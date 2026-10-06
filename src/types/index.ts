@@ -104,7 +104,23 @@ export type ViewTab =
   | 'alerts'
   | 'products'
   | 'clinics'
-  | 'enterprise_automation';
+  | 'enterprise_automation'
+  | 'inventory_management';
+
+export interface WarehouseStockRecord {
+  productId: string;
+  productName: string;
+  category?: string;
+  koreaStock: number;          // 韓国倉庫（仁川）在庫
+  singaporeStock: number;     // シンガポール倉庫在庫
+  koreaSafetyStock: number;   // 韓国倉庫 安全在庫ライン
+  singaporeSafetyStock: number;// シンガポール倉庫 安全在庫ライン
+  inTransitKorea: number;     // 韓国向け輸送中
+  inTransitSingapore: number; // シンガポール向け輸送中
+  reservedKorea: number;      // 韓国倉庫からの引当済数量
+  reservedSingapore: number;  // シンガポール倉庫からの引当済数量
+  preferredWarehouse?: 'korea' | 'singapore' | 'both';
+}
 
 export type OverdueFollowupStatus = '未対応' | '仕入先督促中' | '顧客連絡済' | '代替品提案中' | '今週入荷予定' | '対応完了';
 

@@ -29,6 +29,7 @@ import { UnshippedClinicsView } from './components/UnshippedClinicsView';
 import { PartialShipmentView } from './components/PartialShipmentView';
 import { ProductMasterView } from './components/ProductMasterView';
 import { ClinicMasterView } from './components/ClinicMasterView';
+import { InventoryManagementView } from './components/InventoryManagementView';
 import { BudgetSettingsModal } from './components/BudgetSettingsModal';
 import { DailyDigestModal } from './components/DailyDigestModal';
 import { ClinicProductStatusDrawer } from './components/ClinicProductStatusDrawer';
@@ -497,6 +498,12 @@ export default function App() {
       icon: CheckCircle2,
       badge: null,
     },
+    {
+      id: 'inventory_management' as ViewTab,
+      label: '韓国・シンガポール倉庫在庫',
+      icon: Building,
+      badge: null,
+    },
   ];
 
   // 楽楽販売 マスタ管理 Items (DBグループ: Number1)
@@ -861,6 +868,12 @@ export default function App() {
               orders={deliveryData.orders}
               onSelectOrder={handleOpenDetail}
               onOpenClinicStatus={handleOpenClinicStatus}
+            />
+          )}
+
+          {activeTab === 'inventory_management' && (
+            <InventoryManagementView
+              orders={filteredOrders}
             />
           )}
         </main>
