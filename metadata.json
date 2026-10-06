@@ -1,0 +1,6 @@
+{
+  "name": "納期管理システム",
+  "description": "商品明細ごとの工程進捗・納期遅延・対応漏れをリアルタイムで見える化し、担当営業別および仕入先別の管理を支援する納期管理システム。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

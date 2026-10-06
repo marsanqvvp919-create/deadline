@@ -1,0 +1,749 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>納期管理システム（スタンドアロン版 / Vite不要）</title>
+  <!-- Tailwind CSS CDN (Viteやnpmのインストール不要) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Lucide Icons CDN -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+JP:wght@400;500;600;700&display=swap');
+    body {
+      font-family: 'Noto Sans JP', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col">
+
+  <!-- ヘッダー -->
+  <header class="sticky top-0 z-30 bg-white border-b border-slate-200 shadow-sm">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="flex items-center justify-between h-16">
+        <!-- ロゴ & タイトル -->
+        <div class="flex items-center space-x-3">
+          <div class="w-9 h-9 rounded-lg bg-blue-600 flex items-center justify-center text-white shadow-sm font-bold text-lg">
+            納
+          </div>
+          <div>
+            <div class="flex items-center space-x-2">
+              <span class="font-bold text-slate-900 tracking-tight text-lg">納期管理システム</span>
+              <span class="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-medium border border-emerald-200">
+                スタンドアロン版 (Vite不要)
+              </span>
+            </div>
+            <p class="text-xs text-slate-500">楽楽販売 連携リアルタイム進捗ボード</p>
+          </div>
+        </div>
+
+        <!-- 検索・フィルター・アクション -->
+        <div class="flex items-center space-x-3">
+          <!-- 営業担当フィルター -->
+          <select id="filterRep" onchange="render()" class="text-xs rounded-md border border-slate-200 bg-white px-2.5 py-1.5 focus:ring-2 focus:ring-blue-500">
+            <option value="">全営業担当</option>
+          </select>
+
+          <!-- 期間フィルター -->
+          <select id="filterPeriod" onchange="render()" class="text-xs rounded-md border border-slate-200 bg-white px-2.5 py-1.5 focus:ring-2 focus:ring-blue-500">
+            <option value="all">全期間</option>
+            <option value="this_month">今月納期</option>
+            <option value="next_month">来月納期</option>
+            <option value="delayed">遅延のみ</option>
+          </select>
+
+          <!-- 更新ボタン -->
+          <button onclick="refreshData()" class="p-1.5 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-md transition-colors" title="データ再取得">
+            <i data-lucide="refresh-cw" class="w-4 h-4" id="refreshIcon"></i>
+          </button>
+
+          <!-- 設定ボタン -->
+          <button onclick="openSettings()" class="flex items-center space-x-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 transition-colors">
+            <i data-lucide="settings" class="w-3.5 h-3.5"></i>
+            <span>接続設定</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- ナビゲーションタブ -->
+      <div class="flex space-x-8 -mb-px">
+        <button onclick="setTab('dashboard')" id="tab-dashboard" class="tab-btn py-3 text-sm font-medium border-b-2 border-blue-600 text-blue-600 flex items-center space-x-1.5">
+          <i data-lucide="layout-dashboard" class="w-4 h-4"></i>
+          <span>ダッシュボード</span>
+        </button>
+        <button onclick="setTab('kanban')" id="tab-kanban" class="tab-btn py-3 text-sm font-medium border-b-2 border-transparent text-slate-500 hover:text-slate-700 flex items-center space-x-1.5">
+          <i data-lucide="trello" class="w-4 h-4"></i>
+          <span>納期カンバン</span>
+        </button>
+        <button onclick="setTab('rep')" id="tab-rep" class="tab-btn py-3 text-sm font-medium border-b-2 border-transparent text-slate-500 hover:text-slate-700 flex items-center space-x-1.5">
+          <i data-lucide="user" class="w-4 h-4"></i>
+          <span>営業担当別</span>
+        </button>
+        <button onclick="setTab('alerts')" id="tab-alerts" class="tab-btn py-3 text-sm font-medium border-b-2 border-transparent text-slate-500 hover:text-slate-700 flex items-center space-x-1.5">
+          <i data-lucide="bell" class="w-4 h-4"></i>
+          <span>アラート一覧</span>
+          <span id="navAlertBadge" class="ml-1 text-xs px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 font-semibold">0</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- メインコンテンツ -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+    <!-- データ状態インフォバー -->
+    <div id="statusBanner" class="mb-4 hidden p-3 rounded-lg border text-xs flex items-center justify-between"></div>
+
+    <!-- コンテンツエリア -->
+    <div id="content"></div>
+  </main>
+
+  <!-- 接続設定モーダル -->
+  <div id="settingsModal" class="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 hidden">
+    <div class="bg-white rounded-xl shadow-xl max-w-md w-full p-6">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
+        <h3 class="text-base font-bold text-slate-900 flex items-center gap-2">
+          <i data-lucide="settings" class="w-5 h-5 text-blue-600"></i>
+          GAS中継 & 楽楽販売 接続設定
+        </h3>
+        <button onclick="closeSettings()" class="text-slate-400 hover:text-slate-600">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <div class="space-y-4">
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">GAS WebアプリURL</label>
+          <input type="text" id="settingDataUrl" placeholder="https://script.google.com/macros/s/XXXX/exec" class="w-full text-xs rounded-md border border-slate-300 p-2.5 focus:ring-2 focus:ring-blue-500 focus:outline-hidden">
+          <p class="text-[11px] text-slate-400 mt-1">※未入力の場合は自動的に内蔵サンプルデータが使用されます。</p>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">APIアクセスキー（合言葉）</label>
+          <input type="password" id="settingDataKey" placeholder="GAS側で設定した認証キー" class="w-full text-xs rounded-md border border-slate-300 p-2.5 focus:ring-2 focus:ring-blue-500 focus:outline-hidden">
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">楽楽販売ベースURL</label>
+          <input type="text" id="settingRakurakuUrl" value="https://hnsibot.rakurakuhanbai.jp/ykbxg2a/" class="w-full text-xs rounded-md border border-slate-300 p-2.5 focus:ring-2 focus:ring-blue-500 focus:outline-hidden">
+        </div>
+
+        <div id="testConnectionResult" class="hidden text-xs p-3 rounded-lg"></div>
+      </div>
+
+      <div class="mt-6 flex items-center justify-between pt-4 border-t border-slate-100">
+        <button onclick="testConnection()" class="px-3 py-2 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-md">
+          接続テスト
+        </button>
+        <div class="flex space-x-2">
+          <button onclick="closeSettings()" class="px-3 py-2 text-xs font-medium text-slate-600 hover:text-slate-800">
+            キャンセル
+          </button>
+          <button onclick="saveSettings()" class="px-4 py-2 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md shadow-xs">
+            保存する
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 明細詳細ドロワー -->
+  <div id="detailDrawer" class="fixed inset-y-0 right-0 z-50 w-full sm:w-96 bg-white shadow-2xl border-l border-slate-200 p-6 overflow-y-auto transform translate-x-full transition-transform duration-200">
+    <div id="drawerContent"></div>
+  </div>
+  <div id="drawerBackdrop" onclick="closeDrawer()" class="fixed inset-0 bg-black/30 z-40 hidden"></div>
+
+  <!-- スクリプト: 依存ライブラリなしで完全動作するロジック -->
+  <script>
+    // サンプルデータ（GAS未接続時に即座に動くデータ）
+    const SAMPLE_DATA = {
+      generatedAt: new Date().toISOString(),
+      orders: [
+        {
+          orderId: "ORD-2026-0901",
+          status: "受注確定",
+          salesRep: "高橋 健太",
+          customerName: "さくら美容クリニック 新宿院",
+          orderDate: "2026-09-10",
+          requestedDate: "2026-09-20",
+          deliveredDate: null,
+          orderState: "進行中",
+          lines: [
+            {
+              lineKey: "ORD-2026-0901_PRD-001",
+              productId: "PRD-001",
+              productName: "ヒアルロン酸充填製剤 Type-A (1.0ml)",
+              quantity: 10,
+              supplierName: "メディカルサプライ東日本",
+              stage: "発注済・入荷待ち",
+              earliestDate: "2026-09-18",
+              latestDate: "2026-09-21",
+              poDate: "2026-09-12",
+              shippedDate: null,
+              shippedQty: 0,
+              remainingQty: 10,
+              trackingNo: "9823-1120-4451",
+              duplicateLines: false
+            }
+          ]
+        },
+        {
+          orderId: "ORD-2026-0902",
+          status: "受注確定",
+          salesRep: "佐藤 恵美",
+          customerName: "品川メディカルセンター",
+          orderDate: "2026-09-11",
+          requestedDate: "2026-09-22",
+          deliveredDate: null,
+          orderState: "進行中",
+          lines: [
+            {
+              lineKey: "ORD-2026-0902_PRD-002",
+              productId: "PRD-002",
+              productName: "ボツリヌストキシン 100単位バイアル",
+              quantity: 5,
+              supplierName: "グローバルファーマ株式会社",
+              stage: "未発注",
+              earliestDate: null,
+              latestDate: null,
+              poDate: null,
+              shippedDate: null,
+              shippedQty: 0,
+              remainingQty: 5,
+              trackingNo: "",
+              duplicateLines: false
+            }
+          ]
+        },
+        {
+          orderId: "ORD-2026-0903",
+          status: "出荷処理中",
+          salesRep: "山田 太郎",
+          customerName: "横浜中央皮膚科医院",
+          orderDate: "2026-09-08",
+          requestedDate: "2026-09-25",
+          deliveredDate: null,
+          orderState: "進行中",
+          lines: [
+            {
+              lineKey: "ORD-2026-0903_PRD-003",
+              productId: "PRD-003",
+              productName: "超音波導入用トリートメントジェル",
+              quantity: 20,
+              supplierName: "コスメディカルジャパン",
+              stage: "出荷完了",
+              earliestDate: "2026-09-23",
+              latestDate: "2026-09-24",
+              poDate: "2026-09-10",
+              shippedDate: "2026-09-24",
+              shippedQty: 20,
+              remainingQty: 0,
+              trackingNo: "1234-5678-9012",
+              duplicateLines: false
+            }
+          ]
+        }
+      ],
+      alerts: [
+        {
+          ruleId: "A1",
+          type: "遅延",
+          severity: "高",
+          ruleName: "納期遅延（希望納期超過）",
+          orderId: "ORD-2026-0901",
+          lineKey: "ORD-2026-0901_PRD-001",
+          salesRep: "高橋 健太",
+          dueDate: "2026-09-20",
+          daysOver: 4,
+          message: "希望納期 2026-09-20 を 4日 超過しています"
+        },
+        {
+          ruleId: "B1",
+          type: "漏れ",
+          severity: "高",
+          ruleName: "未発注放置（受注後3日以上）",
+          orderId: "ORD-2026-0902",
+          lineKey: "ORD-2026-0902_PRD-002",
+          salesRep: "佐藤 恵美",
+          dueDate: "2026-09-14",
+          daysOver: 10,
+          message: "受注から 13日 経過していますが未発注です"
+        }
+      ]
+    };
+
+    let state = {
+      currentTab: 'dashboard',
+      data: SAMPLE_DATA,
+      selectedRep: '',
+      selectedPeriod: 'all',
+      isUsingFallback: true,
+      dataUrl: localStorage.getItem('nouki_data_url') || '',
+      dataKey: localStorage.getItem('nouki_data_key') || '',
+      rakurakuUrl: localStorage.getItem('nouki_rakuraku_url') || 'https://hnsibot.rakurakuhanbai.jp/ykbxg2a/'
+    };
+
+    function init() {
+      // 営業担当プルダウン生成
+      const reps = Array.from(new Set(state.data.orders.map(o => o.salesRep)));
+      const repSelect = document.getElementById('filterRep');
+      reps.forEach(rep => {
+        const opt = document.createElement('option');
+        opt.value = rep;
+        opt.textContent = rep;
+        repSelect.appendChild(opt);
+      });
+
+      // 保存されたURLがあれば自動データフェッチ
+      if (state.dataUrl) {
+        refreshData();
+      } else {
+        render();
+      }
+    }
+
+    function setTab(tab) {
+      state.currentTab = tab;
+      document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.classList.remove('border-blue-600', 'text-blue-600');
+        btn.classList.add('border-transparent', 'text-slate-500');
+      });
+      const activeBtn = document.getElementById(`tab-${tab}`);
+      if (activeBtn) {
+        activeBtn.classList.remove('border-transparent', 'text-slate-500');
+        activeBtn.classList.add('border-blue-600', 'text-blue-600');
+      }
+      render();
+    }
+
+    async function refreshData() {
+      const icon = document.getElementById('refreshIcon');
+      if (icon) icon.classList.add('animate-spin');
+
+      if (!state.dataUrl) {
+        state.data = SAMPLE_DATA;
+        state.isUsingFallback = true;
+        setTimeout(() => {
+          if (icon) icon.classList.remove('animate-spin');
+          render();
+        }, 300);
+        return;
+      }
+
+      try {
+        const url = new URL(state.dataUrl);
+        if (state.dataKey) url.searchParams.set('key', state.dataKey);
+
+        const res = await fetch(url.toString());
+        if (!res.ok) throw new Error('通信エラー: ' + res.status);
+        const json = await res.json();
+        state.data = json;
+        state.isUsingFallback = false;
+      } catch (err) {
+        console.warn('API取得失敗。サンプルデータを使用します:', err);
+        state.isUsingFallback = true;
+      } finally {
+        if (icon) icon.classList.remove('animate-spin');
+        render();
+      }
+    }
+
+    function getFilteredOrders() {
+      const rep = document.getElementById('filterRep')?.value || '';
+      return state.data.orders.filter(o => !rep || o.salesRep === rep);
+    }
+
+    function render() {
+      const content = document.getElementById('content');
+      const filteredOrders = getFilteredOrders();
+      const allLines = filteredOrders.flatMap(o => o.lines.map(l => ({ ...l, order: o })));
+
+      // アラートバッジ更新
+      document.getElementById('navAlertBadge').textContent = state.data.alerts.length;
+
+      // ステータスバナー
+      const banner = document.getElementById('statusBanner');
+      if (state.isUsingFallback) {
+        banner.className = 'mb-4 p-3 rounded-lg border bg-amber-50 border-amber-200 text-amber-800 text-xs flex items-center justify-between';
+        banner.innerHTML = `
+          <div class="flex items-center gap-2">
+            <i data-lucide="info" class="w-4 h-4 text-amber-600"></i>
+            <span><strong>サンプルデータ表示中:</strong> 右上の「接続設定」からGAS WebアプリURLを設定すると本番データと同期します。</span>
+          </div>
+          <button onclick="openSettings()" class="underline font-medium hover:text-amber-900">設定を開く</button>
+        `;
+        banner.classList.remove('hidden');
+      } else {
+        banner.classList.add('hidden');
+      }
+
+      // タブ別レンダリング
+      if (state.currentTab === 'dashboard') {
+        renderDashboard(content, filteredOrders, allLines);
+      } else if (state.currentTab === 'kanban') {
+        renderKanban(content, allLines);
+      } else if (state.currentTab === 'rep') {
+        renderRep(content, filteredOrders);
+      } else if (state.currentTab === 'alerts') {
+        renderAlerts(content);
+      }
+
+      lucide.createIcons();
+    }
+
+    function renderDashboard(el, orders, lines) {
+      const delayedCount = state.data.alerts.filter(a => a.type === '遅延').length;
+      const unpoCount = lines.filter(l => l.stage === '未発注').length;
+      const shippedCount = lines.filter(l => l.stage === '出荷完了').length;
+
+      el.innerHTML = `
+        <div class="space-y-6">
+          <!-- KPI カード -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-xs flex items-center justify-between">
+              <div>
+                <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">遅延アラート</p>
+                <p class="text-2xl font-bold text-red-600 mt-1">${delayedCount} <span class="text-xs font-normal text-slate-400">件</span></p>
+              </div>
+              <div class="p-3 bg-red-50 rounded-lg text-red-600"><i data-lucide="alert-octagon" class="w-6 h-6"></i></div>
+            </div>
+
+            <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-xs flex items-center justify-between">
+              <div>
+                <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">未発注明細</p>
+                <p class="text-2xl font-bold text-amber-600 mt-1">${unpoCount} <span class="text-xs font-normal text-slate-400">件</span></p>
+              </div>
+              <div class="p-3 bg-amber-50 rounded-lg text-amber-600"><i data-lucide="clock" class="w-6 h-6"></i></div>
+            </div>
+
+            <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-xs flex items-center justify-between">
+              <div>
+                <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">出荷完了明細</p>
+                <p class="text-2xl font-bold text-blue-600 mt-1">${shippedCount} <span class="text-xs font-normal text-slate-400">件</span></p>
+              </div>
+              <div class="p-3 bg-blue-50 rounded-lg text-blue-600"><i data-lucide="check-circle-2" class="w-6 h-6"></i></div>
+            </div>
+
+            <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-xs flex items-center justify-between">
+              <div>
+                <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">総受注件数</p>
+                <p class="text-2xl font-bold text-slate-800 mt-1">${orders.length} <span class="text-xs font-normal text-slate-400">件</span></p>
+              </div>
+              <div class="p-3 bg-slate-50 rounded-lg text-slate-600"><i data-lucide="file-text" class="w-6 h-6"></i></div>
+            </div>
+          </div>
+
+          <!-- 受注一覧テーブル -->
+          <div class="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
+            <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+              <h2 class="text-base font-bold text-slate-800">最新の受注・進捗一覧</h2>
+              <span class="text-xs text-slate-500">${orders.length} 件の伝票</span>
+            </div>
+            <div class="overflow-x-auto">
+              <table class="min-w-full divide-y divide-slate-200 text-xs">
+                <thead class="bg-slate-50 text-slate-600 font-semibold">
+                  <tr>
+                    <th class="px-4 py-3 text-left">受注番号</th>
+                    <th class="px-4 py-3 text-left">顧客名</th>
+                    <th class="px-4 py-3 text-left">担当営業</th>
+                    <th class="px-4 py-3 text-left">希望納期</th>
+                    <th class="px-4 py-3 text-left">明細数</th>
+                    <th class="px-4 py-3 text-left">進捗状態</th>
+                    <th class="px-4 py-3 text-right">操作</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                  ${orders.map(o => `
+                    <tr class="hover:bg-slate-50 transition-colors">
+                      <td class="px-4 py-3 font-mono font-medium text-blue-600">${o.orderId}</td>
+                      <td class="px-4 py-3 font-medium text-slate-800">${o.customerName}</td>
+                      <td class="px-4 py-3 text-slate-600">${o.salesRep}</td>
+                      <td class="px-4 py-3 text-slate-600">${o.requestedDate || '-'}</td>
+                      <td class="px-4 py-3 text-slate-600">${o.lines.length} 点</td>
+                      <td class="px-4 py-3">
+                        <span class="px-2 py-0.5 rounded text-[11px] font-medium ${o.orderState === '納品完了' ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-blue-800'}">
+                          ${o.orderState}
+                        </span>
+                      </td>
+                      <td class="px-4 py-3 text-right">
+                        <a href="${state.rakurakuUrl}orders/${o.orderId}" target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:text-blue-800 font-medium inline-flex items-center gap-1">
+                          楽楽販売 <i data-lucide="external-link" class="w-3 h-3"></i>
+                        </a>
+                      </td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderKanban(el, lines) {
+      const stages = ['未発注', '発注済・入荷待ち', '一部出荷', '出荷完了'];
+      el.innerHTML = `
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+          ${stages.map(st => {
+            const list = lines.filter(l => l.stage === st);
+            return `
+              <div class="bg-slate-100 rounded-xl p-3 border border-slate-200 flex flex-col max-h-[calc(100vh-220px)]">
+                <div class="flex items-center justify-between pb-2 mb-2 border-b border-slate-200">
+                  <h3 class="font-bold text-xs text-slate-700">${st}</h3>
+                  <span class="text-xs px-2 py-0.5 rounded-full bg-white text-slate-600 font-semibold shadow-2xs">${list.length}</span>
+                </div>
+                <div class="space-y-2 overflow-y-auto flex-1 pr-1">
+                  ${list.map(l => `
+                    <div class="bg-white p-3 rounded-lg border border-slate-200 shadow-xs hover:border-blue-400 transition-colors cursor-pointer" onclick="showDrawer('${l.lineKey}')">
+                      <div class="flex items-center justify-between text-[11px] text-slate-400 mb-1">
+                        <span class="font-mono text-blue-600 font-medium">${l.order.orderId}</span>
+                        <span>${l.order.salesRep}</span>
+                      </div>
+                      <p class="font-bold text-xs text-slate-800 mb-1 line-clamp-2">${l.productName}</p>
+                      <div class="flex items-center justify-between text-[11px] text-slate-500 pt-2 border-t border-slate-50">
+                        <span>数量: <strong>${l.quantity}</strong></span>
+                        <span class="text-slate-400">${l.supplierName}</span>
+                      </div>
+                    </div>
+                  `).join('')}
+                </div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      `;
+    }
+
+    function renderRep(el, orders) {
+      const reps = Array.from(new Set(orders.map(o => o.salesRep)));
+      el.innerHTML = `
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          ${reps.map(rep => {
+            const repOrders = orders.filter(o => o.salesRep === rep);
+            const repAlerts = state.data.alerts.filter(a => a.salesRep === rep);
+            return `
+              <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-xs">
+                <div class="flex items-center justify-between pb-3 border-b border-slate-100 mb-3">
+                  <div class="flex items-center space-x-2">
+                    <div class="w-8 h-8 rounded-full bg-blue-100 text-blue-700 font-bold flex items-center justify-center text-xs">
+                      ${rep.slice(0, 1)}
+                    </div>
+                    <div>
+                      <h3 class="font-bold text-sm text-slate-800">${rep}</h3>
+                      <p class="text-[11px] text-slate-400">担当件数: ${repOrders.length}件</p>
+                    </div>
+                  </div>
+                  ${repAlerts.length > 0 ? `
+                    <span class="px-2 py-0.5 rounded-full bg-red-100 text-red-700 text-xs font-semibold">
+                      アラート ${repAlerts.length}
+                    </span>
+                  ` : `
+                    <span class="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-xs font-semibold">
+                      順調
+                    </span>
+                  `}
+                </div>
+                <div class="space-y-2">
+                  <h4 class="text-xs font-semibold text-slate-600">対応必要アラート:</h4>
+                  ${repAlerts.length === 0 ? '<p class="text-xs text-slate-400">対応が必要なアラートはありません</p>' : ''}
+                  ${repAlerts.map(a => `
+                    <div class="p-2 bg-red-50 border border-red-100 rounded text-xs">
+                      <p class="font-semibold text-red-700">${a.ruleName}</p>
+                      <p class="text-slate-600 text-[11px] mt-0.5">${a.message}</p>
+                    </div>
+                  `).join('')}
+                </div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      `;
+    }
+
+    function renderAlerts(el) {
+      el.innerHTML = `
+        <div class="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
+          <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+            <h2 class="text-base font-bold text-slate-800 flex items-center gap-2">
+              <i data-lucide="bell" class="w-4 h-4 text-red-600"></i>
+              未解消のアラート・対応漏れ一覧
+            </h2>
+            <button onclick="exportAlertsCsv()" class="px-3 py-1.5 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-md flex items-center gap-1.5">
+              <i data-lucide="download" class="w-3.5 h-3.5"></i>
+              CSVエクスポート
+            </button>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-slate-200 text-xs">
+              <thead class="bg-slate-50 text-slate-600 font-semibold">
+                <tr>
+                  <th class="px-4 py-3 text-left">重要度</th>
+                  <th class="px-4 py-3 text-left">区分</th>
+                  <th class="px-4 py-3 text-left">ルール名</th>
+                  <th class="px-4 py-3 text-left">伝票番号</th>
+                  <th class="px-4 py-3 text-left">担当営業</th>
+                  <th class="px-4 py-3 text-left">超過/残り</th>
+                  <th class="px-4 py-3 text-left">メッセージ</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-100">
+                ${state.data.alerts.map(a => `
+                  <tr class="hover:bg-slate-50">
+                    <td class="px-4 py-3">
+                      <span class="px-2 py-0.5 rounded text-[11px] font-semibold ${a.severity === '高' ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'}">
+                        ${a.severity}
+                      </span>
+                    </td>
+                    <td class="px-4 py-3 text-slate-700 font-medium">${a.type}</td>
+                    <td class="px-4 py-3 text-slate-800 font-semibold">${a.ruleName}</td>
+                    <td class="px-4 py-3 font-mono text-blue-600">${a.orderId}</td>
+                    <td class="px-4 py-3 text-slate-600">${a.salesRep}</td>
+                    <td class="px-4 py-3 font-bold text-red-600">${a.daysOver} 日</td>
+                    <td class="px-4 py-3 text-slate-600">${a.message}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+    }
+
+    function showDrawer(lineKey) {
+      const order = state.data.orders.find(o => o.lines.some(l => l.lineKey === lineKey));
+      if (!order) return;
+      const line = order.lines.find(l => l.lineKey === lineKey);
+      if (!line) return;
+
+      const content = document.getElementById('drawerContent');
+      content.innerHTML = `
+        <div class="flex items-center justify-between pb-3 border-b border-slate-200 mb-4">
+          <h3 class="font-bold text-sm text-slate-800">商品明細詳細</h3>
+          <button onclick="closeDrawer()" class="text-slate-400 hover:text-slate-600"><i data-lucide="x" class="w-5 h-5"></i></button>
+        </div>
+        <div class="space-y-4 text-xs">
+          <div>
+            <span class="text-slate-400 block text-[11px]">商品名</span>
+            <span class="font-bold text-slate-900 text-sm">${line.productName}</span>
+          </div>
+          <div>
+            <span class="text-slate-400 block text-[11px]">受注ID / 顧客名</span>
+            <span class="font-mono text-blue-600 font-bold">${order.orderId}</span>
+            <span class="block text-slate-700 mt-0.5">${order.customerName}</span>
+          </div>
+          <div class="grid grid-cols-2 gap-2 p-3 bg-slate-50 rounded-lg">
+            <div>
+              <span class="text-slate-400 block text-[11px]">数量</span>
+              <span class="font-bold text-slate-800">${line.quantity}</span>
+            </div>
+            <div>
+              <span class="text-slate-400 block text-[11px]">進捗工程</span>
+              <span class="font-bold text-blue-600">${line.stage}</span>
+            </div>
+          </div>
+          <div>
+            <span class="text-slate-400 block text-[11px]">仕入先</span>
+            <span class="font-semibold text-slate-800">${line.supplierName}</span>
+          </div>
+          <div>
+            <span class="text-slate-400 block text-[11px]">送り状追跡番号</span>
+            <span class="font-mono text-slate-700">${line.trackingNo || '未登録'}</span>
+          </div>
+          <div class="pt-4 border-t border-slate-100">
+            <a href="${state.rakurakuUrl}orders/${order.orderId}" target="_blank" rel="noopener noreferrer" class="w-full py-2.5 bg-blue-600 text-white rounded-lg font-medium text-xs flex items-center justify-center gap-1.5 shadow-xs hover:bg-blue-700">
+              楽楽販売でこの伝票を開く
+              <i data-lucide="external-link" class="w-3.5 h-3.5"></i>
+            </a>
+          </div>
+        </div>
+      `;
+      document.getElementById('detailDrawer').classList.remove('translate-x-full');
+      document.getElementById('drawerBackdrop').classList.remove('hidden');
+      lucide.createIcons();
+    }
+
+    function closeDrawer() {
+      document.getElementById('detailDrawer').classList.add('translate-x-full');
+      document.getElementById('drawerBackdrop').classList.add('hidden');
+    }
+
+    function openSettings() {
+      document.getElementById('settingDataUrl').value = state.dataUrl;
+      document.getElementById('settingDataKey').value = state.dataKey;
+      document.getElementById('settingRakurakuUrl').value = state.rakurakuUrl;
+      document.getElementById('testConnectionResult').classList.add('hidden');
+      document.getElementById('settingsModal').classList.remove('hidden');
+      lucide.createIcons();
+    }
+
+    function closeSettings() {
+      document.getElementById('settingsModal').classList.add('hidden');
+    }
+
+    function saveSettings() {
+      state.dataUrl = document.getElementById('settingDataUrl').value.trim();
+      state.dataKey = document.getElementById('settingDataKey').value.trim();
+      state.rakurakuUrl = document.getElementById('settingRakurakuUrl').value.trim();
+
+      localStorage.setItem('nouki_data_url', state.dataUrl);
+      localStorage.setItem('nouki_data_key', state.dataKey);
+      localStorage.setItem('nouki_rakuraku_url', state.rakurakuUrl);
+
+      closeSettings();
+      refreshData();
+    }
+
+    async function testConnection() {
+      const urlStr = document.getElementById('settingDataUrl').value.trim();
+      const keyStr = document.getElementById('settingDataKey').value.trim();
+      const resultEl = document.getElementById('testConnectionResult');
+
+      if (!urlStr) {
+        resultEl.className = 'text-xs p-3 rounded-lg bg-amber-50 text-amber-800 border border-amber-200';
+        resultEl.textContent = 'GAS URLが未入力です（内蔵サンプルデータが使われます）。';
+        resultEl.classList.remove('hidden');
+        return;
+      }
+
+      resultEl.className = 'text-xs p-3 rounded-lg bg-blue-50 text-blue-800 border border-blue-200';
+      resultEl.textContent = '接続をテスト中...';
+      resultEl.classList.remove('hidden');
+
+      try {
+        const url = new URL(urlStr);
+        if (keyStr) url.searchParams.set('key', keyStr);
+        const res = await fetch(url.toString());
+        if (!res.ok) throw new Error('HTTPエラー ' + res.status);
+        const data = await res.json();
+        resultEl.className = 'text-xs p-3 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200';
+        resultEl.textContent = `接続成功！受注伝票 ${data.orders?.length || 0} 件を受信しました。`;
+      } catch (err) {
+        resultEl.className = 'text-xs p-3 rounded-lg bg-red-50 text-red-800 border border-red-200';
+        resultEl.textContent = `接続エラー: ${err.message}`;
+      }
+    }
+
+    function exportAlertsCsv() {
+      const headers = ['重要度', '区分', 'ルール名', '受注番号', '担当営業', '超過日数', 'メッセージ'];
+      const rows = state.data.alerts.map(a => [
+        a.severity,
+        a.type,
+        `"${a.ruleName}"`,
+        a.orderId,
+        `"${a.salesRep}"`,
+        a.daysOver,
+        `"${a.message}"`
+      ]);
+      const csvContent = '\uFEFF' + [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `alerts_${new Date().toISOString().slice(0, 10)}.csv`;
+      link.click();
+    }
+
+    // 初期起動
+    init();
+  </script>
+</body>
+</html>
