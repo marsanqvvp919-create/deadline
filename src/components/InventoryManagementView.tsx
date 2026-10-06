@@ -1,21 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { Order, WarehouseStockRecord } from '../types';
-import { formatCurrency, isShippingOrFee } from '../utils';
+import { isShippingOrFee } from '../utils';
 import {
   Building,
   Package,
   Globe,
-  Truck,
-  ArrowRight,
   AlertTriangle,
-  Plus,
-  RefreshCw,
   Search,
   CheckCircle2,
-  Sliders,
-  MapPin,
-  TrendingUp,
-  ArrowLeftRight
+  MapPin
 } from 'lucide-react';
 
 interface InventoryManagementViewProps {
@@ -27,10 +20,6 @@ const STORAGE_WAREHOUSE_STOCK_KEY = 'nouki_multi_warehouse_stock_v1';
 export const InventoryManagementView: React.FC<InventoryManagementViewProps> = ({ orders }) => {
   const [selectedWarehouse, setSelectedWarehouse] = useState<'all' | 'korea' | 'singapore'>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [isTransferModalOpen, setIsTransferModalOpen] = useState<boolean>(false);
-  const [transferItem, setTransferItem] = useState<WarehouseStockRecord | null>(null);
-  const [transferQty, setTransferQty] = useState<number>(10);
-  const [transferDirection, setTransferDirection] = useState<'korea_to_singapore' | 'singapore_to_korea'>('korea_to_singapore');
 
   // Initialize stock records based on orders & products
   const [stockRecords, setStockRecords] = useState<WarehouseStockRecord[]>(() => {
@@ -91,33 +80,6 @@ export const InventoryManagementView: React.FC<InventoryManagementViewProps> = (
     (r) => r.koreaStock <= r.koreaSafetyStock || r.singaporeStock <= r.singaporeSafetyStock
   ).length;
 
-  // Handle Stock Transfer between Korea & Singapore
-  const handleExecuteTransfer = () => {
-    if (!transferItem) return;
-    setStockRecords((prev) =>
-      prev.map((r) => {
-        if (r.productId === transferItem.productId) {
-          if (transferDirection === 'korea_to_singapore') {
-            return {
-              ...r,
-              koreaStock: Math.max(0, r.koreaStock - transferQty),
-              singaporeStock: r.singaporeStock + transferQty,
-            };
-          } else {
-            return {
-              ...r,
-              singaporeStock: Math.max(0, r.singaporeStock - transferQty),
-              koreaStock: r.koreaStock + transferQty,
-            };
-          }
-        }
-        return r;
-      })
-    );
-    setIsTransferModalOpen(false);
-    setTransferItem(null);
-  };
-
   return (
     <div className="space-y-6 animate-in fade-in duration-150">
       {/* Header Banner */}
@@ -137,23 +99,9 @@ export const InventoryManagementView: React.FC<InventoryManagementViewProps> = (
                 </span>
               </div>
               <p className="text-xs text-slate-300 mt-2 leading-relaxed max-w-3xl">
-                韓国倉庫とシンガポール倉庫のリアルタイム在庫数、安全在庫、引当状況を管理し、倉庫間在庫振替を行うことができます。
+                韓国倉庫とシンガポール倉庫のリアルタイム在庫数、安全在庫、引当状況をシンプルに把握・管理できます。
               </p>
             </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => {
-                if (stockRecords.length > 0) {
-                  setTransferItem(stockRecords[0]);
-                  setIsTransferModalOpen(true);
-                }
-              }}
-              className="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer shadow-md"
-            >
-              <ArrowLeftRight className="w-4 h-4" /> 倉庫間在庫振替 (Transfer)
-            </button>
           </div>
         </div>
 
@@ -183,7 +131,7 @@ export const InventoryManagementView: React.FC<InventoryManagementViewProps> = (
               <span className="w-2 h-2 rounded-full bg-rose-400" />
             </div>
             <span className="text-2xl font-extrabold font-mono text-rose-400">{lowStockCount}</span>
-            <span className="text-[10px] text-slate-400 block mt-0.5">発注・振替推奨</span>
+            <span className="text-[10px] text-slate-400 block mt-0.5">要補充品目</span>
           </div>
         </div>
       </div>
@@ -251,7 +199,6 @@ export const InventoryManagementView: React.FC<InventoryManagementViewProps> = (
                   <th className="py-3 px-4 text-right bg-indigo-50/50">シンガポール (SIN) 在庫 / 引当</th>
                 )}
                 <th className="py-3 px-4 text-center">在庫ステータス</th>
-                <th className="py-3 px-4 text-right">操作</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
@@ -301,18 +248,6 @@ export const InventoryManagementView: React.FC<InventoryManagementViewProps> = (
                         </span>
                       )}
                     </td>
-
-                    <td className="py-3 px-4 text-right">
-                      <button
-                        onClick={() => {
-                          setTransferItem(item);
-                          setIsTransferModalOpen(true);
-                        }}
-                        className="px-2.5 py-1 bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-blue-600 rounded-lg text-xs font-bold transition cursor-pointer border border-slate-200"
-                      >
-                        振替・調整
-                      </button>
-                    </td>
                   </tr>
                 );
               })}
@@ -320,82 +255,6 @@ export const InventoryManagementView: React.FC<InventoryManagementViewProps> = (
           </table>
         </div>
       </div>
-
-      {/* Transfer Modal */}
-      {isTransferModalOpen && transferItem && (
-        <div className="fixed inset-0 bg-slate-900/60 z-50 flex items-center justify-center p-4 animate-in fade-in duration-150">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                <ArrowLeftRight className="w-4 h-4 text-blue-600" />
-                倉庫間在庫振替 (Inventory Transfer)
-              </h3>
-              <button
-                onClick={() => setIsTransferModalOpen(false)}
-                className="text-slate-400 hover:text-slate-600 text-sm font-bold cursor-pointer"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="space-y-3 text-xs">
-              <div>
-                <span className="text-slate-400 block">対象商品</span>
-                <span className="text-sm font-bold text-slate-900">{transferItem.productName} ({transferItem.productId})</span>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3 bg-slate-50 p-3 rounded-xl border border-slate-200 font-mono">
-                <div>
-                  <span className="text-slate-500 block">韓国倉庫 (KR) 在庫</span>
-                  <span className="text-lg font-bold text-blue-600">{transferItem.koreaStock}</span>
-                </div>
-                <div>
-                  <span className="text-slate-500 block">シンガポール (SIN) 在庫</span>
-                  <span className="text-lg font-bold text-indigo-600">{transferItem.singaporeStock}</span>
-                </div>
-              </div>
-
-              <div className="space-y-1">
-                <label className="font-bold text-slate-700 block">振替方向</label>
-                <select
-                  value={transferDirection}
-                  onChange={(e) => setTransferDirection(e.target.value as any)}
-                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="korea_to_singapore">韓国倉庫 (KR) ➔ シンガポール倉庫 (SIN)</option>
-                  <option value="singapore_to_korea">シンガポール倉庫 (SIN) ➔ 韓国倉庫 (KR)</option>
-                </select>
-              </div>
-
-              <div className="space-y-1">
-                <label className="font-bold text-slate-700 block">振替数量</label>
-                <input
-                  type="number"
-                  min="1"
-                  value={transferQty}
-                  onChange={(e) => setTransferQty(parseInt(e.target.value) || 1)}
-                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-            </div>
-
-            <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
-              <button
-                onClick={() => setIsTransferModalOpen(false)}
-                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition cursor-pointer"
-              >
-                キャンセル
-              </button>
-              <button
-                onClick={handleExecuteTransfer}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold transition cursor-pointer shadow-sm"
-              >
-                振替を実行する
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
