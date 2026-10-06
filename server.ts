@@ -6,7 +6,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 const app = express();
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 app.use(express.json());
 
@@ -1131,16 +1131,26 @@ app.post('/api/tracking/fedex/live', async (req, res) => {
 });
 
 async function startServer() {
-  const vite = await createViteServer({
-    server: { middlewareMode: true },
-    appType: 'spa',
-  });
+  if (process.env.NODE_ENV === 'production' || process.env.PORT) {
+    app.use(express.static(path.join(__dirname, 'dist')));
+    app.get('*', (_req, res) => {
+      res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+    });
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log(`Production Server is running at http://0.0.0.0:${PORT}`);
+    });
+  } else {
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: 'spa',
+    });
 
-  app.use(vite.middlewares);
+    app.use(vite.middlewares);
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server is running at http://0.0.0.0:${PORT}`);
-  });
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log(`Dev Server is running at http://0.0.0.0:${PORT}`);
+    });
+  }
 }
 
 if (!process.env.VERCEL) {
