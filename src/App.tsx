@@ -30,6 +30,7 @@ import { PartialShipmentView } from './components/PartialShipmentView';
 import { ProductMasterView } from './components/ProductMasterView';
 import { ClinicMasterView } from './components/ClinicMasterView';
 import { InventoryManagementView } from './components/InventoryManagementView';
+import { ArrivalTrackingView } from './components/ArrivalTrackingView';
 import { BudgetSettingsModal } from './components/BudgetSettingsModal';
 import { DailyDigestModal } from './components/DailyDigestModal';
 import { ClinicProductStatusDrawer } from './components/ClinicProductStatusDrawer';
@@ -62,7 +63,8 @@ import {
   Sparkles,
   ShieldAlert,
   Trophy,
-  RefreshCw
+  RefreshCw,
+  Clock
 } from 'lucide-react';
 
 export default function App() {
@@ -504,6 +506,12 @@ export default function App() {
       icon: Building,
       badge: null,
     },
+    {
+      id: 'arrival_tracking' as ViewTab,
+      label: '到着トラッキング',
+      icon: Clock,
+      badge: null,
+    },
   ];
 
   // 楽楽販売 マスタ管理 Items (DBグループ: Number1)
@@ -873,6 +881,12 @@ export default function App() {
 
           {activeTab === 'inventory_management' && (
             <InventoryManagementView
+              orders={filteredOrders}
+            />
+          )}
+
+          {activeTab === 'arrival_tracking' && (
+            <ArrivalTrackingView
               orders={filteredOrders}
             />
           )}

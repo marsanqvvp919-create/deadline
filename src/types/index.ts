@@ -105,7 +105,8 @@ export type ViewTab =
   | 'products'
   | 'clinics'
   | 'enterprise_automation'
-  | 'inventory_management';
+  | 'inventory_management'
+  | 'arrival_tracking';
 
 export interface WarehouseStockRecord {
   productId: string;

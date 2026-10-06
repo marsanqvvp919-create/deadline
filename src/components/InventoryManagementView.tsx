@@ -41,13 +41,11 @@ export const InventoryManagementView: React.FC<InventoryManagementViewProps> = (
       }
     } catch {}
 
-    // Generate initial stock records from orders
     const map = new Map<string, WarehouseStockRecord>();
     orders.forEach((ord) => {
       ord.lines.forEach((l) => {
         if (isShippingOrFee(l.productName, l.productId)) return;
         if (!map.has(l.productId)) {
-          // Deterministic pseudorandom initial stock
           let hash = 0;
           for (let i = 0; i < l.productId.length; i++) hash = (hash * 31 + l.productId.charCodeAt(i)) & 0xffffffff;
           const kStock = Math.abs(hash) % 150 + 30;
@@ -89,7 +87,6 @@ export const InventoryManagementView: React.FC<InventoryManagementViewProps> = (
   // KPI Calculations
   const totalKoreaStock = stockRecords.reduce((sum, r) => sum + r.koreaStock, 0);
   const totalSingaporeStock = stockRecords.reduce((sum, r) => sum + r.singaporeStock, 0);
-  const totalInTransit = stockRecords.reduce((sum, r) => sum + r.inTransitKorea + r.inTransitSingapore, 0);
   const lowStockCount = stockRecords.filter(
     (r) => r.koreaStock <= r.koreaSafetyStock || r.singaporeStock <= r.singaporeSafetyStock
   ).length;
@@ -121,21 +118,6 @@ export const InventoryManagementView: React.FC<InventoryManagementViewProps> = (
     setTransferItem(null);
   };
 
-  // Map orders to warehouse fulfillment flow
-  const orderFlows = orders.slice(0, 15).map((ord, idx) => {
-    const isKorea = idx % 2 === 0;
-    return {
-      orderId: ord.orderId,
-      customerName: ord.customerName,
-      salesRep: ord.salesRep,
-      orderDate: ord.orderDate,
-      warehouse: isKorea ? '韓国倉庫 (ICN - 仁川)' : 'シンガポール倉庫 (SIN)',
-      warehouseCode: isKorea ? 'korea' : 'singapore',
-      status: ord.orderState,
-      itemsCount: ord.lines.length,
-    };
-  });
-
   return (
     <div className="space-y-6 animate-in fade-in duration-150">
       {/* Header Banner */}
@@ -148,14 +130,14 @@ export const InventoryManagementView: React.FC<InventoryManagementViewProps> = (
             <div>
               <div className="flex items-center gap-2.5 flex-wrap">
                 <h1 className="text-xl font-bold tracking-tight">
-                  マルチ倉庫 在庫管理 & クリニック流通フロー
+                  韓国・シンガポール倉庫 在庫管理
                 </h1>
                 <span className="text-xs font-bold px-3 py-1 rounded-full bg-blue-500/30 text-blue-200 border border-blue-400/30 font-mono">
-                  韓国倉庫 (ICN) & シンガポール倉庫 (SIN)
+                  韓国倉庫 (KR) & シンガポール倉庫 (SIN)
                 </span>
               </div>
               <p className="text-xs text-slate-300 mt-2 leading-relaxed max-w-3xl">
-                韓国倉庫とシンガポール倉庫のリアルタイム在庫数、安全在庫、輸送中ステータスを管理し、各クリニックへの物流・出荷フローを完全に可視化します。
+                韓国倉庫とシンガポール倉庫のリアルタイム在庫数、安全在庫、引当状況を管理し、倉庫間在庫振替を行うことができます。
               </p>
             </div>
           </div>
@@ -176,10 +158,10 @@ export const InventoryManagementView: React.FC<InventoryManagementViewProps> = (
         </div>
 
         {/* KPI Cards */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-6 mt-6 border-t border-slate-800">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-6 mt-6 border-t border-slate-800">
           <div className="bg-slate-800/60 border border-slate-700/80 p-3.5 rounded-2xl">
             <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
-              <span>韓国倉庫 (ICN) 在庫合計</span>
+              <span>韓国倉庫 (KR) 在庫合計</span>
               <span className="w-2 h-2 rounded-full bg-blue-400" />
             </div>
             <span className="text-2xl font-extrabold font-mono text-white">{totalKoreaStock.toLocaleString()}</span>
@@ -193,15 +175,6 @@ export const InventoryManagementView: React.FC<InventoryManagementViewProps> = (
             </div>
             <span className="text-2xl font-extrabold font-mono text-white">{totalSingaporeStock.toLocaleString()}</span>
             <span className="text-[10px] text-slate-400 block mt-0.5">安全在庫割れ: {stockRecords.filter(r => r.singaporeStock <= r.singaporeSafetyStock).length}品目</span>
-          </div>
-
-          <div className="bg-slate-800/60 border border-slate-700/80 p-3.5 rounded-2xl">
-            <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
-              <span>輸送中（両倉庫合計）</span>
-              <span className="w-2 h-2 rounded-full bg-amber-400" />
-            </div>
-            <span className="text-2xl font-extrabold font-mono text-amber-300">{totalInTransit.toLocaleString()}</span>
-            <span className="text-[10px] text-slate-400 block mt-0.5">航空・海上貨物トラッキング中</span>
           </div>
 
           <div className="bg-slate-800/60 border border-slate-700/80 p-3.5 rounded-2xl">
@@ -220,7 +193,7 @@ export const InventoryManagementView: React.FC<InventoryManagementViewProps> = (
         <div className="flex items-center gap-2 w-full sm:w-auto overflow-x-auto pb-2 sm:pb-0">
           {[
             { id: 'all', label: '全倉庫表示', icon: Globe },
-            { id: 'korea', label: '韓国倉庫 (仁川 ICN)', icon: Building },
+            { id: 'korea', label: '韓国倉庫 (KR)', icon: Building },
             { id: 'singapore', label: 'シンガポール倉庫 (SIN)', icon: MapPin },
           ].map((tab) => {
             const Icon = tab.icon;
@@ -272,12 +245,11 @@ export const InventoryManagementView: React.FC<InventoryManagementViewProps> = (
               <tr className="bg-slate-50 text-slate-500 border-b border-slate-200 font-semibold">
                 <th className="py-3 px-4">商品コード / 品名</th>
                 {(selectedWarehouse === 'all' || selectedWarehouse === 'korea') && (
-                  <th className="py-3 px-4 text-right bg-blue-50/50">韓国倉庫 (ICN) 在庫 / 引当</th>
+                  <th className="py-3 px-4 text-right bg-blue-50/50">韓国倉庫 (KR) 在庫 / 引当</th>
                 )}
                 {(selectedWarehouse === 'all' || selectedWarehouse === 'singapore') && (
                   <th className="py-3 px-4 text-right bg-indigo-50/50">シンガポール (SIN) 在庫 / 引当</th>
                 )}
-                <th className="py-3 px-4 text-right">輸送中 (In-Transit)</th>
                 <th className="py-3 px-4 text-center">在庫ステータス</th>
                 <th className="py-3 px-4 text-right">操作</th>
               </tr>
@@ -286,7 +258,6 @@ export const InventoryManagementView: React.FC<InventoryManagementViewProps> = (
               {filteredRecords.map((item) => {
                 const isKoreaLow = item.koreaStock <= item.koreaSafetyStock;
                 const isSingaporeLow = item.singaporeStock <= item.singaporeSafetyStock;
-                const totalAvail = item.koreaStock + item.singaporeStock;
 
                 return (
                   <tr key={item.productId} className="hover:bg-slate-50/80 transition">
@@ -319,12 +290,6 @@ export const InventoryManagementView: React.FC<InventoryManagementViewProps> = (
                       </td>
                     )}
 
-                    <td className="py-3 px-4 text-right font-mono">
-                      <span className="text-amber-600 font-bold">
-                        KR: {item.inTransitKorea} / SG: {item.inTransitSingapore}
-                      </span>
-                    </td>
-
                     <td className="py-3 px-4 text-center">
                       {isKoreaLow || isSingaporeLow ? (
                         <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
@@ -356,61 +321,6 @@ export const InventoryManagementView: React.FC<InventoryManagementViewProps> = (
         </div>
       </div>
 
-      {/* Clinic Movement & Fulfillment Flow Section */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-4">
-        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-          <div>
-            <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-              <Truck className="w-4 h-4 text-blue-600" />
-              在庫からクリニックへの流通・出荷フロー可視化 (Clinic Fulfillment Flow)
-            </h2>
-            <p className="text-xs text-slate-500 mt-0.5">
-              各韓国・シンガポール倉庫から、どのクリニックへどのように在庫が引き当てられ発送されているかのリアルタイム動線です。
-            </p>
-          </div>
-          <span className="text-xs font-mono font-bold bg-blue-50 text-blue-700 px-3 py-1 rounded-full border border-blue-200">
-            直近の流通トランザクション
-          </span>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-          {orderFlows.map((flow, idx) => (
-            <div key={idx} className="bg-slate-50 border border-slate-200 p-4 rounded-xl space-y-3 shadow-2xs">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold font-mono text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
-                  {flow.orderId}
-                </span>
-                <span className="text-[11px] font-bold text-slate-600 bg-white px-2 py-0.5 rounded border border-slate-200">
-                  {flow.status}
-                </span>
-              </div>
-
-              <div className="space-y-1 text-xs text-slate-700">
-                <div className="flex items-center gap-1.5 font-bold text-slate-900">
-                  <Building className="w-3.5 h-3.5 text-indigo-600" />
-                  <span className="truncate">{flow.customerName}</span>
-                </div>
-                <div className="flex justify-between text-[11px] text-slate-500">
-                  <span>出荷元倉庫:</span>
-                  <span className="font-bold text-slate-800">{flow.warehouse}</span>
-                </div>
-                <div className="flex justify-between text-[11px] text-slate-500">
-                  <span>担当営業 / 受注日:</span>
-                  <span>{flow.salesRep} ({flow.orderDate})</span>
-                </div>
-              </div>
-
-              <div className="pt-2 border-t border-slate-200 flex items-center justify-between text-[11px] text-slate-500">
-                <span className="flex items-center gap-1 text-emerald-600 font-bold">
-                  <CheckCircle2 className="w-3 h-3" /> 引当・出荷手配済
-                </span>
-                <span className="font-mono">{flow.itemsCount} 品目</span>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
       {/* Transfer Modal */}
       {isTransferModalOpen && transferItem && (
         <div className="fixed inset-0 bg-slate-900/60 z-50 flex items-center justify-center p-4 animate-in fade-in duration-150">
@@ -436,7 +346,7 @@ export const InventoryManagementView: React.FC<InventoryManagementViewProps> = (
 
               <div className="grid grid-cols-2 gap-3 bg-slate-50 p-3 rounded-xl border border-slate-200 font-mono">
                 <div>
-                  <span className="text-slate-500 block">韓国倉庫 (ICN) 在庫</span>
+                  <span className="text-slate-500 block">韓国倉庫 (KR) 在庫</span>
                   <span className="text-lg font-bold text-blue-600">{transferItem.koreaStock}</span>
                 </div>
                 <div>
@@ -452,8 +362,8 @@ export const InventoryManagementView: React.FC<InventoryManagementViewProps> = (
                   onChange={(e) => setTransferDirection(e.target.value as any)}
                   className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
-                  <option value="korea_to_singapore">韓国倉庫 (ICN) ➔ シンガポール倉庫 (SIN)</option>
-                  <option value="singapore_to_korea">シンガポール倉庫 (SIN) ➔ 韓国倉庫 (ICN)</option>
+                  <option value="korea_to_singapore">韓国倉庫 (KR) ➔ シンガポール倉庫 (SIN)</option>
+                  <option value="singapore_to_korea">シンガポール倉庫 (SIN) ➔ 韓国倉庫 (KR)</option>
                 </select>
               </div>
 
