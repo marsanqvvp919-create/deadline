@@ -106,7 +106,11 @@ export type ViewTab =
   | 'clinics'
   | 'enterprise_automation'
   | 'inventory_management'
-  | 'arrival_tracking';
+  | 'arrival_tracking'
+  | 'customs_management'
+  | 'cool_missing'
+  | 'kanto_customs_ng'
+  | 'unmatched_sheets';
 
 export interface WarehouseStockRecord {
   productId: string;
