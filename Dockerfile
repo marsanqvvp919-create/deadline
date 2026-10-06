@@ -20,8 +20,7 @@ COPY server.ts ./
 COPY tsconfig.json ./
 
 ENV NODE_ENV=production
-ENV PORT=3000
 
-EXPOSE 3000
+EXPOSE 8080
 
 CMD ["npx", "tsx", "server.ts"]

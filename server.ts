@@ -1,12 +1,16 @@
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 
 dotenv.config();
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 const app = express();
-const PORT = Number(process.env.PORT) || 3000;
+const PORT = Number(process.env.PORT) || 8080;
 
 app.use(express.json());
 
@@ -1131,7 +1135,8 @@ app.post('/api/tracking/fedex/live', async (req, res) => {
 });
 
 async function startServer() {
-  if (process.env.NODE_ENV === 'production' || process.env.PORT) {
+  const isProduction = process.env.NODE_ENV === 'production' || !!process.env.K_SERVICE || !!process.env.VERCEL;
+  if (isProduction) {
     app.use(express.static(path.join(__dirname, 'dist')));
     app.get('*', (_req, res) => {
       res.sendFile(path.join(__dirname, 'dist', 'index.html'));
