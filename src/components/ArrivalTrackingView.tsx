@@ -6,7 +6,7 @@ import { Order, ShipmentItem } from '../types';
 import { getConfiguredUrls, getLocalClinics } from '../api';
 import { openRakurakuWithCopiedId } from '../utils';
 import { Search, Truck, ExternalLink, Snowflake, Copy, RefreshCw, AlertTriangle, Package, PackageCheck, Plane, ShieldCheck, CheckCircle2, HelpCircle, Link2Off } from 'lucide-react';
-import { summarizeBoxes, usableStatus } from '../utils/shipmentTracking';
+import { boxesOf, summarizeBoxes, usableStatus } from '../utils/shipmentTracking';
 import { CARRIER_STATUS_LABEL, CARRIER_STATUS_STYLE, CarrierStatus, CarrierStatusSnapshot, digitsOf, fetchCarrierStatuses, fetchSavedCarrierStatuses } from '../utils/carriers';
 
 // 出荷管理（101270）の実データから、出荷ごとに「今どの段階か」を表示する。
@@ -85,6 +85,27 @@ function ago(iso?: string): string {
   if (min < 48 * 60) return `${Math.round(min / 60)}時間前`;
   return `${Math.round(min / 1440)}日前`;
 }
+// 並び順
+type SortKey = 'status' | 'newest' | 'oldest' | 'eta' | 'idle' | 'clinic';
+const SORT_LABEL: Record<SortKey, string> = {
+  status: '並び順：状況（要確認が先）',
+  newest: '並び順：出荷日が新しい順',
+  oldest: '並び順：出荷日が古い順',
+  eta: '並び順：配達予定が近い順',
+  idle: '並び順：最終スキャンが古い順（止まっている順）',
+  clinic: '並び順：クリニック名順',
+};
+type SortItem = { now: NowStatus; c?: CarrierStatus; shipped: Date | null; customerName: string };
+const time = (v?: string | null) => (v ? new Date(v).getTime() || 0 : 0);
+const SORTERS: Record<SortKey, (a: SortItem, b: SortItem) => number> = {
+  status: (a, b) => NOW_ORDER.indexOf(a.now) - NOW_ORDER.indexOf(b.now) || (b.shipped?.getTime() || 0) - (a.shipped?.getTime() || 0),
+  newest: (a, b) => (b.shipped?.getTime() || 0) - (a.shipped?.getTime() || 0),
+  oldest: (a, b) => (a.shipped?.getTime() || Infinity) - (b.shipped?.getTime() || Infinity),
+  eta: (a, b) => (time(a.c?.estimatedDelivery) || Infinity) - (time(b.c?.estimatedDelivery) || Infinity),
+  idle: (a, b) => (time(a.c?.lastEventAt) || Infinity) - (time(b.c?.lastEventAt) || Infinity),
+  clinic: (a, b) => a.customerName.localeCompare(b.customerName, 'ja'),
+};
+
 const ymd = (v?: string) => (v ? String(v).slice(0, 10).replace(/-/g, '/') : '');
 
 function toDate(v?: string): Date | null {
@@ -112,6 +133,9 @@ const RECENT_DELIVERED_DAYS = 7;
 export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: ShipmentItem[] }> = ({ orders, shipments }) => {
   const [stageFilter, setStageFilter] = useUrlState<NowStatus | 'all'>('now', 'all');
   const [warehouseFilter, setWarehouseFilter] = useUrlState<string>('wh', 'all');
+  const [sortKey, setSortKey] = useUrlState<SortKey>('sort', 'status');
+  // カードごとの更新中の出荷ID
+  const [refreshing, setRefreshing] = useState<Record<string, boolean>>({});
   const [query, setQuery] = useState('');
   const [copied, setCopied] = useState<string | null>(null);
   // 配送会社APIから取得した最新状況（追跡番号の数字 → 結果）
@@ -221,13 +245,39 @@ export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: Shipmen
     return c;
   }, [items]);
 
-  const visible = items.filter((i) => {
-    if (stageFilter !== 'all' && i.now !== stageFilter) return false;
-    if (warehouseFilter !== 'all' && i.s.warehouse !== warehouseFilter) return false;
-    const q = query.trim().toLowerCase();
-    if (!q) return true;
-    return [i.customerName, i.s.shipmentId, i.s.orderId, i.s.trackingNo].some((v) => (v || '').toLowerCase().includes(q));
-  });
+  const visible = items
+    .filter((i) => {
+      if (stageFilter !== 'all' && i.now !== stageFilter) return false;
+      if (warehouseFilter !== 'all' && i.s.warehouse !== warehouseFilter) return false;
+      const q = query.trim().toLowerCase();
+      if (!q) return true;
+      return [i.customerName, i.s.shipmentId, i.s.orderId, i.s.trackingNo].some((v) => (v || '').toLowerCase().includes(q));
+    })
+    .sort(SORTERS[sortKey] || SORTERS.status);
+
+  // カードの更新ボタン：その出荷の箱だけを配送会社に問い合わせる
+  const refreshOne = async (s: TrackingShipment) => {
+    const nos = boxesOf(s);
+    if (nos.length === 0) return;
+    setRefreshing((r) => ({ ...r, [s.shipmentId]: true }));
+    try {
+      const json = await fetchCarrierStatuses(
+        nos.slice(0, 5).map((n) => ({ trackingNo: n, courier: s.courier })),
+        true
+      );
+      setCarrierStatus((prev) => {
+        const next = { ...prev };
+        json.results.forEach((r) => (next[r.trackingNo] = r));
+        return next;
+      });
+      const errs = Object.values(json.errors || {});
+      if (errs.length > 0) setCarrierMessage(`${s.shipmentId}：${errs.join('／')}`);
+    } catch (e: any) {
+      setCarrierMessage(`${s.shipmentId}：取得できませんでした（${e?.message || e}）`);
+    } finally {
+      setRefreshing((r) => ({ ...r, [s.shipmentId]: false }));
+    }
+  };
 
   // 表示中の出荷（最大120件）について、配送会社の最新状況を取得する
   const loadCarrierStatus = async () => {
@@ -314,6 +364,18 @@ export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: Shipmen
               className="w-full pl-9 pr-3 py-2 text-xs border border-slate-300 rounded-xl bg-white"
             />
           </div>
+          <select
+            value={sortKey}
+            onChange={(e) => setSortKey(e.target.value as SortKey)}
+            className="px-3 py-2 text-xs border border-slate-300 rounded-xl bg-white"
+            title="並び順"
+          >
+            {(Object.keys(SORT_LABEL) as SortKey[]).map((k) => (
+              <option key={k} value={k}>
+                {SORT_LABEL[k]}
+              </option>
+            ))}
+          </select>
           <span className="text-xs text-slate-500">{visible.length}件</span>
           <button
             type="button"
@@ -428,6 +490,18 @@ export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: Shipmen
                 {!blank(s.handlingMemo) && <div className="text-[11px] text-slate-600 bg-slate-50 rounded-lg px-2 py-1">{s.handlingMemo}</div>}
 
                 <div className="mt-auto flex items-center justify-end gap-2 pt-1">
+                  {boxesOf(s).length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => refreshOne(s)}
+                      disabled={!!refreshing[s.shipmentId]}
+                      className="p-1.5 rounded-lg border border-slate-300 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-60"
+                      title="この出荷の最新状況を配送会社から取得"
+                      aria-label="この出荷の最新状況を取得"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${refreshing[s.shipmentId] ? 'animate-spin text-blue-600' : ''}`} />
+                    </button>
+                  )}
                   <div className="flex items-center gap-1.5 shrink-0">
                     {trackUrl && (
                       <a

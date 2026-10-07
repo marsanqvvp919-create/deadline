@@ -39,11 +39,14 @@ export interface TrackResponse {
   configured: { fedex: boolean; dhl: boolean };
 }
 
-export async function fetchCarrierStatuses(items: { trackingNo: string; courier?: string }[]): Promise<TrackResponse> {
+export async function fetchCarrierStatuses(
+  items: { trackingNo: string; courier?: string }[],
+  force = false
+): Promise<TrackResponse> {
   const res = await fetch('/api/carriers/track', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ items }),
+    body: JSON.stringify({ items, force }),
   });
   return res.json();
 }

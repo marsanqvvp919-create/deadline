@@ -2466,6 +2466,7 @@ app.post('/api/carriers/test', async (req, res) => {
 // 追跡番号の一覧を受け取り、配送会社ごとにまとめて問い合わせる（30分は同じ結果を使う）
 app.post('/api/carriers/track', async (req, res) => {
   const items: { trackingNo: string; courier?: string }[] = Array.isArray(req.body?.items) ? req.body.items.slice(0, 120) : [];
+  const force = req.body?.force === true && items.length <= 5;
   const { creds } = await effectiveCarrierCreds();
   await loadCarrierStatusCache();
   const results: CarrierStatus[] = [];
@@ -2476,7 +2477,9 @@ app.post('/api/carriers/track', async (req, res) => {
     const carrier = detectCarrier(digits, it.courier);
     if (!carrier) continue;
     const cached = carrierCache.get(`${carrier}:${digits}`);
-    if (cached && Date.now() - new Date(cached.fetchedAt).getTime() < carrierCacheMs(cached)) results.push(cached);
+    // カードごとの更新ボタン（force、5件まで）は前回の結果を使わずに問い合わせる。ただし1分以内の連打は前回の結果を返す
+    const fresh = cached && Date.now() - new Date(cached.fetchedAt).getTime() < (force ? 60 * 1000 : carrierCacheMs(cached));
+    if (fresh) results.push(cached);
     else pending[carrier].push(digits);
   }
   const errors: Record<string, string> = {};

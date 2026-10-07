@@ -1,4 +1,11 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { CarrierStatus, fetchSavedCarrierStatuses } from '../utils/carriers';
+import { boxesOf, usableStatus } from '../utils/shipmentTracking';
+import { openRakurakuWithCopiedId } from '../utils';
+import { getConfiguredUrls } from '../api';
+
+// 配送会社が通関で止めている（「通関手続きによる遅延」「荷物は処理保留中です」）出荷もこのページに出す
+const CARRIER_HOLD_PATTERN = /通関手続きによる遅延|処理保留中|clearance delay|on hold/i;
 import { ShipmentItem, Order, ClinicItem } from '../types';
 import {
   ShieldAlert,
@@ -40,6 +47,39 @@ export const KantoCustomsNgView: React.FC<KantoCustomsNgViewProps> = ({
 }) => {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const rakurakuUrl = getRakurakuUrl();
+  const { rakurakuBaseUrl } = getConfiguredUrls();
+  const [copied, setCopied] = useState<string | null>(null);
+
+  // 配送会社の状況（サーバーが自動取得したもの）
+  const [carrierStatus, setCarrierStatus] = useState<Record<string, CarrierStatus>>({});
+  useEffect(() => {
+    const load = () =>
+      fetchSavedCarrierStatuses().then((snap) => {
+        if (!snap) return;
+        const map: Record<string, CarrierStatus> = {};
+        snap.statuses.forEach((r) => (map[r.trackingNo] = r));
+        setCarrierStatus(map);
+      });
+    load();
+    const timer = setInterval(load, 5 * 60 * 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const carrierHolds = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    const rows: { s: ShipmentItem; c: CarrierStatus; clinic: string }[] = [];
+    shipments.forEach((s) => {
+      const holds = boxesOf(s)
+        .map((d) => usableStatus(carrierStatus[d]))
+        .filter((c): c is CarrierStatus => !!c && c.status !== 'delivered' && CARRIER_HOLD_PATTERN.test(c.statusText || ''));
+      if (holds.length === 0) return;
+      const clinic = resolveClinicName(s, orders, clinics);
+      if (q && ![s.shipmentId, s.orderId, clinic, s.trackingNo].some((v) => (v || '').toLowerCase().includes(q))) return;
+      rows.push({ s, c: holds[0], clinic });
+    });
+    // 止まっている期間が長い順
+    return rows.sort((a, b) => String(a.c.lastEventAt || '').localeCompare(String(b.c.lastEventAt || '')));
+  }, [shipments, carrierStatus, orders, clinics, searchQuery]);
 
   // 通関NGの条件: 到着空港がNRTで、明細に関東通関可否「不可」の商品を含む出荷
   const kantoNgShipments = useMemo(() => {
@@ -239,7 +279,13 @@ export const KantoCustomsNgView: React.FC<KantoCustomsNgViewProps> = ({
         </div>
 
         {/* KPIs */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-6 mt-6 border-t border-rose-900/40">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-6 mt-6 border-t border-rose-900/40">
+          <div className="bg-slate-800/60 border border-slate-700/80 p-3.5 rounded-2xl">
+            <span className="text-xs text-rose-300 block mb-1">配送会社で通関保留・遅延</span>
+            <span className="text-2xl font-extrabold font-mono text-orange-300">{carrierHolds.length}</span>
+            <span className="text-[10px] text-slate-400 block mt-0.5">「通関手続きによる遅延」「荷物は処理保留中です」</span>
+          </div>
+
           <div className="bg-slate-800/60 border border-slate-700/80 p-3.5 rounded-2xl">
             <span className="text-xs text-rose-300 block mb-1">通関NG 対象出荷件数</span>
             <span className="text-2xl font-extrabold font-mono text-rose-400">{kantoNgShipments.length}</span>
@@ -269,6 +315,70 @@ export const KantoCustomsNgView: React.FC<KantoCustomsNgViewProps> = ({
         <span className="text-xs font-mono text-slate-500">
           該当: {kantoNgShipments.length} 件
         </span>
+      </div>
+
+      {/* 配送会社で通関保留・遅延 */}
+      <div className="bg-white border border-orange-200 rounded-2xl shadow-xs overflow-hidden">
+        <div className="px-4 py-3 border-b border-orange-100 bg-orange-50 flex flex-wrap items-center gap-2">
+          <h3 className="text-sm font-bold text-orange-900">配送会社で通関保留・遅延（{carrierHolds.length}件）</h3>
+          <span className="text-[11px] text-orange-800">DHL・FedEx が「通関手続きによる遅延」「荷物は処理保留中です」を返している出荷。止まっている期間が長い順</span>
+        </div>
+        {carrierHolds.length === 0 ? (
+          <p className="text-xs text-slate-500 px-4 py-3">該当なし</p>
+        ) : (
+          <div className="data-table-wrap overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead>
+                <tr className="text-slate-600 border-b border-slate-200">
+                  <th className="py-2 px-3">出荷ID / 受注ID</th>
+                  <th className="py-2 px-3">クリニック名</th>
+                  <th className="py-2 px-3">到着空港</th>
+                  <th className="py-2 px-3">配送会社の状況</th>
+                  <th className="py-2 px-3">最終スキャン</th>
+                  <th className="py-2 px-3">輸入確認</th>
+                  <th className="py-2 px-3">対応メモ</th>
+                  <th className="py-2 px-3"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {carrierHolds.map(({ s, c, clinic }) => (
+                  <tr key={s.shipmentId} className="align-top hover:bg-orange-50/40 cursor-pointer" onClick={() => onSelectOrder?.(getClickableOrder(s))}>
+                    <td className="py-2 px-3">
+                      <div className="font-mono font-bold text-slate-900">{s.shipmentId}</div>
+                      <div className="font-mono text-[10px] text-blue-600">受注 {formatValue(s.orderId)}</div>
+                    </td>
+                    <td className="py-2 px-3 font-bold text-slate-900">{clinic}</td>
+                    <td className="py-2 px-3">{formatValue(s.arrivalAirport)}</td>
+                    <td className="py-2 px-3 font-bold text-orange-700">
+                      {c.carrier === 'dhl' ? 'DHL' : 'FedEx'}：{c.statusText}
+                      <div className="font-mono text-[10px] text-slate-500 font-normal">{c.trackingNo}</div>
+                    </td>
+                    <td className="py-2 px-3">
+                      {c.lastEventAt ? new Date(c.lastEventAt).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}
+                      {c.lastLocation && <div className="text-[10px] text-slate-500">{c.lastLocation}</div>}
+                    </td>
+                    <td className="py-2 px-3">{formatValue(s.importStatus)}</td>
+                    <td className="py-2 px-3 text-slate-700">{s.handlingMemo && s.handlingMemo !== '—' ? s.handlingMemo : '—'}</td>
+                    <td className="py-2 px-3" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          openRakurakuWithCopiedId(rakurakuBaseUrl, s.shipmentId);
+                          setCopied(s.shipmentId);
+                          setTimeout(() => setCopied(null), 2000);
+                        }}
+                        className="px-2 py-1 rounded-lg bg-slate-900 text-white text-[11px] font-bold"
+                        title="出荷IDをコピーして楽楽販売を開きます"
+                      >
+                        {copied === s.shipmentId ? 'コピー済み' : '開く'}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/* Main Table */}

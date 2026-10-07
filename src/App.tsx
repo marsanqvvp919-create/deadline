@@ -17,7 +17,6 @@ import { Navbar } from './components/Navbar';
 import { SettingsModal } from './components/SettingsModal';
 import { DetailDrawer } from './components/DetailDrawer';
 import { DashboardView } from './components/DashboardView';
-import { CompletedView } from './components/CompletedView';
 import { SalesDashboardView } from './components/SalesDashboardView';
 import { SalesRepSalesView } from './components/SalesRepSalesView';
 import { SalesClinicMasterView } from './components/SalesClinicMasterView';
@@ -38,6 +37,8 @@ import { SheetImportView } from './components/SheetImportView';
 import { ActionListView } from './components/ActionListView';
 import { CarrierSettingsView } from './components/CarrierSettingsView';
 import { MorningMeetingView } from './components/MorningMeetingView';
+import { fetchSavedCarrierStatuses } from './utils/carriers';
+import { boxesOf } from './utils/shipmentTracking';
 import { BudgetSettingsModal } from './components/BudgetSettingsModal';
 import { DailyDigestModal } from './components/DailyDigestModal';
 import { ClinicProductStatusDrawer } from './components/ClinicProductStatusDrawer';
@@ -80,7 +81,7 @@ import {
 } from 'lucide-react';
 
 const KNOWN_TABS: ViewTab[] = [
-  'dashboard', 'morning_meeting', 'alerts', 'procurement', 'unshipped_clinics', 'partial_shipment', 'overdue', 'completed',
+  'dashboard', 'morning_meeting', 'alerts', 'procurement', 'unshipped_clinics', 'partial_shipment', 'overdue',
   'customs_management', 'cool_missing', 'kanto_customs_ng', 'unmatched_sheets', 'inventory_management',
   'sheet_import', 'arrival_tracking', 'products', 'clinics', 'carrier_settings',
   'sales_dashboard', 'sales_rep_sales', 'sales_clinic_master', 'reorder_prediction', 'rep_ranking',
@@ -476,9 +477,30 @@ export default function App() {
     () => shipments.filter((s) => isCoolMissingShipment(s)).length,
     [shipments]
   );
+  // 配送会社が通関で止めている出荷（通関NGのページにも出す）
+  const [carrierHoldNos, setCarrierHoldNos] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    const load = () =>
+      fetchSavedCarrierStatuses().then((snap) => {
+        if (!snap) return;
+        setCarrierHoldNos(
+          new Set(
+            snap.statuses
+              .filter((c) => c.status !== 'delivered' && /通関手続きによる遅延|処理保留中|clearance delay|on hold/i.test(c.statusText || ''))
+              .map((c) => c.trackingNo)
+          )
+        );
+      });
+    load();
+    const timer = setInterval(load, 5 * 60 * 1000);
+    return () => clearInterval(timer);
+  }, []);
   const kantoNgCount = useMemo(
-    () => shipments.filter((s) => isCustomsNgShipment(s, filteredOrders)).length,
-    [shipments, filteredOrders]
+    () =>
+      shipments.filter(
+        (s) => isCustomsNgShipment(s, filteredOrders) || boxesOf(s).some((d) => carrierHoldNos.has(d))
+      ).length,
+    [shipments, filteredOrders, carrierHoldNos]
   );
 
   // 入金済・未発注 品目数の計算 (送料・各種手数料は除外)
@@ -664,13 +686,6 @@ export default function App() {
       badgeColor: 'bg-rose-600 text-white font-bold',
     },
 
-    {
-      id: 'completed' as ViewTab,
-      group: 'progress',
-      label: '出荷伝票',
-      icon: CheckCircle2,
-      badge: null,
-    },
     {
       id: 'customs_management' as ViewTab,
       group: 'logistics',
@@ -1014,12 +1029,6 @@ export default function App() {
 
 
 
-          {activeTab === 'completed' && (
-            <CompletedView
-              orders={filteredOrders}
-              onSelectOrder={handleOpenDetail}
-            />
-          )}
 
           {activeTab === 'sales_dashboard' && (
             <SalesDashboardView

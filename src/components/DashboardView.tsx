@@ -782,7 +782,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
         {/* 5. 今月の納期遵守率 */}
         <div
-          onClick={() => onNavigateToTab('completed')}
+          onClick={() => onNavigateToTab('arrival_tracking')}
           className="bg-white p-4 rounded-xl border-2 border-emerald-200 hover:border-emerald-400 bg-emerald-50/20 shadow-xs hover:shadow-md active:translate-y-0.5 active:scale-[0.99] transition-all cursor-pointer group flex flex-col justify-between"
         >
           <div>
@@ -817,7 +817,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
           <div className="mt-3 pt-2.5 border-t border-emerald-100 flex items-center justify-between">
             <span className="text-[10px] text-emerald-700 transition font-medium">
-              納品完了実績
+              到着トラッキングへ
             </span>
             <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-900 bg-emerald-100 group-hover:bg-emerald-200 border border-emerald-300 px-2 py-0.5 rounded-md shadow-2xs transition">
               <span>表示</span>
