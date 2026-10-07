@@ -235,7 +235,7 @@ export const KantoCustomsNgView: React.FC<KantoCustomsNgViewProps> = ({
   return (
     <div className="space-y-6 animate-in fade-in duration-150">
       {/* Header Banner */}
-      <div className="bg-gradient-to-r from-rose-950 via-slate-900 to-rose-950 border border-rose-800/60 rounded-3xl p-6 shadow-xl text-white">
+      <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-start gap-4">
             <div className="w-14 h-14 rounded-2xl bg-rose-600 text-white flex items-center justify-center shrink-0 shadow-lg font-black">
@@ -244,11 +244,11 @@ export const KantoCustomsNgView: React.FC<KantoCustomsNgViewProps> = ({
             <div>
               <div className="flex items-center gap-2.5 flex-wrap">
                 <h1 className="text-xl font-bold tracking-tight">通関NG一覧</h1>
-                <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-400/40 font-mono">
+                <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-200 font-mono">
                   通関NG: {kantoNgShipments.length} 件
                 </span>
               </div>
-              <p className="text-xs text-rose-200 mt-2 font-medium bg-rose-950/70 border border-rose-600/40 px-3 py-1.5 rounded-xl">
+              <p className="text-xs text-rose-800 mt-2 font-medium bg-rose-50 border border-rose-200 px-3 py-1.5 rounded-xl">
                 ※ 通関NG件数（{kantoNgShipments.length}件）：到着空港がNRT（成田空港）で、明細に関東通関可否「不可」の商品を含む出荷の件数です。更新・調整は楽楽販売にて行ってください。
               </p>
               {!hasKantoData && shipments.length > 0 && (
@@ -271,7 +271,7 @@ export const KantoCustomsNgView: React.FC<KantoCustomsNgViewProps> = ({
             </a>
             <button
               onClick={handleExportCsv}
-              className="px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm"
+              className="px-3.5 py-2.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm"
             >
               <Download className="w-4 h-4" /> CSV出力
             </button>
@@ -279,23 +279,23 @@ export const KantoCustomsNgView: React.FC<KantoCustomsNgViewProps> = ({
         </div>
 
         {/* KPIs */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-6 mt-6 border-t border-rose-900/40">
-          <div className="bg-slate-800/60 border border-slate-700/80 p-3.5 rounded-2xl">
-            <span className="text-xs text-rose-300 block mb-1">配送会社で通関保留・遅延</span>
-            <span className="text-2xl font-extrabold font-mono text-orange-300">{carrierHolds.length}</span>
-            <span className="text-[10px] text-slate-400 block mt-0.5">「通関手続きによる遅延」「荷物は処理保留中です」</span>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-6 mt-6 border-t border-slate-100">
+          <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
+            <span className="text-xs text-rose-700 block mb-1">配送会社で通関保留・遅延</span>
+            <span className="text-2xl font-extrabold font-mono text-orange-600">{carrierHolds.length}</span>
+            <span className="text-[10px] text-slate-500 block mt-0.5">「通関手続きによる遅延」「荷物は処理保留中です」</span>
           </div>
 
-          <div className="bg-slate-800/60 border border-slate-700/80 p-3.5 rounded-2xl">
-            <span className="text-xs text-rose-300 block mb-1">通関NG 対象出荷件数</span>
-            <span className="text-2xl font-extrabold font-mono text-rose-400">{kantoNgShipments.length}</span>
-            <span className="text-[10px] text-slate-400 block mt-0.5">到着NRTかつ関東通関不可品目を含む出荷</span>
+          <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
+            <span className="text-xs text-rose-700 block mb-1">通関NG 対象出荷件数</span>
+            <span className="text-2xl font-extrabold font-mono text-rose-600">{kantoNgShipments.length}</span>
+            <span className="text-[10px] text-slate-500 block mt-0.5">到着NRTかつ関東通関不可品目を含む出荷</span>
           </div>
 
-          <div className="bg-slate-800/60 border border-slate-700/80 p-3.5 rounded-2xl">
-            <span className="text-xs text-slate-400 block mb-1">出荷管理 総レコード数</span>
-            <span className="text-2xl font-extrabold font-mono text-white">{shipments.length}</span>
-            <span className="text-[10px] text-slate-400 block mt-0.5">出荷管理（101270）母数</span>
+          <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
+            <span className="text-xs text-slate-500 block mb-1">出荷管理 総レコード数</span>
+            <span className="text-2xl font-extrabold font-mono text-slate-900">{shipments.length}</span>
+            <span className="text-[10px] text-slate-500 block mt-0.5">出荷管理母数</span>
           </div>
         </div>
       </div>

@@ -518,7 +518,7 @@ ${linesDetail}
           </div>
           <div className="mt-2 pt-2 border-t border-indigo-100 text-[11px] text-indigo-800 flex items-center justify-between">
             <span>発注残点数:</span>
-            <b className="font-mono">{stats.totalLines}品目 ({stats.totalQty}点)</b>
+            <b className="font-mono">{stats.totalLines}明細 ({stats.totalQty}点)</b>
           </div>
         </div>
 
@@ -880,7 +880,7 @@ ${linesDetail}
                     <div className="text-xs font-bold text-slate-700 flex items-center justify-between">
                       <span className="flex items-center gap-1.5">
                         <Package className="w-4 h-4 text-indigo-500" />
-                        未出荷のご注文明細一覧 ({clinic.lines.length}品目)
+                        未出荷のご注文明細一覧 ({clinic.lines.length}明細)
                       </span>
                       <span className="text-[11px] text-slate-500 font-normal">
                         ※ 各明細をクリックすると伝票詳細・追跡番号・納期情報を確認できます

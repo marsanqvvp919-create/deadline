@@ -112,7 +112,7 @@ export const ProductMasterView: React.FC<ProductMasterViewProps> = ({
     }
   };
 
-  // 注文管理（101248）との突合計算: 各商品の現在発注状況
+  // 注文管理との突合計算: 各商品の現在発注状況
   const productOrderStats = useMemo(() => {
     const stats: Record<string, { orderCount: number; totalQty: number; orders: { order: Order; qty: number; stage: string }[] }> = {};
     const byName: typeof stats = {};
@@ -199,7 +199,7 @@ export const ProductMasterView: React.FC<ProductMasterViewProps> = ({
 
   // CSVエクスポート
   const handleExportCsv = () => {
-    const headers = ['109958(商品ID)', '109992(商品名)', 'カテゴリ', '規格', '110002(標準販売単価)', '110007(仕入単価)', '110124(通貨)', '110006(仕入先名)', '110169(製造国)', '110012(下限納期)', '110013(上限納期)', 'ステータス', '備考'];
+    const headers = ['商品ID', '商品名', 'カテゴリ', '規格', '標準販売単価', '仕入単価', '通貨', '仕入先名', '製造国', '下限納期', '上限納期', 'ステータス', '備考'];
     const rows = filteredProducts.map((p) => [
       `"${p.productId}"`,
       `"${p.productName}"`,
@@ -260,19 +260,9 @@ export const ProductMasterView: React.FC<ProductMasterViewProps> = ({
                 <h1 className="text-xl font-bold text-slate-900 tracking-tight">
                   商品マスタ管理
                 </h1>
-                <span className="text-[11px] font-mono font-bold bg-blue-50 text-blue-700 border border-blue-200 px-2.5 py-0.5 rounded-md">
-                  dbSchemaId: 101252
-                </span>
-                <span className="text-[11px] font-mono font-semibold bg-slate-100 text-slate-700 border border-slate-200 px-2 py-0.5 rounded-md">
-                  キー項目: 109958 (商品ID)
-                </span>
-                <span className="text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-md flex items-center gap-1">
-                  <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                  楽楽販売 DBグループ: Number1
-                </span>
               </div>
               <p className="text-xs text-slate-500 mt-1">
-                ご注文管理（101248）の注文明細行（109991: 商品ID）と自動突合し、在庫・引当・販売単価を集中管理
+                楽楽販売の商品マスタです（閲覧のみ）。ご注文管理の明細と商品IDでつなぎ、いま進行中の受注を表示します。
               </p>
             </div>
           </div>
@@ -302,14 +292,6 @@ export const ProductMasterView: React.FC<ProductMasterViewProps> = ({
             >
               <Download className="w-3.5 h-3.5 text-slate-500" />
               <span>CSV出力</span>
-            </button>
-
-            <button
-              onClick={() => setIsSchemaModalOpen(true)}
-              className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer"
-            >
-              <Database className="w-3.5 h-3.5 text-slate-500" />
-              <span>スキーマ表</span>
             </button>
           </div>
         </div>
@@ -442,16 +424,16 @@ export const ProductMasterView: React.FC<ProductMasterViewProps> = ({
           <table className="tbl-product w-full text-left text-xs">
             <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-bold uppercase tracking-wider text-[11px]">
               <tr>
-                <th className="py-3 px-3.5">楽楽ID (109958)</th>
+                <th className="py-3 px-3.5">楽楽ID</th>
                 <th className="py-3 px-3.5">商品名 / 規格</th>
                 <th className="py-3 px-3.5">カテゴリ</th>
                 <th className="py-3 px-3.5 text-right">標準販売単価</th>
                 <th className="py-3 px-3.5 text-right">仕入単価 (原価)</th>
                 <th className="py-3 px-3.5 text-right">粗利率</th>
-                <th className="py-3 px-3.5">仕入先名 (110006)</th>
+                <th className="py-3 px-3.5">仕入先名</th>
                 <th className="py-3 px-3.5">製造国</th>
                 <th className="py-3 px-3.5">標準納期</th>
-                <th className="py-3 px-3.5 text-center">注文管理連携 (101248)</th>
+                <th className="py-3 px-3.5 text-center">注文管理連携</th>
                 <th className="py-3 px-3.5">状況</th>
                 <th className="py-3 px-3.5 text-center">詳細</th>
               </tr>
@@ -567,9 +549,6 @@ export const ProductMasterView: React.FC<ProductMasterViewProps> = ({
                     <span className="font-mono text-xs text-blue-400 font-bold">
                       {selectedProduct.productId}
                     </span>
-                    <span className="text-[10px] bg-slate-800 text-slate-300 px-1.5 py-0.2 rounded font-mono">
-                      schemaId: 101252
-                    </span>
                   </div>
                   <h3 className="text-base font-bold text-white mt-1 leading-snug">
                     {selectedProduct.productName}
@@ -603,53 +582,53 @@ export const ProductMasterView: React.FC<ProductMasterViewProps> = ({
                   </h4>
                   <div className="bg-slate-50 rounded-xl p-3.5 border border-slate-200 space-y-2 text-xs">
                     <div className="flex justify-between py-1 border-b border-slate-200">
-                      <span className="text-slate-500">109958: キー項目 [商品ID]</span>
+                      <span className="text-slate-500">商品ID</span>
                       <span className="font-mono font-bold text-slate-900">{selectedProduct.productId}</span>
                     </div>
                     <div className="flex justify-between py-1 border-b border-slate-200">
-                      <span className="text-slate-500">109992: 商品名</span>
+                      <span className="text-slate-500">商品名</span>
                       <span className="font-semibold text-slate-900">{selectedProduct.productName}</span>
                     </div>
                     <div className="flex justify-between py-1 border-b border-slate-200">
-                      <span className="text-slate-500">109961: 規格・容量</span>
+                      <span className="text-slate-500">規格・容量</span>
                       <span className="text-slate-800">{selectedProduct.spec}</span>
                     </div>
                     <div className="flex justify-between py-1 border-b border-slate-200">
-                      <span className="text-slate-500">110002: 標準販売単価</span>
+                      <span className="text-slate-500">標準販売単価</span>
                       <span className="font-mono font-bold text-slate-900">¥{selectedProduct.standardPrice.toLocaleString()}</span>
                     </div>
                     <div className="flex justify-between py-1 border-b border-slate-200">
-                      <span className="text-slate-500">109994: 下限販売単価</span>
+                      <span className="text-slate-500">下限販売単価</span>
                       <span className="font-mono text-slate-700">¥{selectedProduct.minPrice.toLocaleString()}</span>
                     </div>
                     <div className="flex justify-between py-1 border-b border-slate-200">
-                      <span className="text-slate-500">109995: 上限販売単価</span>
+                      <span className="text-slate-500">上限販売単価</span>
                       <span className="font-mono text-slate-700">¥{selectedProduct.maxPrice.toLocaleString()}</span>
                     </div>
                     <div className="flex justify-between py-1 border-b border-slate-200">
-                      <span className="text-slate-500">110007: 仕入単価 (110124: 通貨)</span>
+                      <span className="text-slate-500">仕入単価（通貨）</span>
                       <span className="font-mono text-slate-800">{selectedProduct.costPrice.toLocaleString()} {selectedProduct.costCurrency || ''}</span>
                     </div>
                     <div className="flex justify-between py-1 border-b border-slate-200">
-                      <span className="text-slate-500">110006: 仕入先名 (110005: ID)</span>
+                      <span className="text-slate-500">仕入先名（ID）</span>
                       <span className="text-slate-800">{selectedProduct.supplierName} ({selectedProduct.supplierId})</span>
                     </div>
                     <div className="flex justify-between py-1 border-b border-slate-200">
-                      <span className="text-slate-500">110169: 製造国ID (製造国マスタ)</span>
+                      <span className="text-slate-500">製造国</span>
                       <span className="text-slate-800">{selectedProduct.countryOfOrigin || '—'}</span>
                     </div>
                     <div className="flex justify-between py-1">
-                      <span className="text-slate-500">110012〜110013: 標準納期（日）</span>
+                      <span className="text-slate-500">標準納期（日）</span>
                       <span className="font-mono text-slate-800">{leadTimeText(selectedProduct)}</span>
                     </div>
                   </div>
                 </div>
 
-                {/* ご注文管理（101248）とのリアルタイム連携状況 */}
+                {/* ご注文管理とのリアルタイム連携状況 */}
                 <div className="space-y-3">
                   <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
                     <ShoppingBag className="w-3.5 h-3.5 text-blue-600" />
-                    <span>ご注文管理（101248）での現在稼働中伝票</span>
+                    <span>ご注文管理での現在稼働中伝票</span>
                   </h4>
 
                   {(() => {

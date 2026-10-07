@@ -240,7 +240,7 @@ export const CustomsManagementView: React.FC<CustomsManagementViewProps> = ({
   return (
     <div className="space-y-6 animate-in fade-in duration-150">
       {/* Header Banner */}
-      <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl text-white">
+      <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-start gap-4">
             <div className="w-14 h-14 rounded-2xl bg-indigo-600 flex items-center justify-center shrink-0 shadow-lg">
@@ -249,15 +249,15 @@ export const CustomsManagementView: React.FC<CustomsManagementViewProps> = ({
             <div>
               <div className="flex items-center gap-2.5 flex-wrap">
                 <h1 className="text-xl font-bold tracking-tight">通関・輸入管理一覧</h1>
-                <span className="text-xs font-bold px-3 py-1 rounded-full bg-indigo-500/30 text-indigo-200 border border-indigo-400/30 font-mono">
-                  出荷管理実レコード (101270)
+                <span className="text-xs font-bold px-3 py-1 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200 font-mono">
+                  楽楽販売 出荷管理
                 </span>
-                <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 font-mono">
+                <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-700 border border-emerald-400/30 font-mono">
                   総レコード: {totalCount} 件
                 </span>
               </div>
               <p className="text-xs text-slate-300 mt-2 leading-relaxed max-w-3xl">
-                出荷管理（101270）の実レコードに基づき、出荷元倉庫、到着空港（KIX/NRT/NGO）、輸入確認、クール申請・委任状・伝票、PHA番号、倉庫インボイス番号、現在地、出荷番号を表示します。
+                出荷管理の実レコードに基づき、出荷元倉庫、到着空港（KIX/NRT/NGO）、輸入確認、クール申請・委任状・伝票、PHA番号、倉庫インボイス番号、現在地、出荷番号を表示します。
               </p>
             </div>
           </div>
@@ -273,7 +273,7 @@ export const CustomsManagementView: React.FC<CustomsManagementViewProps> = ({
             </a>
             <button
               onClick={handleExportCsv}
-              className="px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm"
+              className="px-3.5 py-2.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm"
             >
               <Download className="w-4 h-4" /> CSV出力
             </button>
@@ -282,22 +282,22 @@ export const CustomsManagementView: React.FC<CustomsManagementViewProps> = ({
 
         {/* KPI Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-6 mt-6 border-t border-slate-800">
-          <div className="bg-slate-800/60 border border-slate-700/80 p-3.5 rounded-2xl">
-            <span className="text-xs text-slate-400 block mb-1">出荷管理 総件数</span>
-            <span className="text-2xl font-extrabold font-mono text-white">{totalCount}</span>
-            <span className="text-[10px] text-slate-400 block mt-0.5">実レコード件数</span>
+          <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
+            <span className="text-xs text-slate-500 block mb-1">出荷管理 総件数</span>
+            <span className="text-2xl font-extrabold font-mono text-slate-900">{totalCount}</span>
+            <span className="text-[10px] text-slate-500 block mt-0.5">実レコード件数</span>
           </div>
 
-          <div className="bg-slate-800/60 border border-slate-700/80 p-3.5 rounded-2xl">
-            <span className="text-xs text-amber-300 block mb-1">クール手配漏れ</span>
-            <span className="text-2xl font-extrabold font-mono text-amber-400">{coolMissingTotal}</span>
-            <span className="text-[10px] text-slate-400 block mt-0.5">クール申請・委任状・伝票のいずれかが未</span>
+          <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
+            <span className="text-xs text-amber-700 block mb-1">クール手配漏れ</span>
+            <span className="text-2xl font-extrabold font-mono text-amber-600">{coolMissingTotal}</span>
+            <span className="text-[10px] text-slate-500 block mt-0.5">クール申請・委任状・伝票のいずれかが未</span>
           </div>
 
-          <div className="bg-slate-800/60 border border-slate-700/80 p-3.5 rounded-2xl">
-            <span className="text-xs text-rose-300 block mb-1">通関NG</span>
-            <span className="text-2xl font-extrabold font-mono text-rose-400">{customsNgTotal}</span>
-            <span className="text-[10px] text-slate-400 block mt-0.5">到着NRTかつ関東通関不可</span>
+          <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
+            <span className="text-xs text-rose-700 block mb-1">通関NG</span>
+            <span className="text-2xl font-extrabold font-mono text-rose-600">{customsNgTotal}</span>
+            <span className="text-[10px] text-slate-500 block mt-0.5">到着NRTかつ関東通関不可</span>
           </div>
         </div>
       </div>

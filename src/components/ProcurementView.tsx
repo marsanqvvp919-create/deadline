@@ -540,7 +540,7 @@ ${linesText}
               {stats.paidUnorderedCount}
             </span>
             <span className="text-xs font-semibold text-amber-800">
-              品目 ({stats.paidUnorderedOrdersCount}伝票 / {stats.paidUnorderedQty}点)
+              明細 ({stats.paidUnorderedOrdersCount}伝票 / {stats.paidUnorderedQty}点)
             </span>
           </div>
           <div className="mt-2 pt-2 border-t border-amber-200/60 flex items-center justify-between text-[11px] text-amber-800">
@@ -573,7 +573,7 @@ ${linesText}
             <span className="text-2xl sm:text-3xl font-extrabold text-rose-700 font-mono">
               {stats.agingAlertsCount}
             </span>
-            <span className="text-xs font-semibold text-rose-800">品目滞留中</span>
+            <span className="text-xs font-semibold text-rose-800">明細が滞留中</span>
           </div>
           <p className="mt-2 pt-2 border-t border-rose-200/60 text-[11px] text-rose-700">
             入金から発注が停滞し納期遅延のリスクあり
@@ -602,7 +602,7 @@ ${linesText}
             <span className="text-2xl sm:text-3xl font-extrabold text-blue-900 font-mono">
               {stats.waitingPaymentCount}
             </span>
-            <span className="text-xs font-semibold text-blue-700">品目保留中</span>
+            <span className="text-xs font-semibold text-blue-700">明細が保留中</span>
           </div>
           <p className="mt-2 pt-2 border-t border-blue-200/60 text-[11px] text-blue-700">
             クリニックからの入金連絡を確認次第手配
@@ -633,7 +633,7 @@ ${linesText}
             <span className="text-xs font-semibold text-slate-600">社へ発注指示可能</span>
           </div>
           <p className="mt-2 pt-2 border-t border-slate-100 text-[11px] text-slate-500 truncate">
-            全未発注: {stats.allUnorderedCount}品目 / 直近発注: {stats.recentlyOrderedCount}品目
+            全未発注: {stats.allUnorderedCount}明細 / 直近発注: {stats.recentlyOrderedCount}明細
           </p>
         </div>
       </div>
@@ -802,7 +802,7 @@ ${linesText}
           </div>
 
           <div className="text-slate-500 text-[11px] shrink-0">
-            該当件数: <b className="text-slate-900 font-mono text-xs">{filteredItems.length}</b> 品目
+            該当件数: <b className="text-slate-900 font-mono text-xs">{filteredItems.length}</b> 明細
           </div>
         </div>
       </div>
@@ -812,7 +812,7 @@ ${linesText}
         <div className="flex flex-wrap items-center gap-2 text-xs font-bold text-blue-800 bg-blue-50 border border-blue-200 rounded-xl px-3 py-2">
           <span>
             絞り込み中：{localSearch.trim() && `検索「${localSearch.trim()}」`}
-            {selectedSupplier !== 'all' && ` 仕入先「${selectedSupplier}」`}（{filteredItems.length}品目を表示）
+            {selectedSupplier !== 'all' && ` 仕入先「${selectedSupplier}」`}（{filteredItems.length}明細を表示）
           </span>
           <button
             type="button"
@@ -878,7 +878,7 @@ ${linesText}
                             {group.supplierName}
                           </h2>
                           <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-900 font-mono">
-                            未発注 {supplierItems.length} 品目 / 計 {group.totalQty} 点
+                            未発注 {supplierItems.length} 明細 / 計 {group.totalQty} 点
                           </span>
                           {group.hasAgingAlert && (
                             <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-700 flex items-center gap-1">
@@ -1213,7 +1213,7 @@ ${linesText}
 
                     <div className="flex items-center gap-3">
                       <span className="text-xs text-slate-600">
-                        未発注: <b className="font-mono text-slate-900">{items.length}</b> 品目 ({totalQty}点)
+                        未発注: <b className="font-mono text-slate-900">{items.length}</b> 明細 ({totalQty}点)
                       </span>
                       <button
                         onClick={() => openCompleteModal(items.map((it) => it.line))}

@@ -3,11 +3,11 @@ import { AlertItem, Order } from '../types';
 import { useUrlState } from '../utils/listState';
 import { isOrderDelayed, isLineDelayed, getOrderMaxDelayDays, isStaleUnpaid, STALE_UNPAID_DAYS } from '../utils/delayCalculation';
 
-// 要対応リスト：納期超過・発注漏れ・納期未設定のある伝票を、ルールごとにまとめて表示する（朝会用）。
+// 要対応リスト：納期超過・未発注（3日以上）・納期未設定のある伝票を、ルールごとにまとめて表示する（朝会用）。
 // 1つの伝票に複数の明細が当たっていても1行にまとめる。
 
 const RULES: { id: string; label: string; description: string; tone: string }[] = [
-  { id: 'B1', label: '発注漏れ', description: '受注日から3日以上たっても未発注の明細がある伝票', tone: 'rose' },
+  { id: 'B1', label: '未発注（3日以上）', description: '受注日から3日以上たっても未発注の明細がある伝票', tone: 'rose' },
   { id: 'A1', label: '納期超過', description: '最長納品予定日を過ぎて未出荷の明細がある伝票', tone: 'rose' },
   { id: 'B2', label: '納期未設定', description: '最短・最長納品予定日が未入力の明細がある伝票', tone: 'amber' },
 ];

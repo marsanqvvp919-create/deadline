@@ -26,8 +26,8 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({
 
   const isProduct = type === 'products';
   const title = isProduct
-    ? '商品マスタ（101252）CSVインポート'
-    : 'クリニックマスタ（101250）CSVインポート';
+    ? '商品マスタCSVインポート'
+    : 'クリニックマスタCSVインポート';
 
   // 簡易パーサー
   const handleParse = (text: string) => {
@@ -250,7 +250,7 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({
         {/* Footer */}
         <div className="px-6 py-3.5 bg-slate-50 border-t border-slate-200 flex items-center justify-between">
           <span className="text-xs text-slate-500">
-            楽楽販売の項目ID（109958, 109898等）ヘッダーにも対応
+            楽楽販売から書き出したCSVの見出しに対応
           </span>
           <div className="flex items-center gap-2">
             <button

@@ -94,13 +94,14 @@ export default function App() {
       const params = new URLSearchParams(window.location.search);
       return {
         // 画面のない旧タブ（rep・delivery_dashboard など）はダッシュボードを開く
-        tab: (KNOWN_TABS.includes(params.get('tab') as ViewTab) ? params.get('tab') : 'dashboard') as ViewTab,
+        // 開いたときの最初の画面は朝の納期会議
+        tab: (KNOWN_TABS.includes(params.get('tab') as ViewTab) ? params.get('tab') : 'morning_meeting') as ViewTab,
         // 画面上部の絞り込み（担当営業・仕入先・期間・検索）はやめた。担当営業はダッシュボードから要対応リストを開くときだけ使う
         rep: params.get('tab') === 'alerts' ? params.get('rep') || '' : '',
       };
     } catch {
       return {
-        tab: 'dashboard' as ViewTab,
+        tab: 'morning_meeting' as ViewTab,
         rep: '',
       };
     }
@@ -271,7 +272,7 @@ export default function App() {
       lastSyncedTabRef.current = activeTab;
       const params = tabChanged ? new URLSearchParams() : new URLSearchParams(window.location.search);
       ['tab', 'rep', 'supplier', 'period', 'q'].forEach((k) => params.delete(k));
-      if (activeTab !== 'dashboard') params.set('tab', activeTab);
+      if (activeTab !== 'morning_meeting') params.set('tab', activeTab);
       if (selectedRep) params.set('rep', selectedRep);
 
       const newRelativePathQuery =
@@ -632,37 +633,35 @@ export default function App() {
     },
   ];
 
-  // 納期・進捗管理セクション Items
+  // メニュー：仕事の順番で「今日やること → 出荷・配送 → 分析 → 管理」
   const NAV_GROUPS = [
-    { id: 'today', label: '今日の対応' },
-    { id: 'progress', label: '出荷・進捗' },
-    { id: 'logistics', label: '通関・物流' },
+    { id: 'today', label: '今日やること' },
+    { id: 'shipping', label: '出荷・配送' },
+    { id: 'analysis', label: '分析' },
+    { id: 'admin', label: '管理' },
   ];
-  const deliveryNavItems = [
+  // 通関・輸入はクール手配漏れ・通関NGをタブで含む
+  const CUSTOMS_TABS: ViewTab[] = ['customs_management', 'cool_missing', 'kanto_customs_ng'];
+  const deliveryNavItems: {
+    id: ViewTab;
+    group: string;
+    label: string;
+    icon: any;
+    badge: string | null;
+    badgeColor?: string;
+    match?: ViewTab[];
+  }[] = [
     {
-      id: 'dashboard' as ViewTab,
-      group: 'today',
-      label: 'ダッシュボード',
-      icon: LayoutDashboard,
-      badge: null,
-    },
-    {
-      id: 'morning_meeting' as ViewTab,
+      id: 'morning_meeting',
       group: 'today',
       label: '朝の納期会議',
       icon: CalendarCheck,
-      badge: null,
-    },
-    {
-      id: 'alerts' as ViewTab,
-      group: 'today',
-      label: '要対応リスト',
-      icon: AlertTriangle,
       badge: highSeverityCount > 0 ? `${highSeverityCount}` : null,
       badgeColor: 'bg-rose-600 text-white font-bold',
+      match: ['morning_meeting', 'alerts'],
     },
     {
-      id: 'procurement' as ViewTab,
+      id: 'procurement',
       group: 'today',
       label: '発注管理（未発注）',
       icon: ShoppingCart,
@@ -670,49 +669,15 @@ export default function App() {
       badgeColor: 'bg-amber-500 text-white font-bold',
     },
     {
-      id: 'unshipped_clinics' as ViewTab,
-      group: 'progress',
-      label: '未出荷クリニック',
-      icon: Truck,
-      badge: unshippedClinicsCount > 0 ? `${unshippedClinicsCount}` : null,
-      badgeColor: 'bg-indigo-600 text-white font-bold',
-    },
-    {
-      id: 'overdue' as ViewTab,
+      id: 'overdue',
       group: 'today',
       label: '納期超過一覧',
       icon: AlertTriangle,
-      badge: overdueCounts.ordersCount > 0 ? `${overdueCounts.ordersCount}件（${overdueCounts.linesCount}明細）` : null,
-      badgeColor: 'bg-rose-600 text-white font-bold',
-    },
-
-    {
-      id: 'customs_management' as ViewTab,
-      group: 'logistics',
-      label: '通関・輸入管理',
-      icon: Plane,
-      // バッジは未完了（出荷待ち・配達前）の出荷数
-      badge: `${shipments.filter((sh) => isOpenShipment(sh)).length}`,
-      badgeColor: 'bg-indigo-600 text-white font-bold',
-    },
-    {
-      id: 'cool_missing' as ViewTab,
-      group: 'logistics',
-      label: 'クール手配漏れ',
-      icon: Thermometer,
-      badge: coolMissingCount > 0 ? `${coolMissingCount}` : null,
-      badgeColor: 'bg-amber-600 text-white font-bold',
-    },
-    {
-      id: 'kanto_customs_ng' as ViewTab,
-      group: 'logistics',
-      label: '通関NG',
-      icon: ShieldAlert,
-      badge: kantoNgCount > 0 ? `${kantoNgCount}` : null,
+      badge: overdueCounts.ordersCount > 0 ? `${overdueCounts.ordersCount}` : null,
       badgeColor: 'bg-rose-600 text-white font-bold',
     },
     {
-      id: 'unmatched_sheets' as ViewTab,
+      id: 'unmatched_sheets',
       group: 'today',
       label: '楽楽販売と未照合',
       icon: FileWarning,
@@ -720,47 +685,71 @@ export default function App() {
       badgeColor: 'bg-amber-600 text-white font-bold',
     },
     {
-      id: 'inventory_management' as ViewTab,
-      group: 'logistics',
-      label: '韓国・シンガポール倉庫在庫',
+      id: 'arrival_tracking',
+      group: 'shipping',
+      label: '到着トラッキング',
+      icon: Clock,
+      badge: null,
+    },
+    {
+      id: 'unshipped_clinics',
+      group: 'shipping',
+      label: '未出荷クリニック',
+      icon: Truck,
+      badge: unshippedClinicsCount > 0 ? `${unshippedClinicsCount}` : null,
+      badgeColor: 'bg-indigo-600 text-white font-bold',
+    },
+    {
+      id: 'customs_management',
+      group: 'shipping',
+      label: '通関・輸入',
+      icon: Plane,
+      // バッジは要対応（クール手配漏れ＋通関NG）
+      badge: coolMissingCount + kantoNgCount > 0 ? `${coolMissingCount + kantoNgCount}` : null,
+      badgeColor: 'bg-amber-600 text-white font-bold',
+      match: CUSTOMS_TABS,
+    },
+    {
+      id: 'inventory_management',
+      group: 'shipping',
+      label: '倉庫在庫（韓国・SG）',
       icon: Building,
       badge: null,
     },
     {
-      id: 'sheet_import' as ViewTab,
-      group: 'logistics',
+      id: 'dashboard',
+      group: 'analysis',
+      label: 'ダッシュボード',
+      icon: LayoutDashboard,
+      badge: null,
+    },
+    {
+      id: 'sheet_import',
+      group: 'admin',
       label: 'シート取り込み',
       icon: FileWarning,
       badge: null,
     },
     {
-      id: 'arrival_tracking' as ViewTab,
-      group: 'progress',
-      label: '到着トラッキング',
-      icon: Clock,
+      id: 'products',
+      group: 'admin',
+      label: '商品マスタ',
+      icon: Package,
       badge: null,
     },
-  ];
-
-  // 楽楽販売 マスタ管理 Items (DBグループ: Number1)
-  const masterNavItems = [
     {
-      id: 'products' as ViewTab,
-      label: '商品マスタ',
-      schemaId: '101252',
-      icon: Package,
-    },
-    {
-      id: 'clinics' as ViewTab,
+      id: 'clinics',
+      group: 'admin',
       label: 'クリニックマスタ',
-      schemaId: '101250',
       icon: Building2,
+      badge: null,
     },
     {
-      id: 'carrier_settings' as ViewTab,
+      id: 'carrier_settings',
+      group: 'admin',
       label: '配送会社API連携',
-      schemaId: '',
       icon: Truck,
+      badge: null,
     },
   ];
 
@@ -815,7 +804,7 @@ export default function App() {
               <div key={group.id} className="space-y-1 pt-2 first:pt-0">
                 <div className="px-3 text-[10px] font-bold tracking-wider text-slate-400">{group.label}</div>
             {deliveryNavItems.filter((item) => item.group === group.id).map((item) => {
-              const isActive = activeTab === item.id;
+              const isActive = (item.match || [item.id]).includes(activeTab);
               const Icon = item.icon;
 
               return (
@@ -851,39 +840,6 @@ export default function App() {
             ))}
           </div>
 
-          {/* Section: 楽楽販売 マスタ管理 */}
-          <div className="space-y-1 pt-2 border-t border-slate-800/80">
-            <div className="px-3 flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-slate-400">
-              <span>マスタ</span>
-            </div>
-            {masterNavItems.map((item) => {
-              const isActive = activeTab === item.id;
-              const Icon = item.icon;
-
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => {
-                    setActiveTab(item.id);
-                    setIsMobileNavOpen(false);
-                  }}
-                  className={`w-full flex items-center justify-between px-3.5 py-2.2 rounded-xl text-xs font-bold transition cursor-pointer active:translate-y-px border ${
-                    isActive
-                      ? item.id === 'products'
-                        ? 'bg-blue-600 border-blue-500 text-white shadow-xs'
-                        : 'bg-indigo-600 border-indigo-500 text-white shadow-xs'
-                      : 'border-transparent text-slate-300 hover:text-white hover:bg-slate-800/80 hover:border-slate-700'
-                  }`}
-                >
-                  <div className="flex items-center gap-2.5 truncate flex-1 min-w-0 mr-2">
-                    <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-white' : 'text-slate-400'}`} />
-                    <span className="truncate">{item.label}</span>
-                  </div>
-
-                </button>
-              );
-            })}
-          </div>
         </nav>
 
         {/* Sidebar Footer: Settings Button & Status (Permanently anchored at bottom of sidebar) */}
@@ -954,7 +910,7 @@ export default function App() {
           onRefresh={() => loadData(true)}
           onOpenSettings={() => setIsSettingsOpen(true)}
           onOpenDailyDigest={() => setIsDailyDigestOpen(true)}
-          onNavigateToAlerts={() => setActiveTab('alerts')}
+          onNavigateToAlerts={() => setActiveTab('morning_meeting')}
           onDismissError={handleDismissError}
           onSwitchToSample={handleSwitchToSample}
         />
@@ -1100,6 +1056,31 @@ export default function App() {
               onSelectOrder={handleOpenDetail}
               onOpenClinicStatus={handleOpenClinicStatus}
             />
+          )}
+
+          {/* 通関・輸入：一覧・クール手配漏れ・通関NG をタブで切り替える */}
+          {CUSTOMS_TABS.includes(activeTab) && (
+            <div className="mb-4 inline-flex flex-wrap gap-1 rounded-xl border border-slate-200 bg-white p-1 shadow-2xs">
+              {([
+                ['customs_management', '通関・輸入の一覧', null],
+                ['cool_missing', 'クール手配漏れ', coolMissingCount],
+                ['kanto_customs_ng', '通関NG・通関保留', kantoNgCount],
+              ] as [ViewTab, string, number | null][]).map(([id, label, n]) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setActiveTab(id)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 ${
+                    activeTab === id ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  {label}
+                  {n !== null && n > 0 && (
+                    <span className={`px-1.5 rounded-full text-[10px] font-mono ${activeTab === id ? 'bg-white text-slate-900' : 'bg-amber-100 text-amber-800'}`}>{n}</span>
+                  )}
+                </button>
+              ))}
+            </div>
           )}
 
           {activeTab === 'customs_management' && (

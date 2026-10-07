@@ -542,7 +542,7 @@ export const ClinicProductStatusDrawer: React.FC<ClinicProductStatusDrawerProps>
                     {clinicInfo?.clinicId || '取引先'}
                   </span>
                   <span className="text-[11px] text-slate-400">
-                    楽楽販売 顧客マスタ (101250) 連携中
+                    楽楽販売 顧客マスタ
                   </span>
                   {clinicInfo?.status && (
                     <span className="text-[11px] font-semibold px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
@@ -1348,7 +1348,7 @@ export const ClinicProductStatusDrawer: React.FC<ClinicProductStatusDrawerProps>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
                         <div className="space-y-2">
                           <div className="flex justify-between py-1.5 border-b border-slate-100">
-                            <span className="text-slate-500">109898 (クリニックID)</span>
+                            <span className="text-slate-500">クリニックID</span>
                             <span className="font-mono font-bold text-indigo-700">{clinicInfo.clinicId}</span>
                           </div>
                           <div className="flex justify-between py-1.5 border-b border-slate-100">
@@ -1356,15 +1356,15 @@ export const ClinicProductStatusDrawer: React.FC<ClinicProductStatusDrawerProps>
                             <span className="font-semibold text-slate-800">{clinicInfo.directorName || "—"}</span>
                           </div>
                           <div className="flex justify-between py-1.5 border-b border-slate-100">
-                            <span className="text-slate-500">109978 (担当営業)</span>
+                            <span className="text-slate-500">担当営業</span>
                             <span className="font-bold text-slate-900">{clinicInfo.salesRep}</span>
                           </div>
                           <div className="flex justify-between py-1.5 border-b border-slate-100">
-                            <span className="text-slate-500">110167 (販売通貨)</span>
+                            <span className="text-slate-500">販売通貨</span>
                             <span className="font-mono text-slate-800">{clinicInfo.currency}</span>
                           </div>
                           <div className="flex justify-between py-1.5 border-b border-slate-100">
-                            <span className="text-slate-500">110109 (紹介手数料率)</span>
+                            <span className="text-slate-500">紹介手数料率</span>
                             <span className="font-mono font-bold text-indigo-700">{clinicInfo.commissionRate}%</span>
                           </div>
                         </div>
@@ -1407,7 +1407,7 @@ export const ClinicProductStatusDrawer: React.FC<ClinicProductStatusDrawerProps>
                     <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
                       <div className="p-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
                         <span className="text-xs font-bold text-slate-800">
-                          ご注文管理（101248）での伝票一覧 ({clinicOrders.length} 件)
+                          ご注文管理での伝票一覧 ({clinicOrders.length} 件)
                         </span>
                       </div>
                       <div className="divide-y divide-slate-100 text-xs">
@@ -1440,7 +1440,7 @@ export const ClinicProductStatusDrawer: React.FC<ClinicProductStatusDrawerProps>
                   </>
                 ) : (
                   <div className="bg-white rounded-2xl p-8 text-center text-slate-500 border border-slate-200">
-                    顧客マスタ（101250）に登録情報が見つかりませんでした。
+                    顧客マスタに登録情報が見つかりませんでした。
                   </div>
                 )}
               </div>

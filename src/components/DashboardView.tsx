@@ -463,7 +463,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 <span className="font-mono text-2xl font-extrabold text-amber-600">
                   {paidUnorderedLines.length}
                 </span>
-                <span className="text-xs text-slate-500 font-medium">品目 (※送料・手数料除外)</span>
+                <span className="text-xs text-slate-500 font-medium">明細（送料・手数料を除く）</span>
               </div>
               <p className="text-[11px] text-slate-500 mt-1 line-clamp-2">
                 入金確認が完了した未発注商品。メーカーへの即時手配が可能です。
@@ -691,7 +691,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <span className="text-2xl font-extrabold font-mono text-slate-900 group-hover:text-blue-600 transition">
                 {incompleteLines.length}
               </span>
-              <span className="text-xs text-slate-400 font-semibold">品目</span>
+              <span className="text-xs text-slate-400 font-semibold">明細</span>
             </div>
             <span className="text-[11px] text-slate-400 mt-1 block leading-tight">
               出荷未完了の商品（発注残）
@@ -767,7 +767,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
             <div className="mt-1 flex flex-wrap gap-1 text-[10px] font-bold text-orange-800">
               <span className="px-1.5 py-0.5 rounded bg-orange-100">
-                発注漏れ {missedOrdersCount}件（{missedOrderLinesCount}明細）
+                未発注（3日以上） {missedOrdersCount}件（{missedOrderLinesCount}明細）
               </span>
               <span className="px-1.5 py-0.5 rounded bg-orange-100">
                 納期未設定 {missingDueDateOrdersCount}件（{missingDueDateLinesCount}明細）

@@ -212,7 +212,7 @@ export const CoolMissingView: React.FC<CoolMissingViewProps> = ({
   return (
     <div className="space-y-6 animate-in fade-in duration-150">
       {/* Header Banner */}
-      <div className="bg-gradient-to-r from-amber-950 via-slate-900 to-amber-950 border border-amber-800/60 rounded-3xl p-6 shadow-xl text-white">
+      <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-start gap-4">
             <div className="w-14 h-14 rounded-2xl bg-amber-500 text-slate-900 flex items-center justify-center shrink-0 shadow-lg font-black">
@@ -221,13 +221,13 @@ export const CoolMissingView: React.FC<CoolMissingViewProps> = ({
             <div>
               <div className="flex items-center gap-2.5 flex-wrap">
                 <h1 className="text-xl font-bold tracking-tight">クール手配漏れ一覧</h1>
-                <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-400/40 font-mono">
+                <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-200 font-mono">
                   漏れ件数: {coolMissingShipments.length} 件
                 </span>
               </div>
               {/* ユーザー指定の1行説明文 */}
-              <p className="text-xs text-amber-200 mt-2 font-medium bg-amber-950/70 border border-amber-600/40 px-3 py-1.5 rounded-xl">
-                ※ 漏れ件数（{coolMissingShipments.length}件）：出荷管理（101270）データのうち、クール申請・委任状・伝票のいずれかが「未」となっている出荷の件数です。更新は楽楽販売にて行ってください。
+              <p className="text-xs text-amber-800 mt-2 font-medium bg-amber-50 border border-amber-200 px-3 py-1.5 rounded-xl">
+                ※ 漏れ件数（{coolMissingShipments.length}件）：出荷管理データのうち、クール申請・委任状・伝票のいずれかが「未」となっている出荷の件数です。更新は楽楽販売にて行ってください。
               </p>
             </div>
           </div>
@@ -243,7 +243,7 @@ export const CoolMissingView: React.FC<CoolMissingViewProps> = ({
             </a>
             <button
               onClick={handleExportCsv}
-              className="px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm"
+              className="px-3.5 py-2.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm"
             >
               <Download className="w-4 h-4" /> CSV出力
             </button>
@@ -251,23 +251,23 @@ export const CoolMissingView: React.FC<CoolMissingViewProps> = ({
         </div>
 
         {/* KPIs (実データに基づく内訳) */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-6 mt-6 border-t border-amber-900/40">
-          <div className="bg-slate-800/60 border border-slate-700/80 p-3.5 rounded-2xl">
-            <span className="text-xs text-amber-300 block mb-1">クール申請「未」</span>
-            <span className="text-2xl font-extrabold font-mono text-amber-400">{coolAppMissingCount}</span>
-            <span className="text-[10px] text-slate-400 block mt-0.5">航空会社クール申請未手配</span>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-6 mt-6 border-t border-slate-100">
+          <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
+            <span className="text-xs text-amber-700 block mb-1">クール申請「未」</span>
+            <span className="text-2xl font-extrabold font-mono text-amber-600">{coolAppMissingCount}</span>
+            <span className="text-[10px] text-slate-500 block mt-0.5">航空会社クール申請未手配</span>
           </div>
 
-          <div className="bg-slate-800/60 border border-slate-700/80 p-3.5 rounded-2xl">
-            <span className="text-xs text-rose-300 block mb-1">通関委任状「未」</span>
-            <span className="text-2xl font-extrabold font-mono text-rose-400">{poaMissingCount}</span>
-            <span className="text-[10px] text-slate-400 block mt-0.5">通関委任状未受領</span>
+          <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
+            <span className="text-xs text-rose-700 block mb-1">通関委任状「未」</span>
+            <span className="text-2xl font-extrabold font-mono text-rose-600">{poaMissingCount}</span>
+            <span className="text-[10px] text-slate-500 block mt-0.5">通関委任状未受領</span>
           </div>
 
-          <div className="bg-slate-800/60 border border-slate-700/80 p-3.5 rounded-2xl">
-            <span className="text-xs text-amber-200 block mb-1">伝票ステータス「未」</span>
-            <span className="text-2xl font-extrabold font-mono text-amber-300">{slipMissingCount}</span>
-            <span className="text-[10px] text-slate-400 block mt-0.5">出荷伝票未作成</span>
+          <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
+            <span className="text-xs text-amber-800 block mb-1">伝票ステータス「未」</span>
+            <span className="text-2xl font-extrabold font-mono text-amber-700">{slipMissingCount}</span>
+            <span className="text-[10px] text-slate-500 block mt-0.5">出荷伝票未作成</span>
           </div>
         </div>
       </div>

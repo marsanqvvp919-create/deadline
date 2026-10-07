@@ -207,12 +207,12 @@ export const DetailDrawer: React.FC<DetailDrawerProps> = ({
               </div>
             </div>
 
-            {/* 出荷管理・通関・クール情報セクション (101270連携) */}
+            {/* 出荷管理・通関・クール情報セクション */}
             <div className="bg-indigo-50/40 rounded-xl p-4 border border-indigo-200/80 space-y-3 text-xs">
               <div className="flex items-center justify-between">
                 <h3 className="font-bold text-indigo-950 flex items-center gap-1.5">
                   <ShieldAlert className="w-4 h-4 text-indigo-600" />
-                  <span>出荷管理・通関ステータス詳細 (101270)</span>
+                  <span>出荷管理・通関ステータス詳細</span>
                 </h3>
                 {order.isKantoNg && (
                   <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-300">
