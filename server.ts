@@ -37,8 +37,8 @@ const FIELD_MAP: Record<string, string[]> = {
   requestedDate: ['109983', '希望納期', 'requestedDate'],
   totalAmount: ['109985', '販売金額合計', 'totalAmount'],
   paymentStatus: ['109986', '入金ステータス', '入金状況', '入金状態', '入金確認', '入金区分', 'paymentStatus'],
-  paymentDate: ['109987', '入金日', '入金完了日', '入金確認日', 'paymentDate'],
-  paymentDueDate: ['109989', '入金予定日', '支払期日', '入金期日', '支払予定日', '振込期日', 'paymentDueDate'],
+  paymentDate: ['109987', '入金確認完了日', '入金日', '入金完了日', '入金確認日', 'paymentDate'],
+  paymentDueDate: ['109989', '入金完了予定日', '入金予定日', '支払期日', '入金期日', '支払予定日', '振込期日', 'paymentDueDate'],
   paymentMethod: ['109988', '支払方法', '決済方法', 'paymentMethod'],
   memo: ['109990', '備考', 'memo'],
   // 見積もり・請求管理連携項目
@@ -1244,8 +1244,8 @@ async function syncAllRakurakuData(isManual = false): Promise<boolean> {
       try {
         let resSup = await fetchRakurakuCsv(baseUrl, token, '101253', '103962', '101061', 50);
         recordHeaders('101253', resSup.csv);
-        if (!resSup.csv.trim()) {
-          // 絞込み(103962)で1件も返らないときは、絞込みなしで全件を取り直す
+        if (transformCsvToSuppliers(resSup.csv).length === 0) {
+          // 絞込み(103962)で1件も返らない（見出し行だけ）ときは、絞込みなしで全件を取り直す
           console.warn('[Rakuraku Sync] Suppliers search 103962 returned no CSV:', JSON.stringify(resSup.rawResponse || {}).slice(0, 300));
           await new Promise((r) => setTimeout(r, 2000));
           resSup = await fetchRakurakuCsv(baseUrl, token, '101253', undefined, '101061', 50);
