@@ -155,15 +155,20 @@ export function findUnmatched(
 
     const sheetDate = parseDate(row.shipDate);
     const candidates: UnmatchedRow['candidates'] = [];
+    const seen = new Set<string>();
     for (const s of shipments) {
+      // 出荷管理は明細ごとに行があるので、出荷IDごとに1件にする
+      if (seen.has(s.shipmentId)) continue;
       if (!nameSet.some((n) => namesMatch(n, s.customerName || ''))) continue;
-      // そのクリニックの出荷待ちと、出荷日が近い出荷済みを候補にする
-      if ((s.shipStatus || '').includes('出荷待ち')) {
+      // そのクリニックの出荷待ち（出荷状態が出荷待ち、または出荷日が空欄）と、出荷日が近い出荷済みを候補にする
+      const sd = parseDate(s.shippedDate || '');
+      if ((s.shipStatus || '').includes('出荷待ち') || !sd) {
+        seen.add(s.shipmentId);
         candidates.push({ ...s, reason: '出荷待ち' });
         continue;
       }
-      const sd = parseDate(s.shippedDate || '');
-      if (sheetDate && sd && Math.abs(daysBetween(sd, sheetDate)) <= NEAR_SHIP_DAYS) {
+      if (sheetDate && Math.abs(daysBetween(sd, sheetDate)) <= NEAR_SHIP_DAYS) {
+        seen.add(s.shipmentId);
         candidates.push({ ...s, reason: '出荷日が近い' });
       }
     }

@@ -1545,7 +1545,14 @@ app.get('/api/shipment-sheet/unmatched', async (req, res) => {
   try {
     const sheet = await readShipmentStatusSheet(req.query.refresh === '1');
     const sheetRows = parseSheetRows(sheet.values);
-    const result = findUnmatched(sheetRows, shipments, serverRakurakuStore.clinics || []);
+    // 出荷管理の一覧にはクリニック名が無いため、受注ID からご注文管理のクリニック名を補う
+    const orderCustomer = new Map<string, string>();
+    (serverRakurakuStore.orders?.orders || []).forEach((o: any) => orderCustomer.set(o.orderId, o.customerName));
+    const enriched = shipments.map((s: any) => ({
+      ...s,
+      customerName: s.customerName && s.customerName !== '—' ? s.customerName : orderCustomer.get(s.orderId) || '',
+    }));
+    const result = findUnmatched(sheetRows, enriched, serverRakurakuStore.clinics || []);
     return res.json({
       success: true,
       sheetReadAt: sheet.readAt,
