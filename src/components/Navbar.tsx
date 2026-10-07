@@ -324,15 +324,11 @@ export const Navbar: React.FC<NavbarProps> = ({
             type="button"
             onClick={onNavigateToAlerts}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-rose-300 bg-rose-50 hover:bg-rose-100 active:bg-rose-200 text-rose-800 shadow-xs hover:shadow active:translate-y-px transition cursor-pointer font-bold"
-            title="アラート一覧を表示"
+            title={`納期超過・発注漏れ・納期未設定のある伝票（${highSeverityCount}件）`}
           >
             <Bell className="w-3.5 h-3.5 text-rose-600" />
-            <span className="text-xs font-mono">{totalAlertsCount}</span>
-            {highSeverityCount > 0 && (
-              <span className="text-[10px] px-1.5 py-0.2 bg-rose-600 text-white rounded font-bold shadow-2xs">
-                高:{highSeverityCount}
-              </span>
-            )}
+            <span className="text-xs">要対応</span>
+            <span className="text-xs font-mono">{highSeverityCount}件</span>
           </button>
 
           {/* Generated At timestamp / 最終取得成功時刻（要件3） */}

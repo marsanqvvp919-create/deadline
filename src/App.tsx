@@ -37,6 +37,7 @@ import { CoolMissingView } from './components/CoolMissingView';
 import { KantoCustomsNgView } from './components/KantoCustomsNgView';
 import { SheetUnmatchedView, fetchSheetUnmatched } from './components/SheetUnmatchedView';
 import { SheetImportView } from './components/SheetImportView';
+import { ActionListView } from './components/ActionListView';
 import { BudgetSettingsModal } from './components/BudgetSettingsModal';
 import { DailyDigestModal } from './components/DailyDigestModal';
 import { ClinicProductStatusDrawer } from './components/ClinicProductStatusDrawer';
@@ -441,7 +442,8 @@ export default function App() {
 
   // アラート総数および高重要度数
   const totalAlertsCount = filteredAlerts.length;
-  const highSeverityCount = filteredAlerts.filter((a) => a.severity === '高').length;
+  // 要対応＝納期超過・発注漏れ・納期未設定のアラートがある伝票の数（明細の数ではなく伝票の数）
+  const highSeverityCount = new Set(filteredAlerts.filter((a) => a.severity === '高').map((a) => a.orderId)).size;
 
   // 最長納期超過 伝票・明細数の計算（isLineDelayed統一: ○件○明細）
   const overdueCounts = useMemo(() => {
@@ -616,6 +618,14 @@ export default function App() {
       label: 'ダッシュボード',
       icon: LayoutDashboard,
       badge: null,
+    },
+    {
+      id: 'alerts' as ViewTab,
+      group: 'today',
+      label: '要対応リスト',
+      icon: AlertTriangle,
+      badge: highSeverityCount > 0 ? `${highSeverityCount}` : null,
+      badgeColor: 'bg-rose-600 text-white font-bold',
     },
     {
       id: 'procurement' as ViewTab,
@@ -1111,6 +1121,10 @@ export default function App() {
           )}
 
           {activeTab === 'sheet_import' && <SheetImportView />}
+
+          {activeTab === 'alerts' && (
+            <ActionListView orders={filteredOrders} alerts={filteredAlerts} onSelectOrder={handleOpenDetail} />
+          )}
 
           {activeTab === 'inventory_management' && (
             <InventoryManagementView
