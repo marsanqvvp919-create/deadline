@@ -15,8 +15,12 @@ export function detectCarrier(trackingNo?: string, courierHint?: string): Tracki
 
   // 番号の形が決め手（楽楽販売の配送業者の入力違いがあるため）：12・15桁は FedEx、10桁は DHL。形で決まらないときだけ配送業者を見る
   const digitsOnly = /^\d+$/.test(cleanNo);
-  const byFormat = digitsOnly && (cleanNo.length === 12 || cleanNo.length === 15) ? 'fedex' : digitsOnly && cleanNo.length === 10 ? 'dhl' : null;
-  const code = byFormat || (hint.includes('fedex') ? 'fedex' : hint.includes('dhl') ? 'dhl' : null);
+  const hintedIntl = hint.includes('fedex') || hint.includes('dhl');
+  // 12桁はヤマト・佐川など国内の宅配便にもある。配送業者が FedEx/DHL でない12桁は、7・8始まりだけ FedEx とみなす
+  const domestic12 = digitsOnly && cleanNo.length === 12 && !hintedIntl && !/^[78]/.test(cleanNo);
+  const byFormat =
+    digitsOnly && ((cleanNo.length === 12 && !domestic12) || cleanNo.length === 15) ? 'fedex' : digitsOnly && cleanNo.length === 10 ? 'dhl' : null;
+  const code = domestic12 ? null : byFormat || (hint.includes('fedex') ? 'fedex' : hint.includes('dhl') ? 'dhl' : null);
   if (code === 'fedex') {
     return { carrier: 'FedEx', carrierCode: 'fedex', trackingUrl: `https://www.fedex.com/fedextrack/?trknbr=${cleanNo}` };
   }

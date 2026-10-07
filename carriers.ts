@@ -38,11 +38,15 @@ export const NORMALIZED_LABEL: Record<NormalizedStatus, string> = {
 export function detectCarrier(trackingNo: string, courierHint?: string): CarrierId | null {
   // 番号の形を優先（楽楽販売の配送業者に入力違いがあるため）。形で決まらないときだけ配送業者を見る
   const clean = trackingNo.replace(/[\s-]/g, '');
-  if (/^\d+$/.test(clean)) {
-    if (clean.length === 12 || clean.length === 15) return 'fedex';
-    if (clean.length === 10) return 'dhl';
-  }
   const hint = (courierHint || '').toLowerCase();
+  const hintedIntl = hint.includes('fedex') || hint.includes('dhl');
+  if (/^\d+$/.test(clean)) {
+    // 12桁はヤマト・佐川など国内の宅配便にもある。配送業者が FedEx/DHL でない12桁は、FedEx の番号帯（7・8始まり）だけ FedEx とみなす
+    if (clean.length === 12 && (hintedIntl || /^[78]/.test(clean))) return 'fedex';
+    if (clean.length === 15) return 'fedex';
+    if (clean.length === 10) return 'dhl';
+    if (clean.length === 12) return null;
+  }
   if (hint.includes('fedex')) return 'fedex';
   if (hint.includes('dhl')) return 'dhl';
   return null;

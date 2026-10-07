@@ -58,7 +58,7 @@ const NOW_STATUS: Record<NowStatus, { label: string; hint: string; color: string
   domestic: { label: '国内配送中', hint: '通関が終わり、配達前', color: 'bg-teal-600 text-white', soft: 'bg-teal-50 text-teal-800 border-teal-200', border: 'border-l-teal-500', Icon: Truck },
   delivered: { label: '配達完了', hint: '配送会社または楽楽販売で配達完了', color: 'bg-emerald-600 text-white', soft: 'bg-emerald-50 text-emerald-800 border-emerald-200', border: 'border-l-emerald-500', Icon: CheckCircle2 },
   no_info: { label: '未取得', hint: 'APIでつないでいる配送会社の出荷で、まだ状況を取得していない（DHL は2時間ごとに自動で取得）', color: 'bg-slate-200 text-slate-700', soft: 'bg-slate-50 text-slate-600 border-slate-200', border: 'border-l-slate-300', Icon: HelpCircle },
-  not_linked: { label: '追跡未連携', hint: 'FedEx など、まだAPIでつないでいない配送会社の出荷（追跡番号のリンクから確認）', color: 'bg-slate-100 text-slate-600', soft: 'bg-slate-50 text-slate-500 border-slate-200', border: 'border-l-slate-200', Icon: Link2Off },
+  not_linked: { label: '追跡未連携', hint: 'ヤマト・佐川などAPIでつないでいない配送会社の出荷、または追跡番号の形から配送会社がわからない出荷', color: 'bg-slate-100 text-slate-600', soft: 'bg-slate-50 text-slate-500 border-slate-200', border: 'border-l-slate-200', Icon: Link2Off },
 };
 const NOW_ORDER: NowStatus[] = ['attention', 'waiting', 'pickup', 'abroad', 'customs', 'domestic', 'delivered', 'no_info', 'not_linked'];
 
@@ -155,7 +155,9 @@ export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: Shipmen
     today.setHours(0, 0, 0, 0);
     return (shipments as TrackingShipment[])
       .map((s) => {
-        const c = carrierStatus[digitsOf(s.trackingNo)];
+        // 配送会社で「見つからない」だった番号は、状況がないものとして扱う
+        const raw = carrierStatus[digitsOf(s.trackingNo)];
+        const c = raw && !(raw.status === 'unknown' && raw.error) ? raw : undefined;
         const stage = stageOf(s, c);
         // いまAPIでつないでいるのは DHL だけ（FedEx は鍵を入れたら同じように取得する）
         const linked = carrierOf(s.courier, s.trackingNo).label === 'DHL' || (carrierOf(s.courier, s.trackingNo).label === 'FedEx' && fedexLinked);
