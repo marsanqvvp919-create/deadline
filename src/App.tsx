@@ -1108,7 +1108,8 @@ export default function App() {
 
           {activeTab === 'arrival_tracking' && (
             <ArrivalTrackingView
-              orders={filteredOrders}
+              orders={deliveryData.orders}
+              shipments={shipments}
             />
           )}
         </main>

@@ -83,16 +83,14 @@ export function saveLocalSuppliers(suppliers: SupplierItem[]) {
 }
 
 export function enrichOrdersWithShipments(orders: Order[], shipments: ShipmentItem[]): Order[] {
+  // 受注IDが一致する出荷だけを結びつける（以前はクリニック名でも結びつけており、別の受注の出荷情報が付くことがあった）
   const mapByOrder = new Map<string, ShipmentItem>();
-  const mapByCustomer = new Map<string, ShipmentItem>();
-
   shipments.forEach((s) => {
     if (s.orderId) mapByOrder.set(s.orderId, s);
-    if (s.customerName) mapByCustomer.set(s.customerName, s);
   });
 
   return orders.map((o) => {
-    const s = mapByOrder.get(o.orderId) || mapByCustomer.get(o.customerName);
+    const s = mapByOrder.get(o.orderId);
     if (!s) return o;
     return {
       ...o,

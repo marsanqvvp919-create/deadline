@@ -1,309 +1,266 @@
-import React, { useState, useEffect } from 'react';
-import { Order } from '../types';
-import {
-  Building,
-  Truck,
-  Search,
-  CheckCircle2,
-  Box,
-  Plane,
-  ArrowRight,
-  Globe,
-  MapPin,
-  Clock,
-  Sliders
-} from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { Order, ShipmentItem } from '../types';
+import { getConfiguredUrls } from '../api';
+import { openRakurakuWithCopiedId } from '../utils';
+import { Search, Truck, ExternalLink, Snowflake, Copy } from 'lucide-react';
 
-interface ArrivalTrackingViewProps {
-  orders: Order[];
+// 出荷管理（101270）の実データから、出荷ごとに「今どの段階か」を表示する。
+// 段階は楽楽販売の項目（ステータス・輸入確認ステータス・通関完了日・配達完了日）から決める。
+
+type Stage = 'waiting' | 'import_check' | 'in_transit' | 'domestic' | 'delivered';
+
+const STAGES: { id: Stage; label: string; hint: string }[] = [
+  { id: 'waiting', label: '出荷待ち', hint: 'ステータスが出荷待ち' },
+  { id: 'import_check', label: '輸入確認中', hint: '輸入確認ステータスが交付済み以外' },
+  { id: 'in_transit', label: '輸送・通関中', hint: '出荷済みで通関完了日が空欄' },
+  { id: 'domestic', label: '国内配送中', hint: '通関完了日あり・配達完了日が空欄' },
+  { id: 'delivered', label: '配達完了', hint: '配達完了日あり' },
+];
+
+const IMPORT_IN_PROGRESS = ['下書き', '申請中', '決済待ち', '交付待ち', '差戻し'];
+
+type TrackingShipment = ShipmentItem & {
+  courier?: string;
+  shipStatus?: string;
+  deliveredDate?: string;
+  customsClearedDate?: string;
+  deliveryEta?: string;
+  customsEta?: string;
+  nextDeadline?: string;
+  handlingMemo?: string;
+  warehouseShippedDate?: string;
+};
+
+const blank = (v?: string) => !v || v === '—';
+
+function stageOf(s: TrackingShipment): Stage {
+  if (!blank(s.deliveredDate)) return 'delivered';
+  if ((s.shipStatus || '').includes('出荷待ち')) return 'waiting';
+  if (!blank(s.customsClearedDate)) return 'domestic';
+  if (IMPORT_IN_PROGRESS.includes(s.importStatus)) return 'import_check';
+  return 'in_transit';
 }
 
-const STORAGE_SHIPMENT_TRACKING_KEY = 'nouki_shipment_tracking_v1';
-
-export type TrackingStage = 'preparing' | 'shipping' | 'customs' | 'arrived';
-
-export interface ShipmentFlowItem {
-  orderId: string;
-  customerName: string;
-  salesRep: string;
-  orderDate: string;
-  warehouse: string;
-  warehouseCode: 'korea' | 'singapore';
-  status: string;
-  lines: Array<{ productId: string; productName: string; quantity: number }>;
-  trackingStage: TrackingStage;
+function toDate(v?: string): Date | null {
+  if (blank(v)) return null;
+  const d = new Date(String(v).replace(/\//g, '-').slice(0, 10) + 'T00:00:00');
+  return isNaN(d.getTime()) ? null : d;
 }
 
-export const ArrivalTrackingView: React.FC<ArrivalTrackingViewProps> = ({ orders }) => {
-  const [flowWarehouseFilter, setFlowWarehouseFilter] = useState<'all' | 'korea' | 'singapore'>('all');
-  const [flowStageFilter, setFlowStageFilter] = useState<string>('all');
-  const [flowSearch, setFlowSearch] = useState<string>('');
+function carrierTrackingUrl(courier: string | undefined, trackingNo: string): string | null {
+  const digits = (trackingNo || '').replace(/\D/g, '');
+  if (digits.length < 8) return null;
+  const c = (courier || '').toLowerCase();
+  if (c.includes('fedex')) return `https://www.fedex.com/fedextrack/?trknbr=${digits}`;
+  if (c.includes('dhl')) return `https://www.dhl.com/jp-ja/home/tracking.html?tracking-id=${digits}`;
+  return null;
+}
 
-  // Initialize shipment tracking stages for orders
-  const [shipmentStages, setShipmentStages] = useState<Record<string, TrackingStage>>(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_SHIPMENT_TRACKING_KEY);
-      if (raw) return JSON.parse(raw);
-    } catch {}
-    const initial: Record<string, TrackingStage> = {};
-    orders.slice(0, 50).forEach((ord, idx) => {
-      const stages: TrackingStage[] = ['preparing', 'shipping', 'customs', 'arrived'];
-      initial[ord.orderId] = stages[idx % stages.length];
-    });
-    return initial;
+// 追跡の対象：出荷待ちと、出荷日から45日以内でまだ配達完了していない出荷、直近7日に配達完了した出荷
+const ACTIVE_DAYS = 45;
+const RECENT_DELIVERED_DAYS = 7;
+
+export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: ShipmentItem[] }> = ({ orders, shipments }) => {
+  const [stageFilter, setStageFilter] = useState<Stage | 'all'>('all');
+  const [warehouseFilter, setWarehouseFilter] = useState<string>('all');
+  const [query, setQuery] = useState('');
+  const [copied, setCopied] = useState<string | null>(null);
+  const { rakurakuBaseUrl } = getConfiguredUrls();
+
+  const customerByOrder = useMemo(() => {
+    const m = new Map<string, string>();
+    orders.forEach((o) => m.set(o.orderId, o.customerName));
+    return m;
+  }, [orders]);
+
+  const items = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return (shipments as TrackingShipment[])
+      .map((s) => ({ s, stage: stageOf(s), shipped: toDate(s.warehouseShippedDate) || toDate(s.shippedDate) }))
+      .filter(({ s, stage, shipped }) => {
+        if (stage === 'waiting') return true;
+        if (stage === 'delivered') {
+          const d = toDate(s.deliveredDate);
+          return !!d && (today.getTime() - d.getTime()) / 86400000 <= RECENT_DELIVERED_DAYS;
+        }
+        return !!shipped && (today.getTime() - shipped.getTime()) / 86400000 <= ACTIVE_DAYS;
+      })
+      .map((x) => ({ ...x, customerName: customerByOrder.get(x.s.orderId) || '（クリニック名不明）' }))
+      .sort((a, b) => (b.shipped?.getTime() || 0) - (a.shipped?.getTime() || 0));
+  }, [shipments, customerByOrder]);
+
+  const warehouses = useMemo(
+    () => Array.from(new Set(items.map((i) => i.s.warehouse).filter((w) => !blank(w)))) as string[],
+    [items]
+  );
+
+  const counts = useMemo(() => {
+    const c: Record<Stage, number> = { waiting: 0, import_check: 0, in_transit: 0, domestic: 0, delivered: 0 };
+    items.forEach((i) => c[i.stage]++);
+    return c;
+  }, [items]);
+
+  const visible = items.filter((i) => {
+    if (stageFilter !== 'all' && i.stage !== stageFilter) return false;
+    if (warehouseFilter !== 'all' && i.s.warehouse !== warehouseFilter) return false;
+    const q = query.trim().toLowerCase();
+    if (!q) return true;
+    return [i.customerName, i.s.shipmentId, i.s.orderId, i.s.trackingNo].some((v) => (v || '').toLowerCase().includes(q));
   });
 
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_SHIPMENT_TRACKING_KEY, JSON.stringify(shipmentStages));
-    } catch {}
-  }, [shipmentStages]);
-
-  const advanceStage = (orderId: string) => {
-    setShipmentStages((prev) => {
-      const current = prev[orderId] || 'preparing';
-      let next: TrackingStage = 'preparing';
-      if (current === 'preparing') next = 'shipping';
-      else if (current === 'shipping') next = 'customs';
-      else if (current === 'customs') next = 'arrived';
-      else next = 'arrived';
-      return { ...prev, [orderId]: next };
-    });
-  };
-
-  // Map orders to shipment flow items
-  const shipmentFlows: ShipmentFlowItem[] = orders.slice(0, 50).map((ord, idx) => {
-    const isKorea = idx % 2 === 0;
-    const stage = shipmentStages[ord.orderId] || (idx % 4 === 0 ? 'arrived' : idx % 4 === 1 ? 'shipping' : idx % 4 === 2 ? 'customs' : 'preparing');
-    return {
-      orderId: ord.orderId,
-      customerName: ord.customerName,
-      salesRep: ord.salesRep,
-      orderDate: ord.orderDate,
-      warehouse: isKorea ? '韓国倉庫 (KR)' : 'シンガポール倉庫 (SIN)',
-      warehouseCode: isKorea ? 'korea' : 'singapore',
-      status: ord.orderState,
-      lines: ord.lines.map(l => ({ productId: l.productId, productName: l.productName, quantity: l.quantity })),
-      trackingStage: stage,
-    };
-  });
-
-  const filteredShipmentFlows = shipmentFlows.filter((flow) => {
-    if (flowWarehouseFilter !== 'all' && flow.warehouseCode !== flowWarehouseFilter) return false;
-    if (flowStageFilter !== 'all' && flow.trackingStage !== flowStageFilter) return false;
-    if (flowSearch.trim() !== '') {
-      const q = flowSearch.toLowerCase();
-      const matchOrder = flow.orderId.toLowerCase().includes(q) || flow.customerName.toLowerCase().includes(q);
-      const matchItem = flow.lines.some(l => l.productName.toLowerCase().includes(q) || l.productId.toLowerCase().includes(q));
-      if (!matchOrder && !matchItem) return false;
-    }
-    return true;
-  });
-
-  const totalCount = shipmentFlows.length;
-  const preparingCount = shipmentFlows.filter(f => f.trackingStage === 'preparing').length;
-  const transitCount = shipmentFlows.filter(f => f.trackingStage === 'shipping' || f.trackingStage === 'customs').length;
-  const arrivedCount = shipmentFlows.filter(f => f.trackingStage === 'arrived').length;
-
-  const stageMeta: Record<TrackingStage, { label: string; color: string; bg: string; icon: any }> = {
-    preparing: { label: '出荷準備中', color: 'text-amber-700 border-amber-300 bg-amber-50', bg: 'bg-amber-500', icon: Box },
-    shipping: { label: '国際輸送中', color: 'text-blue-700 border-blue-300 bg-blue-50', bg: 'bg-blue-500', icon: Plane },
-    customs: { label: '通関・国内配送中', color: 'text-indigo-700 border-indigo-300 bg-indigo-50', bg: 'bg-indigo-500', icon: Truck },
-    arrived: { label: 'クリニック到着完了', color: 'text-emerald-700 border-emerald-300 bg-emerald-50', bg: 'bg-emerald-500', icon: CheckCircle2 },
+  const copyAndOpen = (shipmentId: string) => {
+    openRakurakuWithCopiedId(rakurakuBaseUrl, shipmentId);
+    setCopied(shipmentId);
+    setTimeout(() => setCopied(null), 2000);
   };
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-150">
-      {/* Header Banner */}
-      <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl text-white">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="flex items-start gap-4">
-            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-500 to-blue-600 flex items-center justify-center shrink-0 shadow-lg">
-              <Truck className="w-7 h-7 text-white" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2.5 flex-wrap">
-                <h1 className="text-xl font-bold tracking-tight">
-                  直近の流通トランザクション & 到着トラッキング
-                </h1>
-              </div>
-              <p className="text-xs text-slate-300 mt-2 leading-relaxed max-w-3xl">
-                韓国倉庫 (KR) およびシンガポール倉庫 (SIN) から各クリニックへの出荷、国際輸送、通関・国内配送を経て商品が到着するまでの全ステップをリアルタイムで追跡・管理します。
-              </p>
-            </div>
-          </div>
+    <div className="space-y-5">
+      <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-4">
+        <div>
+          <h2 className="text-lg font-bold text-slate-900">到着トラッキング</h2>
+          <p className="text-xs text-slate-500 mt-1">
+            楽楽販売の出荷管理から、出荷ごとに今どの段階かを表示します。対象は出荷待ちと、出荷から{ACTIVE_DAYS}日以内でまだ配達完了していない出荷、直近{RECENT_DELIVERED_DAYS}日に配達完了した出荷です。
+          </p>
         </div>
-
-        {/* KPI Cards */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-6 mt-6 border-t border-slate-800">
-          <div className="bg-slate-800/60 border border-slate-700/80 p-3.5 rounded-2xl">
-            <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
-              <span>追跡中総件数</span>
-              <span className="w-2 h-2 rounded-full bg-blue-400" />
-            </div>
-            <span className="text-2xl font-extrabold font-mono text-white">{totalCount}</span>
-            <span className="text-[10px] text-slate-400 block mt-0.5">直近の流通トランザクション</span>
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+          {STAGES.map((st) => (
+            <button
+              key={st.id}
+              type="button"
+              title={st.hint}
+              onClick={() => setStageFilter(stageFilter === st.id ? 'all' : st.id)}
+              className={`text-left p-3 rounded-xl border ${stageFilter === st.id ? 'border-slate-900 bg-slate-50' : 'border-slate-200'}`}
+            >
+              <span className="text-[11px] font-semibold text-slate-600 block">{st.label}</span>
+              <span className="text-2xl font-bold font-mono text-slate-900">{counts[st.id]}</span>
+              <span className="text-[10px] text-slate-500 ml-1">件</span>
+            </button>
+          ))}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={warehouseFilter}
+            onChange={(e) => setWarehouseFilter(e.target.value)}
+            className="px-3 py-2 text-xs border border-slate-300 rounded-xl bg-white"
+          >
+            <option value="all">すべての出荷元</option>
+            {warehouses.map((w) => (
+              <option key={w} value={w}>
+                {w}
+              </option>
+            ))}
+          </select>
+          <div className="relative flex-1 min-w-[200px] max-w-sm">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="クリニック名・出荷ID・受注ID・追跡番号"
+              className="w-full pl-9 pr-3 py-2 text-xs border border-slate-300 rounded-xl bg-white"
+            />
           </div>
-
-          <div className="bg-slate-800/60 border border-slate-700/80 p-3.5 rounded-2xl">
-            <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
-              <span>出荷準備中</span>
-              <span className="w-2 h-2 rounded-full bg-amber-400" />
-            </div>
-            <span className="text-2xl font-extrabold font-mono text-amber-300">{preparingCount}</span>
-            <span className="text-[10px] text-slate-400 block mt-0.5">倉庫内ピッキング・梱包</span>
-          </div>
-
-          <div className="bg-slate-800/60 border border-slate-700/80 p-3.5 rounded-2xl">
-            <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
-              <span>輸送・通関中</span>
-              <span className="w-2 h-2 rounded-full bg-indigo-400" />
-            </div>
-            <span className="text-2xl font-extrabold font-mono text-indigo-300">{transitCount}</span>
-            <span className="text-[10px] text-slate-400 block mt-0.5">国際便・通関手続き中</span>
-          </div>
-
-          <div className="bg-slate-800/60 border border-slate-700/80 p-3.5 rounded-2xl">
-            <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
-              <span>クリニック到着完了</span>
-              <span className="w-2 h-2 rounded-full bg-emerald-400" />
-            </div>
-            <span className="text-2xl font-extrabold font-mono text-emerald-300">{arrivedCount}</span>
-            <span className="text-[10px] text-slate-400 block mt-0.5">納品・検品完了済み</span>
-          </div>
+          <span className="text-xs text-slate-500">{visible.length}件</span>
         </div>
       </div>
 
-      {/* Filter & Search Bar */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-3">
-        <div className="flex items-center gap-2 w-full sm:w-auto overflow-x-auto pb-2 sm:pb-0">
-          <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700 mr-2">
-            <Sliders className="w-4 h-4 text-indigo-600" /> 絞り込み:
-          </div>
-          <select
-            value={flowWarehouseFilter}
-            onChange={(e) => setFlowWarehouseFilter(e.target.value as any)}
-            className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none"
-          >
-            <option value="all">全出荷元倉庫</option>
-            <option value="korea">韓国倉庫 (KR)</option>
-            <option value="singapore">シンガポール倉庫 (SIN)</option>
-          </select>
-
-          <select
-            value={flowStageFilter}
-            onChange={(e) => setFlowStageFilter(e.target.value)}
-            className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none"
-          >
-            <option value="all">全配送ステージ</option>
-            <option value="preparing">出荷準備中</option>
-            <option value="shipping">国際輸送中</option>
-            <option value="customs">通関・国内配送中</option>
-            <option value="arrived">クリニック到着完了</option>
-          </select>
+      {visible.length === 0 ? (
+        <div className="bg-white border border-slate-200 rounded-2xl p-8 text-center text-sm text-slate-500">
+          {shipments.length === 0 ? '出荷管理のデータを読み込めていません' : '該当する出荷はありません'}
         </div>
-
-        <div className="relative w-full sm:w-72">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-          <input
-            type="text"
-            value={flowSearch}
-            onChange={(e) => setFlowSearch(e.target.value)}
-            placeholder="伝票ID・クリニック名で検索..."
-            className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
-          />
-        </div>
-      </div>
-
-      {/* Transactions / Tracking Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {filteredShipmentFlows.map((flow) => {
-          const meta = stageMeta[flow.trackingStage];
-          const StageIcon = meta.icon;
-
-          return (
-            <div key={flow.orderId} className="bg-white border border-slate-200 p-4 rounded-2xl space-y-3.5 shadow-xs hover:shadow-md transition flex flex-col justify-between">
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold font-mono text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-lg border border-indigo-200">
-                    {flow.orderId}
-                  </span>
-                  <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${meta.color}`}>
-                    <StageIcon className="w-3.5 h-3.5" /> {meta.label}
-                  </span>
-                </div>
-
-                <div className="space-y-1.5 text-xs text-slate-700">
-                  <div className="flex items-center gap-1.5 font-bold text-slate-900">
-                    <Building className="w-3.5 h-3.5 text-indigo-600" />
-                    <span className="truncate">{flow.customerName}</span>
-                  </div>
-
-                  <div className="flex justify-between text-[11px] text-slate-500 bg-slate-50 p-2 rounded-xl border border-slate-200">
-                    <span>出荷元: <strong className="text-slate-800">{flow.warehouse}</strong></span>
-                    <span>受注日: {flow.orderDate}</span>
-                  </div>
-
-                  {/* Products preview */}
-                  <div className="space-y-1 pt-1">
-                    <span className="text-[10px] text-slate-400 font-bold block">対象商品 ({flow.lines.length}品目):</span>
-                    <div className="max-h-24 overflow-y-auto space-y-1 pr-1">
-                      {flow.lines.map((l, i) => (
-                        <div key={i} className="text-[11px] text-slate-600 flex justify-between bg-slate-50 px-2 py-1 rounded border border-slate-100">
-                          <span className="truncate">{l.productName}</span>
-                          <span className="font-mono font-bold shrink-0 ml-2">x{l.quantity}</span>
-                        </div>
-                      ))}
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {visible.slice(0, 300).map(({ s, stage, customerName }) => {
+            const stageIndex = STAGES.findIndex((x) => x.id === stage);
+            const trackUrl = carrierTrackingUrl(s.courier, s.trackingNo);
+            const coolPending = s.isCoolMissing;
+            return (
+              <div key={s.shipmentId} className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs flex flex-col gap-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="font-bold text-sm text-slate-900 truncate">{customerName}</div>
+                    <div className="text-[11px] text-slate-500 font-mono">
+                      {s.shipmentId} ／ 受注 {s.orderId}
                     </div>
                   </div>
-                </div>
-              </div>
-
-              {/* Progress bar and advance button */}
-              <div className="pt-3 border-t border-slate-100 space-y-2">
-                <div className="flex items-center justify-between text-[10px] font-mono text-slate-500">
-                  <span>出荷準備 ➔ 輸送中 ➔ 通関 ➔ 到着</span>
-                  <span className="font-bold text-slate-700">
-                    {flow.trackingStage === 'preparing' && 'ステータス: 1/4'}
-                    {flow.trackingStage === 'shipping' && 'ステータス: 2/4'}
-                    {flow.trackingStage === 'customs' && 'ステータス: 3/4'}
-                    {flow.trackingStage === 'arrived' && '到着完了 (4/4)'}
+                  <span className="px-2 py-0.5 rounded-md text-[11px] font-bold bg-slate-900 text-white shrink-0">
+                    {STAGES[stageIndex].label}
                   </span>
                 </div>
 
-                <div className="w-full bg-slate-200 h-2 rounded-full overflow-hidden flex">
-                  <div className={`h-full transition-all duration-300 ${
-                    flow.trackingStage === 'preparing' ? 'w-1/4 bg-amber-500' :
-                    flow.trackingStage === 'shipping' ? 'w-2/4 bg-blue-500' :
-                    flow.trackingStage === 'customs' ? 'w-3/4 bg-indigo-500' : 'w-full bg-emerald-500'
-                  }`} />
+                {/* 段階のバー */}
+                <div>
+                  <div className="flex gap-1">
+                    {STAGES.map((st, i) => (
+                      <div
+                        key={st.id}
+                        className={`h-1.5 flex-1 rounded-full ${i <= stageIndex ? (stage === 'delivered' ? 'bg-emerald-500' : 'bg-blue-600') : 'bg-slate-200'}`}
+                      />
+                    ))}
+                  </div>
+                  <div className="flex justify-between text-[10px] text-slate-400 mt-1">
+                    {STAGES.map((st) => (
+                      <span key={st.id}>{st.label}</span>
+                    ))}
+                  </div>
                 </div>
 
-                <div className="flex items-center justify-between pt-1">
-                  <span className="text-[11px] text-slate-500 font-medium">担当営業: {flow.salesRep}</span>
-                  {flow.trackingStage !== 'arrived' ? (
-                    <button
-                      onClick={() => advanceStage(flow.orderId)}
-                      className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-[11px] font-bold transition cursor-pointer shadow-xs flex items-center gap-1"
-                    >
-                      次の段階へ進む <ArrowRight className="w-3 h-3" />
-                    </button>
-                  ) : (
-                    <span className="text-xs font-bold text-emerald-600 flex items-center gap-1">
-                      <CheckCircle2 className="w-3.5 h-3.5" /> 到着確認済み
+                <div className="text-[11px] text-slate-600 grid grid-cols-2 gap-x-3 gap-y-1">
+                  <span>出荷元 {blank(s.warehouse) ? '—' : s.warehouse}</span>
+                  <span>到着空港 {blank(s.arrivalAirport) ? '—' : s.arrivalAirport}</span>
+                  <span>出荷日 {blank(s.warehouseShippedDate) ? (blank(s.shippedDate) ? '—' : s.shippedDate) : s.warehouseShippedDate}</span>
+                  <span>輸入確認 {blank(s.importStatus) ? '—' : s.importStatus}</span>
+                  {!blank(s.customsEta) && stageIndex < 3 && <span>通関予定 {s.customsEta}</span>}
+                  {!blank(s.deliveryEta) && stageIndex < 4 && <span>配達予定 {s.deliveryEta}</span>}
+                  {!blank(s.deliveredDate) && <span className="text-emerald-700 font-bold">配達完了 {s.deliveredDate}</span>}
+                  {!blank(s.nextDeadline) && <span className="text-amber-700 font-bold">次の期限 {s.nextDeadline}</span>}
+                </div>
+
+                {coolPending && (
+                  <div className="text-[11px] font-bold text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1 flex items-center gap-1">
+                    <Snowflake className="w-3 h-3" />
+                    クール手配が未完了（申請 {s.coolApplicationStatus}／委任状 {s.powerOfAttorneyStatus}／伝票 {s.slipStatus}）
+                  </div>
+                )}
+                {!blank(s.handlingMemo) && <div className="text-[11px] text-slate-600 bg-slate-50 rounded-lg px-2 py-1">{s.handlingMemo}</div>}
+
+                <div className="mt-auto flex items-center justify-between gap-2 pt-1">
+                  <span className="text-[11px] text-slate-500 flex items-center gap-1 min-w-0">
+                    <Truck className="w-3 h-3 shrink-0" />
+                    <span className="truncate">
+                      {s.courier || '配送業者未設定'} {blank(s.trackingNo) ? '' : s.trackingNo}
                     </span>
-                  )}
+                  </span>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {trackUrl && (
+                      <a
+                        href={trackUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-2 py-1 rounded bg-white border border-slate-300 text-[11px] font-bold text-slate-700 flex items-center gap-1"
+                      >
+                        配送状況 <ExternalLink className="w-3 h-3" />
+                      </a>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => copyAndOpen(s.shipmentId)}
+                      className="px-2 py-1 rounded bg-slate-900 text-white text-[11px] font-bold flex items-center gap-1"
+                      title="出荷IDをコピーして楽楽販売を開きます"
+                    >
+                      <Copy className="w-3 h-3" />
+                      {copied === s.shipmentId ? 'コピー済み' : '楽楽販売で開く'}
+                    </button>
+                  </div>
                 </div>
               </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {filteredShipmentFlows.length === 0 && (
-        <div className="text-center py-16 bg-white border border-slate-200 rounded-2xl text-slate-400 text-xs shadow-xs">
-          条件に一致する流通トランザクションはありません。
+            );
+          })}
         </div>
+      )}
+      {visible.length > 300 && (
+        <p className="text-xs text-slate-500 text-center">表示は新しい順に300件までです。出荷元や検索で絞り込んでください。</p>
       )}
     </div>
   );

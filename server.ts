@@ -283,6 +283,14 @@ const SHIPMENT_FIELD_MAP: Record<string, string[]> = {
   shipStatus: ['110188', 'ステータス', '出荷状態', 'shipStatus'],
   // 倉庫から出た日（出荷日は楽楽販売の入力日が入ることがあるため別項目で持つ）
   warehouseShippedDate: ['倉庫出荷日', 'warehouseShippedDate'],
+  // 到着トラッキング用の日付・メモ
+  deliveredDate: ['配達完了日'],
+  customsClearedDate: ['通関完了日'],
+  deliveryEta: ['配達 予定日', '配達予定日'],
+  customsEta: ['通関 予定日', '通関予定日'],
+  nextDeadline: ['次の期限'],
+  vendorShipDate: ['ベンダー出荷日'],
+  handlingMemo: ['対応メモ'],
   // 明細の受注ID・商品ID（ご注文管理の明細と結びつけるため）
   lineOrderId: ['受注ID（明細）'],
   lineProductId: ['商品ID'],
@@ -351,6 +359,13 @@ function transformCsvToShipments(csvText: string): any[] {
     const shipStatus = getVal(row, 'shipStatus') || '';
     const courier = getVal(row, 'courier') || '';
     const warehouseShippedDate = getVal(row, 'warehouseShippedDate') || '';
+    const deliveredDate = getVal(row, 'deliveredDate') || '';
+    const customsClearedDate = getVal(row, 'customsClearedDate') || '';
+    const deliveryEta = getVal(row, 'deliveryEta') || '';
+    const customsEta = getVal(row, 'customsEta') || '';
+    const nextDeadline = getVal(row, 'nextDeadline') || '';
+    const vendorShipDate = getVal(row, 'vendorShipDate') || '';
+    const handlingMemo = getVal(row, 'handlingMemo') || '';
     const lineRef = {
       orderId: getVal(row, 'lineOrderId') || orderId,
       productId: getVal(row, 'lineProductId'),
@@ -388,6 +403,13 @@ function transformCsvToShipments(csvText: string): any[] {
       shipStatus,
       courier,
       warehouseShippedDate,
+      deliveredDate,
+      customsClearedDate,
+      deliveryEta,
+      customsEta,
+      nextDeadline,
+      vendorShipDate,
+      handlingMemo,
       lineRef,
       isKantoNg,
       isCoolMissing,
