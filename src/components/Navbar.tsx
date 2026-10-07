@@ -252,10 +252,10 @@ export const Navbar: React.FC<NavbarProps> = ({
             )}
           </button>
 
-          {/* Generated At timestamp */}
-          <div className="hidden lg:flex items-center gap-1.5 text-[11px] text-slate-600 bg-slate-50 px-2.5 py-1.5 rounded-lg border border-slate-300 shadow-2xs">
-            <Clock className="w-3.5 h-3.5 text-slate-400" />
-            <span>更新: {formatDateTime(generatedAt)}</span>
+          {/* Generated At timestamp (同期時刻表示) */}
+          <div className="flex items-center gap-1.5 text-[11px] font-mono font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200/80 px-2.5 py-1.5 rounded-lg border border-slate-300 shadow-2xs">
+            <Clock className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+            <span className="whitespace-nowrap">同期: {formatDateTime(generatedAt)}</span>
           </div>
 
           {/* Manual Refresh tactile button (Phase 2 Requirement) */}

@@ -59,6 +59,52 @@ export interface Order {
   unpaidBalance?: number;             // 請求残高（未回収額）
   billingStatus?: '未請求' | '請求済' | '一部入金' | '入金済';
   isOverdueReceivable?: boolean;      // 支払期日を過ぎた未入金フラグ
+
+  // 出荷管理（dbSchemaId: 101270）連携項目
+  shipmentId?: string;                // 出荷ID
+  importStatus?: string;              // 輸入確認ステータス
+  arrivalAirport?: string;            // 到着空港
+  coolApplicationStatus?: string;     // クール申請
+  powerOfAttorneyStatus?: string;     // 委任状
+  slipStatus?: string;                // 伝票
+  currentLocation?: string;           // 現在地
+  customsStatus?: string;             // 通関ステータス
+  isKantoNg?: boolean;                // 通関NGフラグ
+  isCoolMissing?: boolean;            // クール手配漏れフラグ
+}
+
+export interface ShipmentItem {
+  shipmentId: string;
+  orderId: string;
+  customerName: string;
+  productId: string;
+  productName: string;
+  quantity: number;
+  trackingNo: string;
+  carrier?: string;
+  shippedDate?: string;
+  arrivalAirport: string;
+  importStatus: string;
+  coolApplicationStatus: string;
+  powerOfAttorneyStatus: string;
+  slipStatus: string;
+  currentLocation: string;
+  customsStatus: string;
+  isKantoNg: boolean;
+  isCoolMissing: boolean;
+  memo?: string;
+  updatedAt?: string;
+}
+
+export interface SupplierItem {
+  supplierId: string;
+  supplierName: string;
+  country?: string;
+  leadTimeDays?: number;
+  contactPerson?: string;
+  email?: string;
+  phone?: string;
+  status?: string;
 }
 
 export interface AlertItem {

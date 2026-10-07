@@ -31,12 +31,17 @@ import { ProductMasterView } from './components/ProductMasterView';
 import { ClinicMasterView } from './components/ClinicMasterView';
 import { InventoryManagementView } from './components/InventoryManagementView';
 import { ArrivalTrackingView } from './components/ArrivalTrackingView';
+import { CustomsManagementView } from './components/CustomsManagementView';
+import { CoolMissingView } from './components/CoolMissingView';
+import { KantoCustomsNgView } from './components/KantoCustomsNgView';
+import { UnmatchedCustomsView } from './components/UnmatchedCustomsView';
 import { BudgetSettingsModal } from './components/BudgetSettingsModal';
 import { DailyDigestModal } from './components/DailyDigestModal';
 import { ClinicProductStatusDrawer } from './components/ClinicProductStatusDrawer';
-import { getLocalClinics } from './api';
+import { getLocalClinics, getLocalShipments } from './api';
 import { getSalesRepsList } from './utils/salesRepMapping';
 import { isShippingOrFee } from './utils';
+import { isOrderDelayed } from './utils/delayCalculation';
 import {
   LayoutDashboard,
   ShoppingCart,
@@ -64,7 +69,10 @@ import {
   ShieldAlert,
   Trophy,
   RefreshCw,
-  Clock
+  Clock,
+  Plane,
+  Thermometer,
+  FileWarning
 } from 'lucide-react';
 
 export default function App() {
@@ -296,24 +304,31 @@ export default function App() {
   const totalAlertsCount = filteredAlerts.length;
   const highSeverityCount = filteredAlerts.filter((a) => a.severity === '高').length;
 
-  // 最長納期超過 伝票数の計算
+  // 最長納期超過 伝票数の計算（統一判定関数を使用し、トップカード・営業別・仕入先別の数字を完全一致させる）
   const overdueOrdersCount = useMemo(() => {
     if (!deliveryData) return 0;
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    let count = 0;
-    filteredOrders.forEach((o) => {
-      if (o.deliveredDate || o.orderState === '納品完了') return;
-      const hasOverdue = o.lines.some((l) => {
-        if (l.stage === '出荷完了') return false;
-        if (!l.latestDate) return false;
-        const d = new Date(l.latestDate);
-        return !isNaN(d.getTime()) && d < today;
-      });
-      if (hasOverdue) count++;
-    });
-    return count;
+    return filteredOrders.filter((o) => isOrderDelayed(o)).length;
   }, [deliveryData, filteredOrders]);
+
+  // 出荷管理（101270）データのバッジ集計
+  const localShipmentsList = useMemo(() => getLocalShipments(), [deliveryData]);
+  const coolMissingCount = useMemo(
+    () => localShipmentsList.filter((s) => s.isCoolMissing || s.coolApplicationStatus === '申請漏れ').length,
+    [localShipmentsList]
+  );
+  const kantoNgCount = useMemo(
+    () => localShipmentsList.filter((s) => s.isKantoNg || s.customsStatus.includes('NG')).length,
+    [localShipmentsList]
+  );
+  const unmatchedCustomsCount = useMemo(() => {
+    return localShipmentsList.filter((s) => {
+      const hasOrder = filteredOrders.some((o) => o.orderId === s.orderId);
+      const poaIssue = s.powerOfAttorneyStatus && (s.powerOfAttorneyStatus.includes('未') || s.powerOfAttorneyStatus.includes('不備'));
+      const slipIssue = s.slipStatus && (s.slipStatus.includes('未') || s.slipStatus.includes('不備'));
+      const importIssue = s.importStatus && (s.importStatus.includes('修正') || s.importStatus.includes('不備'));
+      return !hasOrder || poaIssue || slipIssue || importIssue || s.isCoolMissing;
+    }).length;
+  }, [localShipmentsList, filteredOrders]);
 
   // 入金済・未発注 品目数の計算 (送料・各種手数料は除外)
   const paidUnorderedCount = useMemo(() => {
@@ -499,6 +514,34 @@ export default function App() {
       label: '出荷伝票',
       icon: CheckCircle2,
       badge: null,
+    },
+    {
+      id: 'customs_management' as ViewTab,
+      label: '通関・輸入管理 (101270)',
+      icon: Plane,
+      badge: `${localShipmentsList.length}`,
+      badgeColor: 'bg-indigo-600 text-white font-bold',
+    },
+    {
+      id: 'cool_missing' as ViewTab,
+      label: 'クール手配漏れ',
+      icon: Thermometer,
+      badge: coolMissingCount > 0 ? `${coolMissingCount}` : null,
+      badgeColor: 'bg-amber-600 text-white font-bold',
+    },
+    {
+      id: 'kanto_customs_ng' as ViewTab,
+      label: '通関NG',
+      icon: ShieldAlert,
+      badge: kantoNgCount > 0 ? `${kantoNgCount}` : null,
+      badgeColor: 'bg-rose-600 text-white font-bold',
+    },
+    {
+      id: 'unmatched_sheets' as ViewTab,
+      label: '未照合・書類不備',
+      icon: FileWarning,
+      badge: unmatchedCustomsCount > 0 ? `${unmatchedCustomsCount}` : null,
+      badgeColor: 'bg-orange-600 text-white font-bold',
     },
     {
       id: 'inventory_management' as ViewTab,
@@ -876,6 +919,34 @@ export default function App() {
               orders={deliveryData.orders}
               onSelectOrder={handleOpenDetail}
               onOpenClinicStatus={handleOpenClinicStatus}
+            />
+          )}
+
+          {activeTab === 'customs_management' && (
+            <CustomsManagementView
+              orders={filteredOrders}
+              onSelectOrder={handleOpenDetail}
+            />
+          )}
+
+          {activeTab === 'cool_missing' && (
+            <CoolMissingView
+              orders={filteredOrders}
+              onSelectOrder={handleOpenDetail}
+            />
+          )}
+
+          {activeTab === 'kanto_customs_ng' && (
+            <KantoCustomsNgView
+              orders={filteredOrders}
+              onSelectOrder={handleOpenDetail}
+            />
+          )}
+
+          {activeTab === 'unmatched_sheets' && (
+            <UnmatchedCustomsView
+              orders={filteredOrders}
+              onSelectOrder={handleOpenDetail}
             />
           )}
 

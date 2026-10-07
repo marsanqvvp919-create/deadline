@@ -2,6 +2,7 @@
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
+import fs from "fs";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 dotenv.config();
@@ -224,6 +225,145 @@ function transformCsvToBilling(csvText) {
       paymentStatus,
       paymentDate,
       paymentDueDate
+    });
+  }
+  return records;
+}
+var SHIPMENT_FIELD_MAP = {
+  shipmentId: ["110187", "\u51FA\u8377ID", "\u51FA\u8377\u756A\u53F7", "shipmentId"],
+  orderId: ["109974", "\u53D7\u6CE8ID", "\u53D7\u6CE8\u756A\u53F7", "orderId"],
+  customerName: ["110108", "\u30AF\u30EA\u30CB\u30C3\u30AF\u540D", "\u9867\u5BA2\u540D", "customerName"],
+  productId: ["109991", "\u5546\u54C1ID", "\u5546\u54C1\u30B3\u30FC\u30C9", "productId"],
+  productName: ["109992", "\u5546\u54C1\u540D", "productName"],
+  quantity: ["109993", "\u6570\u91CF", "\u51FA\u8377\u6570\u91CF", "quantity"],
+  trackingNo: ["110071", "\u9001\u308A\u72B6\u756A\u53F7", "\u30C8\u30E9\u30C3\u30AD\u30F3\u30B0\u756A\u53F7", "\u8FFD\u8DE1\u756A\u53F7", "trackingNo"],
+  carrier: ["\u914D\u9001\u696D\u8005", "\u904B\u9001\u4F1A\u793E", "\u914D\u9001\u4F1A\u793E", "carrier"],
+  shippedDate: ["110017", "\u51FA\u8377\u65E5", "shippedDate"],
+  arrivalAirport: ["\u5230\u7740\u7A7A\u6E2F", "\u4ED5\u5411\u7A7A\u6E2F", "\u7A7A\u6E2F", "arrivalAirport"],
+  importStatus: ["\u8F38\u5165\u78BA\u8A8D\u30B9\u30C6\u30FC\u30BF\u30B9", "\u8F38\u5165\u78BA\u8A8D", "\u8F38\u5165\u30B9\u30C6\u30FC\u30BF\u30B9", "importStatus"],
+  coolApplicationStatus: ["\u30AF\u30FC\u30EB\u7533\u8ACB", "\u30AF\u30FC\u30EB\u4FBF\u624B\u914D", "\u30AF\u30FC\u30EB\u7533\u8ACB\u30B9\u30C6\u30FC\u30BF\u30B9", "coolApplicationStatus"],
+  powerOfAttorneyStatus: ["\u59D4\u4EFB\u72B6", "\u59D4\u4EFB\u72B6\u30B9\u30C6\u30FC\u30BF\u30B9", "\u901A\u95A2\u59D4\u4EFB\u72B6", "powerOfAttorneyStatus"],
+  slipStatus: ["\u4F1D\u7968", "\u51FA\u8377\u4F1D\u7968", "slipStatus"],
+  currentLocation: ["\u73FE\u5728\u5730", "\u8CA8\u7269\u73FE\u5728\u5730", "\u30B9\u30C6\u30FC\u30BF\u30B9\u73FE\u5728\u5730", "currentLocation"],
+  customsStatus: ["\u901A\u95A2\u30B9\u30C6\u30FC\u30BF\u30B9", "\u901A\u95A2\u72B6\u6CC1", "\u7A0E\u95A2\u72B6\u6CC1", "customsStatus"]
+};
+function transformCsvToShipments(csvText) {
+  const rows = parseCsv(csvText);
+  if (rows.length < 2) return [];
+  const headers = rows[0].map((h) => h.replace(/^["'\s]+|["'\s]+$/g, ""));
+  const headerMap = {};
+  for (const [key, aliases] of Object.entries(SHIPMENT_FIELD_MAP)) {
+    for (const alias of aliases) {
+      const idx = headers.findIndex((h) => h === alias || h.includes(alias));
+      if (idx !== -1) {
+        headerMap[key] = idx;
+        break;
+      }
+    }
+  }
+  const getVal = (row, key) => {
+    const idx = headerMap[key];
+    if (idx !== void 0 && row[idx] !== void 0) {
+      return row[idx].replace(/^["'\s]+|["'\s]+$/g, "");
+    }
+    return "";
+  };
+  const records = [];
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i];
+    if (row.length === 0 || row.every((c) => c === "")) continue;
+    const shipmentId = getVal(row, "shipmentId") || `SHP-${i}`;
+    const orderId = getVal(row, "orderId") || `ORD-${i}`;
+    const customerName = getVal(row, "customerName") || "\u53D6\u5F15\u5148\u30AF\u30EA\u30CB\u30C3\u30AF";
+    const productId = getVal(row, "productId") || `PRD-${i}`;
+    const productName = getVal(row, "productName") || "\u533B\u7642\u7528\u88FD\u5264";
+    const quantity = parseInt(getVal(row, "quantity"), 10) || 1;
+    const trackingNo = getVal(row, "trackingNo") || `740980114${String(i).padStart(4, "0")}`;
+    const carrier = getVal(row, "carrier") || "FedEx";
+    const shippedDate = getVal(row, "shippedDate") || "2026-10-06";
+    const arrivalAirport = getVal(row, "arrivalAirport") || (i % 2 === 0 ? "\u6210\u7530\u56FD\u969B\u7A7A\u6E2F (NRT)" : "\u95A2\u897F\u56FD\u969B\u7A7A\u6E2F (KIX)");
+    const importStatus = getVal(row, "importStatus") || "\u627F\u8A8D\u6E08";
+    const coolApplicationStatus = getVal(row, "coolApplicationStatus") || (i % 10 === 0 ? "\u7533\u8ACB\u6F0F\u308C" : "\u7533\u8ACB\u6E08");
+    const powerOfAttorneyStatus = getVal(row, "powerOfAttorneyStatus") || "\u53D7\u9818\u6E08";
+    const slipStatus = getVal(row, "slipStatus") || "\u4F5C\u6210\u6E08";
+    const currentLocation = getVal(row, "currentLocation") || "\u6210\u7530\u7A0E\u95A2 \u5BE9\u67FB\u5834";
+    const customsStatus = getVal(row, "customsStatus") || "\u7A0E\u95A2\u5BE9\u67FB\u4E2D";
+    const isKantoNg = arrivalAirport.includes("\u6210\u7530") && (customsStatus.includes("NG") || customsStatus.includes("\u7559\u7F6E"));
+    const isCoolMissing = coolApplicationStatus.includes("\u6F0F\u308C") || coolApplicationStatus.includes("\u672A");
+    records.push({
+      shipmentId,
+      orderId,
+      customerName,
+      productId,
+      productName,
+      quantity,
+      trackingNo,
+      carrier,
+      shippedDate,
+      arrivalAirport,
+      importStatus,
+      coolApplicationStatus,
+      powerOfAttorneyStatus,
+      slipStatus,
+      currentLocation,
+      customsStatus,
+      isKantoNg,
+      isCoolMissing,
+      updatedAt: "2026-10-06 17:00"
+    });
+  }
+  return records;
+}
+var SUPPLIER_FIELD_MAP = {
+  supplierId: ["110005", "\u4ED5\u5165\u5148ID", "\u4ED5\u5165\u5148\u30B3\u30FC\u30C9", "supplierId"],
+  supplierName: ["110006", "\u4ED5\u5165\u5148\u540D", "\u4ED5\u5165\u5148", "supplierName"],
+  country: ["\u56FD", "\u6240\u5728\u5730\u56FD", "\u56FD\u540D", "country"],
+  leadTimeDays: ["\u6A19\u6E96\u7D0D\u671F", "\u30EA\u30FC\u30C9\u30BF\u30A4\u30E0", "leadTimeDays"],
+  contactPerson: ["\u62C5\u5F53\u8005", "contactPerson"],
+  email: ["\u30E1\u30FC\u30EB\u30A2\u30C9\u30EC\u30B9", "email"],
+  phone: ["\u96FB\u8A71\u756A\u53F7", "TEL", "phone"]
+};
+function transformCsvToSuppliers(csvText) {
+  const rows = parseCsv(csvText);
+  if (rows.length < 2) return [];
+  const headers = rows[0].map((h) => h.replace(/^["'\s]+|["'\s]+$/g, ""));
+  const headerMap = {};
+  for (const [key, aliases] of Object.entries(SUPPLIER_FIELD_MAP)) {
+    for (const alias of aliases) {
+      const idx = headers.findIndex((h) => h === alias || h.includes(alias));
+      if (idx !== -1) {
+        headerMap[key] = idx;
+        break;
+      }
+    }
+  }
+  const getVal = (row, key) => {
+    const idx = headerMap[key];
+    if (idx !== void 0 && row[idx] !== void 0) {
+      return row[idx].replace(/^["'\s]+|["'\s]+$/g, "");
+    }
+    return "";
+  };
+  const records = [];
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i];
+    if (row.length === 0 || row.every((c) => c === "")) continue;
+    const supplierId = getVal(row, "supplierId") || `SUP-${i}`;
+    const supplierName = getVal(row, "supplierName") || `\u4ED5\u5165\u5148-${i}`;
+    const country = getVal(row, "country") || "\u65E5\u672C";
+    const leadTimeDays = parseInt(getVal(row, "leadTimeDays"), 10) || 7;
+    const contactPerson = getVal(row, "contactPerson") || "";
+    const email = getVal(row, "email") || "";
+    const phone = getVal(row, "phone") || "";
+    records.push({
+      supplierId,
+      supplierName,
+      country,
+      leadTimeDays,
+      contactPerson,
+      email,
+      phone,
+      status: "\u901A\u5E38\u53D6\u5F15"
     });
   }
   return records;
@@ -653,23 +793,37 @@ async function getOutboundIp() {
   }
   return cachedOutboundIp || "34.34.226.81";
 }
-async function fetchRakurakuCsv(cleanBaseUrl, token, dbSchemaId, maxPages = 10) {
+async function fetchRakurakuCsv(cleanBaseUrl, token, dbSchemaId, searchIdOrMaxPages, listId, maxPages = 10) {
+  let searchId;
+  let actualListId;
+  let pagesToFetch = maxPages;
+  if (typeof searchIdOrMaxPages === "number") {
+    pagesToFetch = searchIdOrMaxPages;
+    searchId = void 0;
+    actualListId = void 0;
+  } else {
+    searchId = searchIdOrMaxPages ? searchIdOrMaxPages.toString() : void 0;
+    actualListId = listId ? listId.toString() : void 0;
+  }
   let combinedCsv = "";
   const apiUrl = `${cleanBaseUrl}/api/csvexport/version/v1`;
-  for (let page = 0; page < maxPages; page++) {
+  for (let page = 0; page < pagesToFetch; page++) {
     const offset = page * 200;
+    const reqBody = {
+      dbSchemaId: dbSchemaId.toString(),
+      viewId: "0",
+      limit: 200,
+      offset
+    };
+    if (searchId) reqBody.searchId = searchId.toString();
+    if (actualListId) reqBody.listId = actualListId.toString();
     const response = await fetch(apiUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json; charset=utf-8",
         "X-HD-apitoken": token.trim()
       },
-      body: JSON.stringify({
-        dbSchemaId: dbSchemaId.toString(),
-        viewId: "0",
-        limit: 200,
-        offset
-      })
+      body: JSON.stringify(reqBody)
     });
     const responseText = await response.text();
     let responseJson = null;
@@ -715,10 +869,12 @@ app.post("/api/rakuraku/fetch", async (req, res) => {
     const token = req.body.token || process.env.VITE_DATA_KEY || "lzWjxU5iMLMUSN57asqR6ov2w9eXrJ9Roeqq8KSY9zk93lrYHa54d4zaUr0zKO0a";
     const baseUrl = req.body.baseUrl || process.env.VITE_RAKURAKU_BASE_URL || "https://hnsibot.rakurakuhanbai.jp/ykbxg2a/";
     const dbSchemaId = req.body.dbSchemaId || "101248";
+    const searchId = req.body.searchId || (dbSchemaId === "101270" ? "103958" : dbSchemaId === "101253" ? "103962" : void 0);
+    const listId = req.body.listId || (dbSchemaId === "101270" ? "101059" : dbSchemaId === "101253" ? "101061" : void 0);
     const cleanBaseUrl = baseUrl.replace(/\/+$/, "");
-    console.log(`[Rakuraku Proxy] Outbound IP: ${currentIp}, Fetching from ${cleanBaseUrl} with dbSchemaId: ${dbSchemaId}`);
+    console.log(`[Rakuraku Proxy] Outbound IP: ${currentIp}, Fetching from ${cleanBaseUrl} with dbSchemaId: ${dbSchemaId}, searchId: ${searchId}, listId: ${listId}`);
     const pagesToFetch = 10;
-    const result = await fetchRakurakuCsv(cleanBaseUrl, token, dbSchemaId, pagesToFetch);
+    const result = await fetchRakurakuCsv(cleanBaseUrl, token, dbSchemaId, searchId, listId, pagesToFetch);
     const responseText = result.csv;
     const responseJson = result.rawResponse;
     let parsedData = null;
@@ -731,6 +887,12 @@ app.post("/api/rakuraku/fetch", async (req, res) => {
       } else if (schemaStr === "101250") {
         parsedData = transformCsvToClinics(responseText);
         dataType = "clinics";
+      } else if (schemaStr === "101270") {
+        parsedData = transformCsvToShipments(responseText);
+        dataType = "shipments";
+      } else if (schemaStr === "101253") {
+        parsedData = transformCsvToSuppliers(responseText);
+        dataType = "suppliers";
       } else {
         parsedData = transformCsvToDeliveryData(responseText);
         dataType = "orders";
@@ -743,6 +905,7 @@ app.post("/api/rakuraku/fetch", async (req, res) => {
       dataType,
       schemaId: schemaStr,
       data: parsedData,
+      count: Array.isArray(parsedData) ? parsedData.length : parsedData?.orders?.length || 0,
       serverIp: currentIp,
       rawCsv: !responseJson ? responseText : void 0
     });
@@ -998,11 +1161,14 @@ app.post("/api/tracking/fedex/live", async (req, res) => {
   }
 });
 async function startServer() {
-  const isProduction = process.env.NODE_ENV === "production" || !!process.env.K_SERVICE || !!process.env.VERCEL;
+  const distPath = path.resolve(process.cwd(), "dist");
+  const distIndexPath = path.resolve(distPath, "index.html");
+  const hasDist = fs.existsSync(distIndexPath);
+  const isProduction = process.env.NODE_ENV === "production" && hasDist;
   if (isProduction) {
-    app.use(express.static(path.join(__dirname, "dist")));
+    app.use(express.static(distPath));
     app.get("*", (_req, res) => {
-      res.sendFile(path.join(__dirname, "dist", "index.html"));
+      res.sendFile(distIndexPath);
     });
     app.listen(PORT, "0.0.0.0", () => {
       console.log(`Production Server is running at http://0.0.0.0:${PORT}`);

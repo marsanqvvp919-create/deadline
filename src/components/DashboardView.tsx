@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Order, AlertItem, WeeklyHistoryItem, ViewTab } from '../types';
 import { formatDate, formatDateTime, isShippingOrFee, getElapsedTimeInfo, ElapsedTimeInfo } from '../utils';
 import { calculateComprehensiveSalesMetrics, isEligibleForOverdue } from '../utils/salesCalculations';
+import { isOrderDelayed, isLineDelayed, getLineDelayDays } from '../utils/delayCalculation';
 import {
   AlertCircle,
   Clock,
@@ -58,19 +59,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     return () => clearInterval(timer);
   }, []);
 
-  // 経過時間インジケーターの検証・テスト用オフセット（分）
-  // 0: 実時間, 10: 10分前(緑), 35: 35分前(黄: 30分経過), 75: 75分前(赤: 1時間経過)
-  const [testOffsetMinutes, setTestOffsetMinutes] = useState<number>(0);
-
-  // 経過時間情報の計算（30分以上で黄色、1時間以上で赤色）
+  // 経過時間情報の計算（実時間）
   const freshness = useMemo(() => {
-    return getElapsedTimeInfo(generatedAt, testOffsetMinutes);
-  }, [generatedAt, testOffsetMinutes, ticker]);
+    return getElapsedTimeInfo(generatedAt, 0);
+  }, [generatedAt, ticker]);
 
-  // 基準日（日本時間の本日 2026-09-24）
-  const todayStr = '2026-09-24';
-  const today = new Date(todayStr + 'T00:00:00+09:00');
-  const thisYearMonth = '2026-09';
+  const today = useMemo(() => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }, []);
+  const thisYearMonth = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
 
   // 売上・請求残・見積メトリクス（見積期日1週間超過は除外）
   const salesMetrics = useMemo(() => {
@@ -93,21 +92,23 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   // 未完了明細（stage !== '出荷完了'）
   const incompleteLines = allLines.filter((l) => l.stage !== '出荷完了');
 
-  // 遅延明細（stage !== '出荷完了' かつ latestDate < today かつ 入金済or後払い・非見積）
-  const delayedLines = incompleteLines.filter((l) => {
-    if (!l.latestDate) return false;
-    const target = new Date(l.latestDate + 'T00:00:00+09:00');
-    if (target.getTime() >= today.getTime()) return false;
-    const parent = orders.find((o) => o.orderId === l.orderId);
-    if (!parent) return false;
-    return isEligibleForOverdue(parent);
-  });
+  // 統一された納期超過判定（伝票・明細）
+  const delayedOrders = useMemo(() => {
+    return orders.filter((o) => isOrderDelayed(o));
+  }, [orders]);
+
+  const delayedLines = useMemo(() => {
+    return allLines.filter((l) => {
+      const parent = orders.find((o) => o.orderId === l.orderId);
+      return isLineDelayed(l, parent);
+    });
+  }, [allLines, orders]);
 
   // 10日以内に期限の明細（今日 <= latestDate <= 10日後）
   const tenDaysLater = new Date(today.getTime() + 10 * 24 * 60 * 60 * 1000);
   const urgentLines = incompleteLines.filter((l) => {
     if (!l.latestDate) return false;
-    const target = new Date(l.latestDate + 'T00:00:00+09:00');
+    const target = new Date(l.latestDate);
     return target.getTime() >= today.getTime() && target.getTime() <= tenDaysLater.getTime();
   });
 
@@ -214,6 +215,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     }
   });
 
+  // 担当別の納期超過明細数をカウント（仕入先別およびトップカードの数字と完全に一致）
+  incompleteLines.forEach((l) => {
+    const rep = l.salesRep || '未設定';
+    const entry = salesRepMap.get(rep);
+    if (!entry) return;
+    const parent = orders.find((o) => o.orderId === l.orderId);
+    if (isLineDelayed(l, parent)) {
+      entry.delayed++;
+    }
+  });
+
   allLines.forEach((l) => {
     const rep = l.salesRep || '未設定';
     const entry = salesRepMap.get(rep);
@@ -221,12 +233,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
     if (l.stage !== '出荷完了') {
       entry.incomplete++;
-      if (l.latestDate) {
-        const target = new Date(l.latestDate + 'T00:00:00+09:00');
-        if (target.getTime() < today.getTime()) {
-          entry.delayed++;
-        }
-      }
     } else if (l.shippedDate && l.shippedDate.startsWith(thisYearMonth)) {
       entry.completedThisMonth++;
       if (l.latestDate && l.shippedDate <= l.latestDate) {
@@ -267,13 +273,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     const entry = supplierMap.get(sup)!;
     entry.incomplete++;
 
-    if (l.latestDate) {
-      const target = new Date(l.latestDate + 'T00:00:00+09:00');
-      if (target.getTime() < today.getTime()) {
-        entry.delayed++;
-        const days = Math.ceil((today.getTime() - target.getTime()) / (1000 * 60 * 60 * 24));
-        entry.totalDelayDays += Math.max(0, days);
-      }
+    const parent = orders.find((o) => o.orderId === l.orderId);
+    if (isLineDelayed(l, parent)) {
+      entry.delayed++;
+      const days = getLineDelayDays(l);
+      entry.totalDelayDays += Math.max(0, days);
     }
   });
 
@@ -356,59 +360,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </p>
         </div>
 
-        {/* Right Actions: Test Selector & Refresh */}
-        <div className="flex flex-wrap items-center gap-2">
-          {/* Quick Test Offset Selector (30分以上:黄 / 1時間以上:赤の確認用) */}
-          <div className="flex items-center gap-1 bg-slate-100 border border-slate-300 p-1 rounded-lg text-[10px]">
-            <span className="font-bold text-slate-500 px-1">色テスト:</span>
-            <button
-              type="button"
-              onClick={() => setTestOffsetMinutes(0)}
-              title="実時間で表示"
-              className={`px-2 py-0.5 font-bold rounded border cursor-pointer transition active:translate-y-px ${
-                testOffsetMinutes === 0
-                  ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
-                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
-              }`}
-            >
-              実時間
-            </button>
-            <button
-              type="button"
-              onClick={() => setTestOffsetMinutes(10)}
-              title="10分前 (30分未満: 緑色)"
-              className={`px-2 py-0.5 font-bold rounded border cursor-pointer transition active:translate-y-px ${
-                testOffsetMinutes === 10
-                  ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
-                  : 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100'
-              }`}
-            >
-              10分前 (緑)
-            </button>
-            <button
-              type="button"
-              onClick={() => setTestOffsetMinutes(35)}
-              title="35分前 (30分以上: 黄色)"
-              className={`px-2 py-0.5 font-bold rounded border cursor-pointer transition active:translate-y-px ${
-                testOffsetMinutes === 35
-                  ? 'bg-amber-500 text-slate-900 border-amber-600 shadow-xs'
-                  : 'bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100'
-              }`}
-            >
-              35分前 (黄: 30分超)
-            </button>
-            <button
-              type="button"
-              onClick={() => setTestOffsetMinutes(75)}
-              title="75分前 (1時間以上: 赤色)"
-              className={`px-2 py-0.5 font-bold rounded border cursor-pointer transition active:translate-y-px ${
-                testOffsetMinutes === 75
-                  ? 'bg-rose-600 text-white border-rose-600 shadow-xs'
-                  : 'bg-rose-50 text-rose-800 border-rose-300 hover:bg-rose-100'
-              }`}
-            >
-              75分前 (赤: 1時間超)
-            </button>
+        {/* Right Actions: Sync Time Display & Refresh Button */}
+        <div className="flex flex-wrap items-center gap-2.5">
+          <div className="flex items-center gap-2 bg-slate-100 border border-slate-200 px-3 py-1.5 rounded-lg text-xs font-mono text-slate-700">
+            <Clock className="w-3.5 h-3.5 text-slate-500" />
+            <span>最終同期: <strong className="text-slate-900">{formatDateTime(generatedAt)}</strong></span>
+            <FreshnessBadge info={freshness} />
           </div>
 
           {/* Sync / Refresh tactile button */}
@@ -417,7 +374,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               type="button"
               onClick={onRefresh}
               disabled={isRefreshing}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-xs font-bold rounded-lg border border-blue-500 shadow-xs hover:shadow active:translate-y-px transition cursor-pointer"
+              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-xs font-bold rounded-lg border border-blue-500 shadow-xs hover:shadow active:translate-y-px transition cursor-pointer"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
               <span>{isRefreshing ? '取得中...' : 'データを今すぐ更新'}</span>
@@ -464,7 +421,80 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
         </div>
 
+        {/* 2. 納期超過件数 */}
+        <div
+          onClick={() => onNavigateToTab('overdue')}
+          className="bg-white p-4 rounded-xl border-2 border-rose-200 hover:border-rose-400 bg-rose-50/20 shadow-xs hover:shadow-md active:translate-y-0.5 active:scale-[0.99] transition-all cursor-pointer group flex flex-col justify-between"
+        >
+          <div>
+            <div className="flex items-center justify-between gap-1 mb-2">
+              <div className="flex items-center gap-1.5">
+                <div className="p-1 rounded-md bg-rose-100 text-rose-600 group-hover:bg-rose-600 group-hover:text-white transition">
+                  <AlertTriangle className="w-3.5 h-3.5" />
+                </div>
+                <span className="text-xs font-bold text-rose-900">納期超過</span>
+              </div>
+              <FreshnessBadge info={freshness} />
+            </div>
+            <div className="mt-1 flex items-baseline gap-1.5">
+              <span className="text-2xl font-extrabold font-mono text-rose-600">
+                {delayedLines.length}
+              </span>
+              <span className="text-xs text-rose-600 font-bold">品目</span>
+              <span className="text-[11px] text-slate-500 font-medium ml-1">
+                ({delayedOrders.length}件)
+              </span>
+            </div>
+            <span className="text-[11px] text-slate-400 mt-1 block leading-tight">
+              最長納品予定日超過・未出荷
+            </span>
+          </div>
+          <div className="mt-3 pt-2.5 border-t border-rose-100 flex items-center justify-between">
+            <span className="text-[10px] text-rose-700 transition font-medium">
+              超過一覧へ
+            </span>
+            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-rose-900 bg-rose-100 group-hover:bg-rose-200 border border-rose-300 px-2 py-0.5 rounded-md shadow-2xs transition">
+              <span>表示</span>
+              <ChevronRight className="w-3 h-3 group-hover:translate-x-0.5 transition" />
+            </span>
+          </div>
+        </div>
 
+        {/* 3. 納期間近（10日以内） */}
+        <div
+          onClick={() => onNavigateToTab('unshipped_clinics')}
+          className="bg-white p-4 rounded-xl border-2 border-amber-200 hover:border-amber-400 bg-amber-50/20 shadow-xs hover:shadow-md active:translate-y-0.5 active:scale-[0.99] transition-all cursor-pointer group flex flex-col justify-between"
+        >
+          <div>
+            <div className="flex items-center justify-between gap-1 mb-2">
+              <div className="flex items-center gap-1.5">
+                <div className="p-1 rounded-md bg-amber-100 text-amber-600 group-hover:bg-amber-600 group-hover:text-white transition">
+                  <Clock className="w-3.5 h-3.5" />
+                </div>
+                <span className="text-xs font-bold text-amber-900">納期間近（10日以内）</span>
+              </div>
+              <FreshnessBadge info={freshness} />
+            </div>
+            <div className="mt-1 flex items-baseline gap-1.5">
+              <span className="text-2xl font-extrabold font-mono text-amber-600">
+                {urgentLines.length}
+              </span>
+              <span className="text-xs text-amber-600 font-bold">品目</span>
+            </div>
+            <span className="text-[11px] text-slate-400 mt-1 block leading-tight">
+              10日以内に納品予定の未出荷品
+            </span>
+          </div>
+          <div className="mt-3 pt-2.5 border-t border-amber-100 flex items-center justify-between">
+            <span className="text-[10px] text-amber-700 transition font-medium">
+              間近案件へ
+            </span>
+            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-900 bg-amber-100 group-hover:bg-amber-200 border border-amber-300 px-2 py-0.5 rounded-md shadow-2xs transition">
+              <span>表示</span>
+              <ChevronRight className="w-3 h-3 group-hover:translate-x-0.5 transition" />
+            </span>
+          </div>
+        </div>
 
         {/* 4. 漏れ件数 */}
         <div
@@ -518,12 +548,20 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <FreshnessBadge info={freshness} />
             </div>
             <div className="mt-1 flex items-baseline gap-1.5">
-              <span className="text-2xl font-extrabold font-mono text-emerald-700">
-                {onTimeRate}%
-              </span>
-              <span className="text-xs text-emerald-600 font-medium">
-                ({onTimeShippedCount}/{completedThisMonth.length}件)
-              </span>
+              {completedThisMonth.length > 0 ? (
+                <>
+                  <span className="text-2xl font-extrabold font-mono text-emerald-700">
+                    {onTimeRate}%
+                  </span>
+                  <span className="text-xs text-emerald-600 font-medium">
+                    ({onTimeShippedCount}/{completedThisMonth.length}件)
+                  </span>
+                </>
+              ) : (
+                <span className="text-lg font-bold text-slate-400">
+                  データなし
+                </span>
+              )}
             </div>
             <span className="text-[11px] text-slate-400 mt-1 block leading-tight">
               出荷日 ≦ 最長納品予定日
@@ -650,10 +688,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </h3>
               <div className="mt-1 flex items-baseline gap-1.5">
                 <span className="font-mono text-2xl font-extrabold text-rose-600">
-                  {delayedLines.length}
+                  {delayedOrders.length}
                 </span>
                 <span className="text-xs text-slate-500 font-medium">
-                  明細 (遅延伝票)
+                  件 ({delayedLines.length}品目)
                 </span>
               </div>
               <p className="text-[11px] text-slate-500 mt-1 line-clamp-2">
@@ -716,7 +754,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   const rate =
                     item.completedThisMonth > 0
                       ? Math.round((item.onTimeThisMonth / item.completedThisMonth) * 100)
-                      : 100;
+                      : null;
                   return (
                     <tr
                       key={item.rep}
@@ -748,17 +786,23 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                         </span>
                       </td>
                       <td className="py-3 px-4 text-right font-mono font-semibold text-slate-800">
-                        <span
-                          className={
-                            rate < 90
-                              ? 'text-rose-600 font-bold'
-                              : rate < 95
-                              ? 'text-amber-600 font-bold'
-                              : 'text-emerald-700 font-bold'
-                          }
-                        >
-                          {rate}%
-                        </span>
+                        {rate !== null ? (
+                          <span
+                            className={
+                              rate < 90
+                                ? 'text-rose-600 font-bold'
+                                : rate < 95
+                                ? 'text-amber-600 font-bold'
+                                : 'text-emerald-700 font-bold'
+                            }
+                          >
+                            {rate}%
+                          </span>
+                        ) : (
+                          <span className="text-slate-400 font-normal">
+                            データなし
+                          </span>
+                        )}
                       </td>
                       <td className="py-2 px-3 text-right">
                         <span className="inline-flex items-center gap-1 px-2 py-1 bg-white group-hover:bg-blue-600 text-slate-700 group-hover:text-white rounded border border-slate-300 group-hover:border-blue-600 font-bold text-[10px] shadow-2xs transition active:translate-y-px">
@@ -889,7 +933,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
           <div className="mt-3 pt-3 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
             <span>今週の遅延数: <strong>{delayedLines.length}件</strong></span>
-            <span className="text-emerald-600 font-semibold">ピーク比 -64% 改善</span>
           </div>
         </div>
 
@@ -903,9 +946,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <h2 className="text-sm font-bold text-slate-900">仕入先別の状況</h2>
               <FreshnessBadge info={freshness} />
             </div>
-            <p className="text-[11px] text-slate-500 mt-0.5">
-              納期遅延が発生しやすい仕入先を特定し、納期調整に役立てます
-            </p>
           </div>
           <span className="text-xs text-slate-400 font-medium">遅延件数順</span>
         </div>

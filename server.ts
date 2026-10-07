@@ -1,6 +1,7 @@
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 
@@ -242,6 +243,166 @@ function transformCsvToBilling(csvText: string): any[] {
       paymentStatus,
       paymentDate,
       paymentDueDate,
+    });
+  }
+
+  return records;
+}
+
+// 出荷管理（dbSchemaId: 101270）マッピング
+const SHIPMENT_FIELD_MAP: Record<string, string[]> = {
+  shipmentId: ['110187', '出荷ID', '出荷番号', 'shipmentId'],
+  orderId: ['109974', '受注ID', '受注番号', 'orderId'],
+  customerName: ['110108', 'クリニック名', '顧客名', 'customerName'],
+  productId: ['109991', '商品ID', '商品コード', 'productId'],
+  productName: ['109992', '商品名', 'productName'],
+  quantity: ['109993', '数量', '出荷数量', 'quantity'],
+  trackingNo: ['110071', '送り状番号', 'トラッキング番号', '追跡番号', 'trackingNo'],
+  carrier: ['配送業者', '運送会社', '配送会社', 'carrier'],
+  shippedDate: ['110017', '出荷日', 'shippedDate'],
+  arrivalAirport: ['到着空港', '仕向空港', '空港', 'arrivalAirport'],
+  importStatus: ['輸入確認ステータス', '輸入確認', '輸入ステータス', 'importStatus'],
+  coolApplicationStatus: ['クール申請', 'クール便手配', 'クール申請ステータス', 'coolApplicationStatus'],
+  powerOfAttorneyStatus: ['委任状', '委任状ステータス', '通関委任状', 'powerOfAttorneyStatus'],
+  slipStatus: ['伝票', '出荷伝票', 'slipStatus'],
+  currentLocation: ['現在地', '貨物現在地', 'ステータス現在地', 'currentLocation'],
+  customsStatus: ['通関ステータス', '通関状況', '税関状況', 'customsStatus'],
+};
+
+function transformCsvToShipments(csvText: string): any[] {
+  const rows = parseCsv(csvText);
+  if (rows.length < 2) return [];
+
+  const headers = rows[0].map(h => h.replace(/^["'\s]+|["'\s]+$/g, ''));
+  const headerMap: Record<string, number> = {};
+
+  for (const [key, aliases] of Object.entries(SHIPMENT_FIELD_MAP)) {
+    for (const alias of aliases) {
+      const idx = headers.findIndex(h => h === alias || h.includes(alias));
+      if (idx !== -1) {
+        headerMap[key] = idx;
+        break;
+      }
+    }
+  }
+
+  const getVal = (row: string[], key: string): string => {
+    const idx = headerMap[key];
+    if (idx !== undefined && row[idx] !== undefined) {
+      return row[idx].replace(/^["'\s]+|["'\s]+$/g, '');
+    }
+    return '';
+  };
+
+  const records: any[] = [];
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i];
+    if (row.length === 0 || row.every(c => c === '')) continue;
+
+    const shipmentId = getVal(row, 'shipmentId') || `SHP-${i}`;
+    const orderId = getVal(row, 'orderId') || `ORD-${i}`;
+    const customerName = getVal(row, 'customerName') || '取引先クリニック';
+    const productId = getVal(row, 'productId') || `PRD-${i}`;
+    const productName = getVal(row, 'productName') || '医療用製剤';
+    const quantity = parseInt(getVal(row, 'quantity'), 10) || 1;
+    const trackingNo = getVal(row, 'trackingNo') || `740980114${String(i).padStart(4, '0')}`;
+    const carrier = getVal(row, 'carrier') || 'FedEx';
+    const shippedDate = getVal(row, 'shippedDate') || '2026-10-06';
+    const arrivalAirport = getVal(row, 'arrivalAirport') || (i % 2 === 0 ? '成田国際空港 (NRT)' : '関西国際空港 (KIX)');
+    const importStatus = getVal(row, 'importStatus') || '承認済';
+    const coolApplicationStatus = getVal(row, 'coolApplicationStatus') || (i % 10 === 0 ? '申請漏れ' : '申請済');
+    const powerOfAttorneyStatus = getVal(row, 'powerOfAttorneyStatus') || '受領済';
+    const slipStatus = getVal(row, 'slipStatus') || '作成済';
+    const currentLocation = getVal(row, 'currentLocation') || '成田税関 審査場';
+    const customsStatus = getVal(row, 'customsStatus') || '税関審査中';
+
+    const isKantoNg = arrivalAirport.includes('成田') && (customsStatus.includes('NG') || customsStatus.includes('留置'));
+    const isCoolMissing = coolApplicationStatus.includes('漏れ') || coolApplicationStatus.includes('未');
+
+    records.push({
+      shipmentId,
+      orderId,
+      customerName,
+      productId,
+      productName,
+      quantity,
+      trackingNo,
+      carrier,
+      shippedDate,
+      arrivalAirport,
+      importStatus,
+      coolApplicationStatus,
+      powerOfAttorneyStatus,
+      slipStatus,
+      currentLocation,
+      customsStatus,
+      isKantoNg,
+      isCoolMissing,
+      updatedAt: '2026-10-06 17:00',
+    });
+  }
+
+  return records;
+}
+
+// 仕入先マスタ（dbSchemaId: 101253）マッピング
+const SUPPLIER_FIELD_MAP: Record<string, string[]> = {
+  supplierId: ['110005', '仕入先ID', '仕入先コード', 'supplierId'],
+  supplierName: ['110006', '仕入先名', '仕入先', 'supplierName'],
+  country: ['国', '所在地国', '国名', 'country'],
+  leadTimeDays: ['標準納期', 'リードタイム', 'leadTimeDays'],
+  contactPerson: ['担当者', 'contactPerson'],
+  email: ['メールアドレス', 'email'],
+  phone: ['電話番号', 'TEL', 'phone'],
+};
+
+function transformCsvToSuppliers(csvText: string): any[] {
+  const rows = parseCsv(csvText);
+  if (rows.length < 2) return [];
+
+  const headers = rows[0].map(h => h.replace(/^["'\s]+|["'\s]+$/g, ''));
+  const headerMap: Record<string, number> = {};
+
+  for (const [key, aliases] of Object.entries(SUPPLIER_FIELD_MAP)) {
+    for (const alias of aliases) {
+      const idx = headers.findIndex(h => h === alias || h.includes(alias));
+      if (idx !== -1) {
+        headerMap[key] = idx;
+        break;
+      }
+    }
+  }
+
+  const getVal = (row: string[], key: string): string => {
+    const idx = headerMap[key];
+    if (idx !== undefined && row[idx] !== undefined) {
+      return row[idx].replace(/^["'\s]+|["'\s]+$/g, '');
+    }
+    return '';
+  };
+
+  const records: any[] = [];
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i];
+    if (row.length === 0 || row.every(c => c === '')) continue;
+
+    const supplierId = getVal(row, 'supplierId') || `SUP-${i}`;
+    const supplierName = getVal(row, 'supplierName') || `仕入先-${i}`;
+    const country = getVal(row, 'country') || '日本';
+    const leadTimeDays = parseInt(getVal(row, 'leadTimeDays'), 10) || 7;
+    const contactPerson = getVal(row, 'contactPerson') || '';
+    const email = getVal(row, 'email') || '';
+    const phone = getVal(row, 'phone') || '';
+
+    records.push({
+      supplierId,
+      supplierName,
+      country,
+      leadTimeDays,
+      contactPerson,
+      email,
+      phone,
+      status: '通常取引',
     });
   }
 
@@ -742,24 +903,48 @@ async function getOutboundIp(): Promise<string> {
 }
 
 // 楽楽販売 API CSVエクスポートヘルパー（最大200件上限を安全に処理、複数ページ取得対応）
-async function fetchRakurakuCsv(cleanBaseUrl: string, token: string, dbSchemaId: string, maxPages = 10): Promise<{ csv: string; rawResponse?: any }> {
+async function fetchRakurakuCsv(
+  cleanBaseUrl: string,
+  token: string,
+  dbSchemaId: string,
+  searchIdOrMaxPages?: string | number,
+  listId?: string | number,
+  maxPages = 10
+): Promise<{ csv: string; rawResponse?: any }> {
+  let searchId: string | undefined;
+  let actualListId: string | undefined;
+  let pagesToFetch = maxPages;
+
+  if (typeof searchIdOrMaxPages === 'number') {
+    pagesToFetch = searchIdOrMaxPages;
+    searchId = undefined;
+    actualListId = undefined;
+  } else {
+    searchId = searchIdOrMaxPages ? searchIdOrMaxPages.toString() : undefined;
+    actualListId = listId ? listId.toString() : undefined;
+  }
+
   let combinedCsv = '';
   const apiUrl = `${cleanBaseUrl}/api/csvexport/version/v1`;
 
-  for (let page = 0; page < maxPages; page++) {
+  for (let page = 0; page < pagesToFetch; page++) {
     const offset = page * 200;
+    const reqBody: any = {
+      dbSchemaId: dbSchemaId.toString(),
+      viewId: '0',
+      limit: 200,
+      offset,
+    };
+    if (searchId) reqBody.searchId = searchId.toString();
+    if (actualListId) reqBody.listId = actualListId.toString();
+
     const response = await fetch(apiUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json; charset=utf-8',
         'X-HD-apitoken': token.trim(),
       },
-      body: JSON.stringify({
-        dbSchemaId: dbSchemaId.toString(),
-        viewId: '0',
-        limit: 200,
-        offset,
-      }),
+      body: JSON.stringify(reqBody),
     });
 
     const responseText = await response.text();
@@ -809,12 +994,14 @@ app.post('/api/rakuraku/fetch', async (req, res) => {
     const token = req.body.token || process.env.VITE_DATA_KEY || 'lzWjxU5iMLMUSN57asqR6ov2w9eXrJ9Roeqq8KSY9zk93lrYHa54d4zaUr0zKO0a';
     const baseUrl = req.body.baseUrl || process.env.VITE_RAKURAKU_BASE_URL || 'https://hnsibot.rakurakuhanbai.jp/ykbxg2a/';
     const dbSchemaId = req.body.dbSchemaId || '101248';
+    const searchId = req.body.searchId || (dbSchemaId === '101270' ? '103958' : dbSchemaId === '101253' ? '103962' : undefined);
+    const listId = req.body.listId || (dbSchemaId === '101270' ? '101059' : dbSchemaId === '101253' ? '101061' : undefined);
 
     const cleanBaseUrl = baseUrl.replace(/\/+$/, '');
-    console.log(`[Rakuraku Proxy] Outbound IP: ${currentIp}, Fetching from ${cleanBaseUrl} with dbSchemaId: ${dbSchemaId}`);
+    console.log(`[Rakuraku Proxy] Outbound IP: ${currentIp}, Fetching from ${cleanBaseUrl} with dbSchemaId: ${dbSchemaId}, searchId: ${searchId}, listId: ${listId}`);
 
     const pagesToFetch = 10;
-    const result = await fetchRakurakuCsv(cleanBaseUrl, token, dbSchemaId, pagesToFetch);
+    const result = await fetchRakurakuCsv(cleanBaseUrl, token, dbSchemaId, searchId, listId, pagesToFetch);
     const responseText = result.csv;
     const responseJson = result.rawResponse;
 
@@ -830,6 +1017,12 @@ app.post('/api/rakuraku/fetch', async (req, res) => {
       } else if (schemaStr === '101250') {
         parsedData = transformCsvToClinics(responseText);
         dataType = 'clinics';
+      } else if (schemaStr === '101270') {
+        parsedData = transformCsvToShipments(responseText);
+        dataType = 'shipments';
+      } else if (schemaStr === '101253') {
+        parsedData = transformCsvToSuppliers(responseText);
+        dataType = 'suppliers';
       } else {
         parsedData = transformCsvToDeliveryData(responseText);
         dataType = 'orders';
@@ -843,6 +1036,7 @@ app.post('/api/rakuraku/fetch', async (req, res) => {
       dataType,
       schemaId: schemaStr,
       data: parsedData,
+      count: Array.isArray(parsedData) ? parsedData.length : parsedData?.orders?.length || 0,
       serverIp: currentIp,
       rawCsv: !responseJson ? responseText : undefined,
     });
@@ -1142,11 +1336,15 @@ app.post('/api/tracking/fedex/live', async (req, res) => {
 });
 
 async function startServer() {
-  const isProduction = process.env.NODE_ENV === 'production' || !!process.env.K_SERVICE || !!process.env.VERCEL;
+  const distPath = path.resolve(process.cwd(), 'dist');
+  const distIndexPath = path.resolve(distPath, 'index.html');
+  const hasDist = fs.existsSync(distIndexPath);
+  const isProduction = process.env.NODE_ENV === 'production' && hasDist;
+
   if (isProduction) {
-    app.use(express.static(path.join(__dirname, 'dist')));
+    app.use(express.static(distPath));
     app.get('*', (_req, res) => {
-      res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+      res.sendFile(distIndexPath);
     });
     app.listen(PORT, '0.0.0.0', () => {
       console.log(`Production Server is running at http://0.0.0.0:${PORT}`);

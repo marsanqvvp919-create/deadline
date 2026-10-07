@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { Order, AlertItem, WeeklyHistoryItem, ViewTab } from '../types';
 import { formatDate, isShippingOrFee, formatNumber } from '../utils';
 import { isEligibleForOverdue } from '../utils/salesCalculations';
+import { isOrderDelayed, isLineDelayed, getLineDelayDays } from '../utils/delayCalculation';
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
 import {
   Truck,
@@ -65,15 +66,11 @@ export const DeliveryDashboardView: React.FC<DeliveryDashboardViewProps> = ({
   }, [allLines]);
 
   const delayedLines = useMemo(() => {
-    return incompleteLines.filter((l) => {
-      if (!l.latestDate) return false;
-      const target = new Date(l.latestDate + 'T00:00:00+09:00');
-      if (target.getTime() >= today.getTime()) return false;
+    return allLines.filter((l) => {
       const parent = orders.find((o) => o.orderId === l.orderId);
-      if (!parent) return false;
-      return isEligibleForOverdue(parent);
+      return isLineDelayed(l, parent);
     });
-  }, [incompleteLines, today, orders]);
+  }, [allLines, orders]);
 
   // 今月の納期遵守率
   const completedThisMonth = useMemo(() => {
@@ -93,13 +90,13 @@ export const DeliveryDashboardView: React.FC<DeliveryDashboardViewProps> = ({
   const onTimeRate = useMemo(() => {
     return completedThisMonth.length > 0
       ? Math.round((onTimeShippedCount / completedThisMonth.length) * 100)
-      : 100;
+      : null;
   }, [completedThisMonth, onTimeShippedCount]);
 
   // 納期遵守率ゲージデータ
   const deliveryGaugeData = [
-    { name: '遵守', value: onTimeRate },
-    { name: '未達', value: Math.max(0, 100 - onTimeRate) },
+    { name: '遵守', value: onTimeRate ?? 0 },
+    { name: '未達', value: onTimeRate !== null ? Math.max(0, 100 - onTimeRate) : 100 },
   ];
   const DELIVERY_COLORS = ['#4f46e5', '#e2e8f0'];
 
@@ -151,19 +148,17 @@ export const DeliveryDashboardView: React.FC<DeliveryDashboardViewProps> = ({
       }
       const entry = map.get(sup)!;
       entry.incomplete++;
-      if (l.latestDate) {
-        const target = new Date(l.latestDate + 'T00:00:00+09:00');
-        if (target.getTime() < today.getTime()) {
-          entry.delayed++;
-          const days = Math.ceil((today.getTime() - target.getTime()) / (1000 * 60 * 60 * 24));
-          entry.totalDelayDays += Math.max(0, days);
-        }
+      const parent = orders.find((o) => o.orderId === l.orderId);
+      if (isLineDelayed(l, parent)) {
+        entry.delayed++;
+        const days = getLineDelayDays(l);
+        entry.totalDelayDays += Math.max(0, days);
       }
     });
     return Array.from(map.values()).sort(
       (a, b) => b.delayed - a.delayed || b.incomplete - a.incomplete
     );
-  }, [incompleteLines, today]);
+  }, [incompleteLines, orders]);
 
   // 週次遅延グラフデータ
   const historyData = weeklyDelayHistory && weeklyDelayHistory.length > 0 ? weeklyDelayHistory : [];
@@ -281,7 +276,9 @@ export const DeliveryDashboardView: React.FC<DeliveryDashboardViewProps> = ({
             </PieChart>
           </ResponsiveContainer>
           <div className="absolute bottom-1 text-center">
-            <span className="text-base font-black text-indigo-600 font-mono">{onTimeRate}%</span>
+            <span className="text-base font-black text-indigo-600 font-mono">
+              {onTimeRate !== null ? `${onTimeRate}%` : 'データなし'}
+            </span>
           </div>
         </div>
       </div>
@@ -292,16 +289,26 @@ export const DeliveryDashboardView: React.FC<DeliveryDashboardViewProps> = ({
         <div className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-xs hover:shadow-md transition">
           <div className="flex items-center justify-between mb-3">
             <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">今月納期遵守率</span>
-            <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
-              <ArrowUpRight className="w-3 h-3" />+2.3pt 対前月
-            </span>
+            {onTimeRate !== null && (
+              <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                <ArrowUpRight className="w-3 h-3" />遵守率
+              </span>
+            )}
           </div>
           <div className="text-2xl font-black text-slate-900 tracking-tight">
-            {onTimeRate}%
+            {onTimeRate !== null ? (
+              <span>{onTimeRate}%</span>
+            ) : (
+              <span className="text-lg font-bold text-slate-400">データなし</span>
+            )}
           </div>
           <div className="mt-2 flex items-center gap-1.5 text-xs text-slate-500 font-medium">
             <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-            <span>完了 {completedThisMonth.length}件中 {onTimeShippedCount}件遵守</span>
+            <span>
+              {completedThisMonth.length > 0
+                ? `完了 ${completedThisMonth.length}件中 ${onTimeShippedCount}件遵守`
+                : '当月の出荷完了データなし'}
+            </span>
           </div>
         </div>
 

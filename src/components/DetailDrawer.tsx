@@ -15,7 +15,11 @@ import {
   Clock,
   FileCheck,
   CheckCircle2,
-  RefreshCw
+  RefreshCw,
+  ShieldAlert,
+  Plane,
+  Thermometer,
+  FileWarning
 } from 'lucide-react';
 
 interface DetailDrawerProps {
@@ -219,6 +223,67 @@ export const DetailDrawer: React.FC<DetailDrawerProps> = ({
                   <span className="text-slate-400 block text-[11px]">販売金額合計</span>
                   <span className="font-mono font-bold text-slate-900">
                     {order.totalAmount !== undefined ? `¥${order.totalAmount.toLocaleString()}` : '-'}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* 出荷管理・通関・クール情報セクション (101270連携) */}
+            <div className="bg-indigo-50/40 rounded-xl p-4 border border-indigo-200/80 space-y-3 text-xs">
+              <div className="flex items-center justify-between">
+                <h3 className="font-bold text-indigo-950 flex items-center gap-1.5">
+                  <ShieldAlert className="w-4 h-4 text-indigo-600" />
+                  <span>出荷管理・通関ステータス詳細 (101270)</span>
+                </h3>
+                {order.isKantoNg && (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-300">
+                    通関NG
+                  </span>
+                )}
+                {order.isCoolMissing && (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                    クール手配漏れ
+                  </span>
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                <div>
+                  <span className="text-slate-400 block text-[11px]">出荷ID</span>
+                  <span className="font-mono font-bold text-indigo-700">
+                    {order.shipmentId || 'SHP-202610-042'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block text-[11px]">到着空港</span>
+                  <span className="font-semibold text-slate-800 flex items-center gap-1">
+                    <Plane className="w-3 h-3 text-indigo-500" />
+                    {order.arrivalAirport || '関西国際空港 (KIX)'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block text-[11px]">輸入確認ステータス</span>
+                  <span className={`font-bold ${order.importStatus === '要修正' ? 'text-rose-600' : 'text-emerald-700'}`}>
+                    {order.importStatus || '承認済'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block text-[11px]">クール便申請</span>
+                  <span className="font-bold text-slate-800 flex items-center gap-1">
+                    <Thermometer className="w-3 h-3 text-blue-500" />
+                    {order.coolApplicationStatus || '申請済'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block text-[11px]">通関委任状 / 伝票</span>
+                  <span className="font-medium text-slate-700">
+                    委任状:{order.powerOfAttorneyStatus || '受領済'} / 伝票:{order.slipStatus || '作成済'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block text-[11px]">現在地</span>
+                  <span className="text-slate-800 font-medium">
+                    {order.currentLocation || '成田税関 審査場'}
                   </span>
                 </div>
               </div>

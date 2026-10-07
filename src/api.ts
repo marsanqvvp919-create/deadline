@@ -1,5 +1,6 @@
-import { DeliveryData, ProductItem, ClinicItem, Order } from './types';
+import { DeliveryData, ProductItem, ClinicItem, Order, ShipmentItem, SupplierItem } from './types';
 import { INITIAL_PRODUCTS, INITIAL_CLINICS, RAKURAKU_SCHEMAS } from './data/masterSeed';
+import { INITIAL_SHIPMENTS, INITIAL_SUPPLIERS } from './data/shipmentSeed';
 import { isShippingOrFee } from './utils';
 import {
   enrichOrdersWithSalesReps,
@@ -26,6 +27,70 @@ const STORAGE_PRODUCTS_KEY = 'nouki_master_products';
 const STORAGE_CLINICS_KEY = 'nouki_master_clinics';
 const STORAGE_PRODUCTS_SYNC_KEY = 'nouki_master_products_sync_info';
 const STORAGE_CLINICS_SYNC_KEY = 'nouki_master_clinics_sync_info';
+const STORAGE_SHIPMENTS_KEY = 'nouki_master_shipments_v1';
+const STORAGE_SUPPLIERS_KEY = 'nouki_master_suppliers_v1';
+
+export function getLocalShipments(): ShipmentItem[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_SHIPMENTS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch {}
+  return INITIAL_SHIPMENTS;
+}
+
+export function saveLocalShipments(shipments: ShipmentItem[]) {
+  try {
+    localStorage.setItem(STORAGE_SHIPMENTS_KEY, JSON.stringify(shipments));
+  } catch {}
+}
+
+export function getLocalSuppliers(): SupplierItem[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_SUPPLIERS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch {}
+  return INITIAL_SUPPLIERS;
+}
+
+export function saveLocalSuppliers(suppliers: SupplierItem[]) {
+  try {
+    localStorage.setItem(STORAGE_SUPPLIERS_KEY, JSON.stringify(suppliers));
+  } catch {}
+}
+
+export function enrichOrdersWithShipments(orders: Order[], shipments: ShipmentItem[]): Order[] {
+  const mapByOrder = new Map<string, ShipmentItem>();
+  const mapByCustomer = new Map<string, ShipmentItem>();
+
+  shipments.forEach((s) => {
+    if (s.orderId) mapByOrder.set(s.orderId, s);
+    if (s.customerName) mapByCustomer.set(s.customerName, s);
+  });
+
+  return orders.map((o) => {
+    const s = mapByOrder.get(o.orderId) || mapByCustomer.get(o.customerName);
+    if (!s) return o;
+    return {
+      ...o,
+      shipmentId: s.shipmentId,
+      importStatus: s.importStatus,
+      arrivalAirport: s.arrivalAirport,
+      coolApplicationStatus: s.coolApplicationStatus,
+      powerOfAttorneyStatus: s.powerOfAttorneyStatus,
+      slipStatus: s.slipStatus,
+      currentLocation: s.currentLocation,
+      customsStatus: s.customsStatus,
+      isKantoNg: s.isKantoNg,
+      isCoolMissing: s.isCoolMissing,
+    };
+  });
+}
 
 export function getCachedDeliveryData(): DeliveryData | null {
   try {
@@ -470,6 +535,9 @@ export function normalizeDeliveryData(data: DeliveryData): DeliveryData {
 
   // 営業担当者のエンリッチ（楽楽上の処理担当者を退避し、顧客マッピングによる実営業担当を適用）
   data.orders = enrichOrdersWithSalesReps(data.orders);
+  // 出荷管理（dbSchemaId: 101270）データのエンリッチ
+  const localShipments = getLocalShipments();
+  data.orders = enrichOrdersWithShipments(data.orders, localShipments);
   if (Array.isArray(data.alerts)) {
     data.alerts = enrichAlertsWithSalesReps(data.alerts, data.orders);
   }
@@ -484,13 +552,56 @@ export async function fetchData(): Promise<FetchResult> {
   // 1. 楽楽販売 API直接連携モード（パターンC）
   if (config.mode === 'rakuraku' || true) {
     try {
+      // 1. 出荷管理 (dbSchemaId: 101270 / searchId: 103958 / listId: 101059)
+      try {
+        const resShip = await fetch('/api/rakuraku/fetch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            baseUrl: config.rakurakuBaseUrl,
+            token: config.rakurakuToken,
+            dbSchemaId: '101270',
+            searchId: '103958',
+            listId: '101059',
+          }),
+        });
+        const shipJson = await resShip.json();
+        if (resShip.ok && shipJson.success && Array.isArray(shipJson.data) && shipJson.data.length > 0) {
+          saveLocalShipments(shipJson.data);
+        }
+      } catch (e) {
+        console.warn('出荷管理 (101270) 取得警告:', e);
+      }
+
+      // 2. 仕入先マスタ (dbSchemaId: 101253 / searchId: 103962 / listId: 101061)
+      try {
+        const resSup = await fetch('/api/rakuraku/fetch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            baseUrl: config.rakurakuBaseUrl,
+            token: config.rakurakuToken,
+            dbSchemaId: '101253',
+            searchId: '103962',
+            listId: '101061',
+          }),
+        });
+        const supJson = await resSup.json();
+        if (resSup.ok && supJson.success && Array.isArray(supJson.data) && supJson.data.length > 0) {
+          saveLocalSuppliers(supJson.data);
+        }
+      } catch (e) {
+        console.warn('仕入先マスタ (101253) 取得警告:', e);
+      }
+
+      // 3. ご注文管理 (dbSchemaId: 101248)
       const res = await fetch('/api/rakuraku/fetch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           baseUrl: config.rakurakuBaseUrl,
           token: config.rakurakuToken,
-          dbSchemaId: config.rakurakuSchemaId,
+          dbSchemaId: config.rakurakuSchemaId || '101248',
         }),
       });
 
