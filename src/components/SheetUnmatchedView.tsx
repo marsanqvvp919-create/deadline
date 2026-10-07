@@ -29,6 +29,7 @@ interface UnmatchedRow {
   kind: 'single' | 'multiple' | 'none';
   matchedClinicNames: string[];
   bulkGroupKey: string | null;
+  noCandidateReason?: string;
 }
 
 interface MatchedIssue {
@@ -371,8 +372,9 @@ export const SheetUnmatchedView: React.FC<{ onCountChange?: (count: number | nul
                     </div>
                     <div className="lg:col-span-7">
                       {r.candidates.length === 0 ? (
-                        <p className="text-xs text-slate-500">
-                          候補の出荷が見つかりません。楽楽販売でクリニック名を確認してください。
+                        <p className="text-xs text-slate-600">
+                          <span className="font-bold text-rose-700">候補なし：</span>
+                          {r.noCandidateReason || '候補の出荷が見つかりません。'}
                           {!data.clinicsLoaded && '（顧客マスタが未取得のため、英語表記での照合はまだ行っていません）'}
                         </p>
                       ) : (

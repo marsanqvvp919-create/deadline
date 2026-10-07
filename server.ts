@@ -1801,7 +1801,12 @@ app.get('/api/shipment-sheet/unmatched', async (req, res) => {
       ...s,
       customerName: s.customerName && s.customerName !== '—' ? s.customerName : orderCustomer.get(s.orderId) || '',
     }));
-    const result = findUnmatched(sheetRows, enriched, serverRakurakuStore.clinics || []);
+    const ordersLite = (serverRakurakuStore.orders?.orders || []).map((o: any) => ({
+      orderId: o.orderId,
+      customerName: o.customerName,
+      status: o.status,
+    }));
+    const result = findUnmatched(sheetRows, enriched, serverRakurakuStore.clinics || [], new Date(), ordersLite);
     return res.json({
       success: true,
       sheetReadAt: sheet.readAt,

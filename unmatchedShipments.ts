@@ -26,6 +26,12 @@ export interface ShipmentLike {
   courier?: string;
 }
 
+export interface OrderLite {
+  orderId: string;
+  customerName: string;
+  status: string;
+}
+
 export interface ClinicLike {
   clinicId?: string;
   clinicName: string;
@@ -44,6 +50,7 @@ export interface UnmatchedRow extends SheetShipmentRow {
   candidates: (ShipmentLike & { reason: CandidateReason })[];
   kind: CandidateKind;
   matchedClinicNames: string[];
+  noCandidateReason?: string;
   bulkGroupKey: string | null;
 }
 
@@ -145,6 +152,23 @@ function narrowByCourier<T extends ShipmentLike>(courier: string, candidates: T[
   return filtered;
 }
 
+/** 2つの文字列の編集距離（1文字の追加・削除・置換を1と数える） */
+function editDistance(a: string, b: string, max: number): number {
+  if (Math.abs(a.length - b.length) > max) return max + 1;
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    let rowMin = i;
+    for (let j = 1; j <= b.length; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      rowMin = Math.min(rowMin, cur[j]);
+    }
+    if (rowMin > max) return max + 1;
+    prev = cur;
+  }
+  return prev[b.length];
+}
+
 function namesMatch(a: string, b: string): boolean {
   const na = normalizeClinicName(a);
   const nb = normalizeClinicName(b);
@@ -152,7 +176,10 @@ function namesMatch(a: string, b: string): boolean {
   if (na === nb) return true;
   const shorter = na.length <= nb.length ? na : nb;
   const longer = na.length <= nb.length ? nb : na;
-  return shorter.length >= 4 && longer.includes(shorter);
+  if (shorter.length >= 4 && longer.includes(shorter)) return true;
+  // 表記ゆれ（例：中野新井薬師寺参道／中野新井薬師参道）：8文字以上なら1文字の違いまで同じとみなす。
+  // 2文字以上の違いは別の院（例：新宿院／渋谷院）のことがあるので同じとみなさない
+  return shorter.length >= 8 && editDistance(na, nb, 1) <= 1;
 }
 
 /** 同じ日に同じ系列へまとめて送ったもの（例：湘南美容クリニック109個口）のグループ名 */
@@ -179,7 +206,8 @@ export function findUnmatched(
   sheetRows: SheetShipmentRow[],
   shipments: ShipmentLike[],
   clinics: ClinicLike[],
-  today: Date = new Date()
+  today: Date = new Date(),
+  orders: OrderLite[] = []
 ): {
   rows: UnmatchedRow[];
   issues: MatchedIssue[];
@@ -276,8 +304,28 @@ export function findUnmatched(
         ? invoiceHits.map((s) => ({ ...s, reason: 'インボイス番号が一致' as const }))
         : narrowByCourier(row.courier, narrowByWarehouse(row.origin, candidates));
 
+    // 候補が無い理由（どこを直せばよいかを画面で分かるようにする）
+    let noCandidateReason: string | undefined;
+    if (narrowed.length === 0) {
+      const clinicOrders = orders
+        .filter((o) => nameSet.some((n) => namesMatch(n, o.customerName || '')))
+        .sort((a, b) => b.orderId.localeCompare(a.orderId));
+      if (matchedClinicNames.length === 0 && clinicOrders.length === 0) {
+        noCandidateReason = '顧客マスタにも受注にも、このクリニック名が見つかりません（名前の表記を確認してください）';
+      } else {
+        const quotes = clinicOrders.filter((o) => (o.status || '').includes('見積')).slice(0, 3);
+        const latest = clinicOrders[0];
+        if (quotes.length > 0 && latest && (latest.status || '').includes('見積')) {
+          noCandidateReason = `最新の受注 ${quotes.map((o) => o.orderId).join('・')} が「${latest.status}」のままです（受注に進んでいないため出荷がありません）`;
+        } else {
+          noCandidateReason = '出荷待ちの出荷も、出荷日が近い出荷もありません（楽楽販売に出荷が登録されていない可能性があります）';
+        }
+      }
+    }
+
     unmatched.push({
       ...row,
+      noCandidateReason,
       candidates: narrowed,
       kind: narrowed.length === 0 ? 'none' : narrowed.length === 1 ? 'single' : 'multiple',
       matchedClinicNames,
