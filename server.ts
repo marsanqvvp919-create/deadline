@@ -443,10 +443,13 @@ function transformCsvToSuppliers(csvText: string): any[] {
     const row = rows[i];
     if (row.length === 0 || row.every(c => c === '')) continue;
 
-    const supplierId = getVal(row, 'supplierId') || `SUP-${i}`;
-    const supplierName = getVal(row, 'supplierName') || `仕入先-${i}`;
-    const country = getVal(row, 'country') || '日本';
-    const leadTimeDays = parseInt(getVal(row, 'leadTimeDays'), 10) || 7;
+    const supplierId = getVal(row, 'supplierId');
+    const supplierName = getVal(row, 'supplierName');
+    if (!supplierId && !supplierName) continue;
+    // 国・標準納期は楽楽販売に値があるときだけ（以前は日本・7日を仮に入れていた）
+    const country = getVal(row, 'country');
+    const leadTimeRaw = parseInt(getVal(row, 'leadTimeDays'), 10);
+    const leadTimeDays = isNaN(leadTimeRaw) ? null : leadTimeRaw;
     const contactPerson = getVal(row, 'contactPerson') || '';
     const email = getVal(row, 'email') || '';
     const phone = getVal(row, 'phone') || '';
@@ -1239,7 +1242,15 @@ async function syncAllRakurakuData(isManual = false): Promise<boolean> {
       // 仕入先マスタ (101253)
       await new Promise((r) => setTimeout(r, 2000));
       try {
-        const resSup = await fetchRakurakuCsv(baseUrl, token, '101253', '103962', '101061', 50);
+        let resSup = await fetchRakurakuCsv(baseUrl, token, '101253', '103962', '101061', 50);
+        recordHeaders('101253', resSup.csv);
+        if (!resSup.csv.trim()) {
+          // 絞込み(103962)で1件も返らないときは、絞込みなしで全件を取り直す
+          console.warn('[Rakuraku Sync] Suppliers search 103962 returned no CSV:', JSON.stringify(resSup.rawResponse || {}).slice(0, 300));
+          await new Promise((r) => setTimeout(r, 2000));
+          resSup = await fetchRakurakuCsv(baseUrl, token, '101253', undefined, '101061', 50);
+          recordHeaders('101253', resSup.csv);
+        }
         const parsedSuppliers = transformCsvToSuppliers(resSup.csv);
         if (parsedSuppliers && parsedSuppliers.length > 0) {
           serverRakurakuStore.suppliers = parsedSuppliers;
@@ -1255,6 +1266,7 @@ async function syncAllRakurakuData(isManual = false): Promise<boolean> {
       await new Promise((r) => setTimeout(r, 2000));
       try {
         const resProd = await fetchRakurakuCsv(baseUrl, token, '101252', 50);
+        recordHeaders('101252', resProd.csv);
         const parsedProducts = transformCsvToProducts(resProd.csv);
         if (parsedProducts && parsedProducts.length > 0) {
           serverRakurakuStore.products = parsedProducts;
@@ -1270,6 +1282,7 @@ async function syncAllRakurakuData(isManual = false): Promise<boolean> {
       await new Promise((r) => setTimeout(r, 2000));
       try {
         const resClinics = await fetchRakurakuCsv(baseUrl, token, '101250', 50);
+        recordHeaders('101250', resClinics.csv);
         const parsedClinics = transformCsvToClinics(resClinics.csv);
         if (parsedClinics && parsedClinics.length > 0) {
           serverRakurakuStore.clinics = parsedClinics;
