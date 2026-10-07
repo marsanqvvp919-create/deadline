@@ -5,6 +5,8 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { Storage } from '@google-cloud/storage';
+import { GoogleAuth } from 'google-auth-library';
+import { parseSheetRows, findUnmatched } from './unmatchedShipments';
 
 dotenv.config();
 
@@ -167,6 +169,7 @@ const PRODUCT_FIELD_MAP: Record<string, string[]> = {
 const CLINIC_FIELD_MAP: Record<string, string[]> = {
   clinicId: ['109898', 'クリニックID', '顧客ID', '得意先コード', 'clinicId'],
   clinicName: ['110108', '顧客名', 'クリニック名', '病院名', 'clinicName'],
+  clinicNameEn: ['クリニック名英語表記', '英語表記', 'clinicNameEn'],
   directorName: ['院長名', '担当医師', '代表者名', '代表者', 'directorName'],
   salesRep: ['109978', '担当者', '担当者（ユーザ）', '担当営業', '営業担当', 'salesRep'],
   currency: ['110167', '販売通貨', '通貨', 'currency'],
@@ -269,6 +272,7 @@ const SHIPMENT_FIELD_MAP: Record<string, string[]> = {
   kantoCustomsPermitted: ['関東通関可否', '関東通関', '関東通関判定', 'kantoCustomsPermitted'],
   customsStatus: ['通関ステータス', '通関状況', '税関状況', 'customsStatus'],
   shippedDate: ['110017', '出荷日', '発送日', 'shippedDate'],
+  shipStatus: ['出荷状態', '出荷ステータス', 'shipStatus'],
 };
 
 function transformCsvToShipments(csvText: string): any[] {
@@ -320,6 +324,7 @@ function transformCsvToShipments(csvText: string): any[] {
     const kantoCustomsPermitted = getVal(row, 'kantoCustomsPermitted') || '—';
     const customsStatus = getVal(row, 'customsStatus') || '—';
     const shippedDate = getVal(row, 'shippedDate') || '—';
+    const shipStatus = getVal(row, 'shipStatus') || '';
 
     // クール手配漏れの条件: クール申請・委任状・伝票のどれかが「未」
     const isCoolMissing =
@@ -350,6 +355,7 @@ function transformCsvToShipments(csvText: string): any[] {
       kantoCustomsPermitted,
       customsStatus,
       shippedDate,
+      shipStatus,
       isKantoNg,
       isCoolMissing,
       updatedAt: new Date().toISOString().replace('T', ' ').slice(0, 16),
@@ -534,6 +540,7 @@ function transformCsvToClinics(csvText: string): any[] {
     clinics.push({
       clinicId,
       clinicName,
+      clinicNameEn: getVal(row, 'clinicNameEn') || '',
       directorName: getVal(row, 'directorName') || '院長',
       salesRep: getVal(row, 'salesRep') || '未設定',
       currency: getVal(row, 'currency') || 'JPY',
@@ -1503,6 +1510,57 @@ app.post('/api/rakuraku/master/clinics', async (_req, res) => {
     });
   }
   return res.json(respondNotYetSynced('101250', currentIp, 'クリニックマスタ'));
+});
+
+// ----------------------------------------------------------------------
+// 「◆出荷ステータス」シートと楽楽販売の照合（読み取りのみ。シートにも楽楽販売にも書き込まない）
+// ----------------------------------------------------------------------
+const SHIPMENT_STATUS_SHEET_ID = process.env.SHIPMENT_STATUS_SHEET_ID || '1woJTJRIRd_fV8rvWtuWQJkHIRD-FxEV50j5WosEguJo';
+const SHIPMENT_STATUS_SHEET_RANGE = '出荷ステータス!A:N';
+const SHEET_CACHE_MS = 15 * 60 * 1000;
+let sheetCache: { values: string[][]; readAt: string } | null = null;
+
+async function readShipmentStatusSheet(force = false): Promise<{ values: string[][]; readAt: string }> {
+  if (!force && sheetCache && Date.now() - new Date(sheetCache.readAt).getTime() < SHEET_CACHE_MS) {
+    return sheetCache;
+  }
+  const auth = new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'] });
+  const client = await auth.getClient();
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHIPMENT_STATUS_SHEET_ID}/values/${encodeURIComponent(SHIPMENT_STATUS_SHEET_RANGE)}`;
+  const res = await client.request<{ values?: string[][] }>({ url });
+  sheetCache = { values: res.data.values || [], readAt: new Date().toISOString() };
+  return sheetCache;
+}
+
+app.get('/api/shipment-sheet/unmatched', async (req, res) => {
+  const shipments = serverRakurakuStore.shipments;
+  if (!shipments || shipments.length === 0) {
+    return res.json({
+      success: false,
+      pending: true,
+      error: '楽楽販売の出荷管理データをまだ取得できていません。取得後に照合します',
+      rakurakuLastSuccessTime: serverRakurakuStore.lastSuccessTime,
+    });
+  }
+  try {
+    const sheet = await readShipmentStatusSheet(req.query.refresh === '1');
+    const sheetRows = parseSheetRows(sheet.values);
+    const result = findUnmatched(sheetRows, shipments, serverRakurakuStore.clinics || []);
+    return res.json({
+      success: true,
+      sheetReadAt: sheet.readAt,
+      rakurakuLastSuccessTime: serverRakurakuStore.lastSuccessTime,
+      clinicsLoaded: (serverRakurakuStore.clinics || []).length > 0,
+      ...result,
+    });
+  } catch (err: any) {
+    const status = err?.response?.status || err?.code;
+    let message = err?.message || 'シートの読み込みに失敗しました';
+    if (status === 403) message = 'シートを読む権限がありません。サービスアカウントへの共有（閲覧者）と Sheets API の有効化を確認してください';
+    if (status === 404) message = 'シートまたは「出荷ステータス」タブが見つかりません';
+    console.warn('[Shipment Sheet] Read failed:', status, err?.message);
+    return res.json({ success: false, error: message, errorStatus: status });
+  }
 });
 
 // 現在のサーバー発信元IP確認API

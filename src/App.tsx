@@ -36,6 +36,7 @@ import { ArrivalTrackingView } from './components/ArrivalTrackingView';
 import { CustomsManagementView } from './components/CustomsManagementView';
 import { CoolMissingView } from './components/CoolMissingView';
 import { KantoCustomsNgView } from './components/KantoCustomsNgView';
+import { SheetUnmatchedView, fetchSheetUnmatched } from './components/SheetUnmatchedView';
 import { BudgetSettingsModal } from './components/BudgetSettingsModal';
 import { DailyDigestModal } from './components/DailyDigestModal';
 import { ClinicProductStatusDrawer } from './components/ClinicProductStatusDrawer';
@@ -178,12 +179,30 @@ export default function App() {
   const [clinics, setClinics] = useState<ClinicItem[]>(() => getLocalClinics());
   const [shipments, setShipments] = useState<ShipmentItem[]>(() => getLocalShipments());
 
-  // 未照合画面は実照合機能実装まで非表示
+  // 旧「未照合・書類不備」画面のURLは、シートとの照合画面に振り替える
   useEffect(() => {
-    if ((activeTab as string) === 'unmatched_sheets' || (activeTab as string) === 'unmatched_customs') {
-      setActiveTab('customs_management');
+    if ((activeTab as string) === 'unmatched_customs') {
+      setActiveTab('unmatched_sheets');
     }
   }, [activeTab]);
+
+  // 「楽楽販売と未照合」の件数（サイドバーのバッジ用。サーバーの照合結果を15分ごとに読む）
+  const [sheetUnmatchedCount, setSheetUnmatchedCount] = useState<number | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const loadCount = () =>
+      fetchSheetUnmatched()
+        .then((json) => {
+          if (!cancelled) setSheetUnmatchedCount(json.success ? json.rows?.length ?? 0 : null);
+        })
+        .catch(() => {});
+    loadCount();
+    const timer = setInterval(loadCount, 15 * 60 * 1000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, []);
 
   const STORAGE_BUDGET_KEY = 'nouki_sales_budgets_v1';
   const [salesBudgets, setSalesBudgets] = useState<Record<string, number>>(() => {
@@ -619,6 +638,13 @@ export default function App() {
       badgeColor: 'bg-rose-600 text-white font-bold',
     },
     {
+      id: 'unmatched_sheets' as ViewTab,
+      label: '楽楽販売と未照合',
+      icon: FileWarning,
+      badge: sheetUnmatchedCount ? `${sheetUnmatchedCount}` : null,
+      badgeColor: 'bg-amber-600 text-white font-bold',
+    },
+    {
       id: 'inventory_management' as ViewTab,
       label: '韓国・シンガポール倉庫在庫',
       icon: Building,
@@ -1024,6 +1050,10 @@ export default function App() {
               clinics={clinics}
               onSelectOrder={handleOpenDetail}
             />
+          )}
+
+          {activeTab === 'unmatched_sheets' && (
+            <SheetUnmatchedView onCountChange={setSheetUnmatchedCount} />
           )}
 
           {activeTab === 'inventory_management' && (
