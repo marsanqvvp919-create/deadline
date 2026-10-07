@@ -315,7 +315,9 @@ export function findUnmatched(
       const sameClinic = hits.some(
         (s) => (s.customerId && resolvedIds.has(s.customerId)) || names.some((n) => namesMatch(n, s.customerName || ''))
       );
-      if (!sameClinic && resolved.length > 0) {
+      // 受注にも顧客にも紐づいていない出荷（一括発注の店舗ごとの出荷など）は、比べる相手が無いので確認しない
+      const comparable = hits.some((s) => (s.orderId && s.orderId !== '—') || s.customerId || s.customerName);
+      if (!sameClinic && comparable && resolved.length > 0) {
         issues.push({ ...row, issue: 'registered_elsewhere', shipments: hits });
         continue;
       }

@@ -1211,6 +1211,19 @@ function applyWarehouseShipDates() {
   });
 }
 
+// 出荷のクリニック名：受注IDからご注文管理の名前、受注に紐づかない出荷（一括発注の店舗ごとの出荷など）は
+// 顧客ID から顧客マスタの名前を使う
+function shipmentCustomerResolver(): (s: any) => string {
+  const byOrder = new Map<string, string>();
+  (serverRakurakuStore.orders?.orders || []).forEach((o: any) => byOrder.set(o.orderId, o.customerName));
+  const byClinicId = new Map<string, string>();
+  (serverRakurakuStore.clinics || []).forEach((c: any) => c.clinicId && byClinicId.set(c.clinicId, c.clinicName));
+  return (s: any) => {
+    if (s.customerName && s.customerName !== '—') return s.customerName;
+    return byOrder.get(s.orderId) || (s.customerId ? byClinicId.get(s.customerId) : '') || '';
+  };
+}
+
 function recordDelayHistory() {
   const orders = serverRakurakuStore.orders?.orders;
   if (!orders) return;
@@ -1805,15 +1818,14 @@ app.get('/api/shipment-sheet/unmatched', async (req, res) => {
   try {
     const sheet = await readShipmentStatusSheet(req.query.refresh === '1');
     const sheetRows = parseSheetRows(sheet.values);
-    // 出荷管理の一覧にはクリニック名が無いため、受注ID からご注文管理のクリニック名を補う
-    const orderCustomer = new Map<string, string>();
-    (serverRakurakuStore.orders?.orders || []).forEach((o: any) => orderCustomer.set(o.orderId, o.customerName));
+    // 出荷管理の一覧にはクリニック名が無いため、受注ID（無ければ顧客ID）から補う
+    const customerOf = shipmentCustomerResolver();
     // 照合に使う項目だけにする（全項目を返すと応答が大きくなる）
     const enriched = shipments.map((s: any) => ({
       shipmentId: s.shipmentId,
       orderId: s.orderId,
       customerId: s.customerId,
-      customerName: s.customerName && s.customerName !== '—' ? s.customerName : orderCustomer.get(s.orderId) || '',
+      customerName: customerOf(s),
       trackingNo: s.trackingNo,
       shippedDate: s.shippedDate,
       shipStatus: s.shipStatus,
@@ -1992,12 +2004,11 @@ async function runSheetImportDryRun(trigger: 'schedule' | 'manual', write = fals
     await loadImportPreview();
     const shipments = serverRakurakuStore.shipments || [];
     if (shipments.length === 0) throw new Error('楽楽販売の出荷管理データをまだ取得できていません');
-    const orderCustomer = new Map<string, string>();
-    (serverRakurakuStore.orders?.orders || []).forEach((o: any) => orderCustomer.set(o.orderId, o.customerName));
+    const customerOf = shipmentCustomerResolver();
     const sheet = await readShipmentStatusSheet(true);
     const preview = buildImportPreview(
       sheet.values,
-      shipments.map((sh: any) => ({ ...sh, customerName: orderCustomer.get(sh.orderId) || '' }))
+      shipments.map((sh: any) => ({ ...sh, customerName: customerOf(sh) }))
     );
     let writeResult: any = null;
     let failedCount = 0;

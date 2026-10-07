@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { useUrlState } from '../utils/listState';
 import { Order, ShipmentItem } from '../types';
-import { getConfiguredUrls } from '../api';
+import { getConfiguredUrls, getLocalClinics } from '../api';
 import { openRakurakuWithCopiedId } from '../utils';
 import { Search, Truck, ExternalLink, Snowflake, Copy } from 'lucide-react';
 
@@ -69,6 +69,12 @@ export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: Shipmen
   const [copied, setCopied] = useState<string | null>(null);
   const { rakurakuBaseUrl } = getConfiguredUrls();
 
+  const clinicById = useMemo(() => {
+    const m = new Map<string, string>();
+    getLocalClinics().forEach((c) => c.clinicId && m.set(c.clinicId, c.clinicName));
+    return m;
+  }, []);
+
   const customerByOrder = useMemo(() => {
     const m = new Map<string, string>();
     orders.forEach((o) => m.set(o.orderId, o.customerName));
@@ -88,9 +94,16 @@ export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: Shipmen
         }
         return !!shipped && (today.getTime() - shipped.getTime()) / 86400000 <= ACTIVE_DAYS;
       })
-      .map((x) => ({ ...x, customerName: customerByOrder.get(x.s.orderId) || '（クリニック名不明）' }))
+      .map((x) => ({
+        ...x,
+        // 受注に紐づかない出荷（一括発注の店舗ごとの出荷など）は顧客IDから顧客マスタの名前を使う
+        customerName:
+          customerByOrder.get(x.s.orderId) ||
+          (x.s.customerId ? clinicById.get(x.s.customerId) : '') ||
+          '（クリニック名不明）',
+      }))
       .sort((a, b) => (b.shipped?.getTime() || 0) - (a.shipped?.getTime() || 0));
-  }, [shipments, customerByOrder]);
+  }, [shipments, customerByOrder, clinicById]);
 
   const warehouses = useMemo(
     () => Array.from(new Set(items.map((i) => i.s.warehouse).filter((w) => !blank(w)))) as string[],
@@ -183,7 +196,7 @@ export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: Shipmen
                   <div className="min-w-0">
                     <div className="font-bold text-sm text-slate-900 truncate">{customerName}</div>
                     <div className="text-[11px] text-slate-500 font-mono">
-                      {s.shipmentId} ／ 受注 {s.orderId}
+                      {s.shipmentId} ／ {s.orderId && s.orderId !== '—' ? `受注 ${s.orderId}` : '受注の紐づけなし'}
                     </div>
                   </div>
                   <span className="px-2 py-0.5 rounded-md text-[11px] font-bold bg-slate-900 text-white shrink-0">
