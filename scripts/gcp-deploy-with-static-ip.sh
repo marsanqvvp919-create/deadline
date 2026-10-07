@@ -79,7 +79,8 @@ gcloud run deploy $SERVICE_NAME \
     --allow-unauthenticated \
     --vpc-connector $CONNECTOR_NAME \
     --vpc-egress all-traffic \
-    --set-env-vars VITE_RAKURAKU_BASE_URL="https://hnsibot.rakurakuhanbai.jp/ykbxg2a/",VITE_DATA_KEY="lzWjxU5iMLMUSN57asqR6ov2w9eXrJ9Roeqq8KSY9zk93lrYHa54d4zaUr0zKO0a"
+    --set-env-vars VITE_RAKURAKU_BASE_URL="https://hnsibot.rakurakuhanbai.jp/ykbxg2a/" \
+    --update-secrets VITE_DATA_KEY=rakuraku-api-token:latest
 
 echo "=========================================================="
 echo "🎉 デプロイメントが完了しました！"

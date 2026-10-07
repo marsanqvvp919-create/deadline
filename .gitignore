@@ -6,3 +6,6 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# esbuild output (built in Docker)
+server.js

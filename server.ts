@@ -1163,7 +1163,7 @@ async function syncAllRakurakuData(isManual = false): Promise<boolean> {
   serverRakurakuStore.isFetching = true;
   serverRakurakuStore.lastAttemptTime = new Date().toISOString();
 
-  const token = process.env.VITE_DATA_KEY || 'lzWjxU5iMLMUSN57asqR6ov2w9eXrJ9Roeqq8KSY9zk93lrYHa54d4zaUr0zKO0a';
+  const token = process.env.VITE_DATA_KEY || '';
   const baseUrl = (process.env.VITE_RAKURAKU_BASE_URL || 'https://hnsibot.rakurakuhanbai.jp/ykbxg2a/').replace(/\/+$/, '');
 
   try {
@@ -1584,7 +1584,7 @@ app.get('/api/rakuraku/ip', async (_req, res) => {
 // 楽楽販売 接続診断API
 app.get('/api/rakuraku/diagnose', async (_req, res) => {
   const serverIp = await getOutboundIp();
-  const token = process.env.VITE_DATA_KEY || 'lzWjxU5iMLMUSN57asqR6ov2w9eXrJ9Roeqq8KSY9zk93lrYHa54d4zaUr0zKO0a';
+  const token = process.env.VITE_DATA_KEY || '';
   const baseUrl = process.env.VITE_RAKURAKU_BASE_URL || 'https://hnsibot.rakurakuhanbai.jp/ykbxg2a/';
   const cleanBaseUrl = baseUrl.replace(/\/+$/, '');
   const apiUrl = `${cleanBaseUrl}/api/csvexport/version/v1`;
@@ -1642,7 +1642,7 @@ app.get('/api/rakuraku/diagnose', async (_req, res) => {
 app.post('/api/rakuraku/master/billing', async (req, res) => {
   const currentIp = await getOutboundIp();
   try {
-    const token = req.body.token || process.env.VITE_DATA_KEY || 'lzWjxU5iMLMUSN57asqR6ov2w9eXrJ9Roeqq8KSY9zk93lrYHa54d4zaUr0zKO0a';
+    const token = req.body.token || process.env.VITE_DATA_KEY || '';
     const baseUrl = req.body.baseUrl || process.env.VITE_RAKURAKU_BASE_URL || 'https://hnsibot.rakurakuhanbai.jp/ykbxg2a/';
     const cleanBaseUrl = baseUrl.replace(/\/+$/, '');
 
@@ -1670,7 +1670,7 @@ app.post('/api/rakuraku/master/billing', async (req, res) => {
 // 会計システム連携用CSVエクスポートAPI
 app.get('/api/rakuraku/accounting/csv', async (_req, res) => {
   try {
-    const token = process.env.VITE_DATA_KEY || 'lzWjxU5iMLMUSN57asqR6ov2w9eXrJ9Roeqq8KSY9zk93lrYHa54d4zaUr0zKO0a';
+    const token = process.env.VITE_DATA_KEY || '';
     const baseUrl = process.env.VITE_RAKURAKU_BASE_URL || 'https://hnsibot.rakurakuhanbai.jp/ykbxg2a/';
     const cleanBaseUrl = baseUrl.replace(/\/+$/, '');
 

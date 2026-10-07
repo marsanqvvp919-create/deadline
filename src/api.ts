@@ -264,7 +264,7 @@ export function getConfiguredUrls() {
     dataUrl: localUrl || envUrl || '',
     dataKey: localKey || envKey || '',
     rakurakuBaseUrl: localRakuraku || envRakuraku || 'https://hnsibot.rakurakuhanbai.jp/ykbxg2a/',
-    rakurakuToken: localToken || 'lzWjxU5iMLMUSN57asqR6ov2w9eXrJ9Roeqq8KSY9zk93lrYHa54d4zaUr0zKO0a',
+    rakurakuToken: localToken || '',
     rakurakuSchemaId: localSchema || '101248',
     serverIp: currentServerIp,
   };
