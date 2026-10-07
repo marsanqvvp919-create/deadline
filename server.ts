@@ -362,7 +362,29 @@ function transformCsvToShipments(csvText: string): any[] {
     });
   }
 
-  return records;
+  return mergeShipmentRowsById(records);
+}
+
+// 出荷管理のCSVは明細ごとに1行あるため、出荷IDごとに1件にまとめる（件数・メニューは出荷単位で数える）。
+// 出荷の項目は明細行の間で同じ値なので、空でない最初の値を使う。
+function mergeShipmentRowsById(records: any[]): any[] {
+  const byId = new Map<string, any>();
+  for (const r of records) {
+    const existing = byId.get(r.shipmentId);
+    if (!existing) {
+      byId.set(r.shipmentId, { ...r, lineCount: 1 });
+      continue;
+    }
+    existing.lineCount += 1;
+    for (const [k, v] of Object.entries(r)) {
+      if ((existing[k] === undefined || existing[k] === '' || existing[k] === '—') && v !== '' && v !== '—') {
+        existing[k] = v;
+      }
+    }
+    existing.isCoolMissing = existing.isCoolMissing || r.isCoolMissing;
+    existing.isKantoNg = existing.isKantoNg || r.isKantoNg;
+  }
+  return Array.from(byId.values());
 }
 
 // 仕入先マスタ（dbSchemaId: 101253）マッピング
@@ -760,8 +782,9 @@ function transformCsvToDeliveryData(csvText: string): any {
       order.orderState = '進行中';
     }
 
-    // 進行中の伝票に対してアラートを判定（納品完了および全明細出荷済の伝票は除外）
-    if (order.orderState !== '納品完了' && order.orderState !== '全明細出荷済') {
+    // 進行中の伝票に対してアラートを判定（納品完了・全明細出荷済、および見積作成中・見積済み・出荷済みの伝票は除外）
+    const alertExcludedStatus = ['見積作成中', '見積済み', '出荷済み'].includes((order.status || '').trim());
+    if (order.orderState !== '納品完了' && order.orderState !== '全明細出荷済' && !alertExcludedStatus) {
       for (const line of order.lines) {
         // すに出荷完了している明細はアラート対象外
         if (line.stage === '出荷完了' || line.shippedQty >= line.quantity || line.remainingQty === 0) {

@@ -129,6 +129,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   // 漏れアラート件数
   const leakageAlertsCount = alerts.filter((a) => a.type === '漏れ').length;
+  const missedOrderLinesCount = alerts.filter((a) => a.ruleId === 'B1').length;
+  const missingDueDateLinesCount = alerts.filter((a) => a.ruleId === 'B2').length;
 
   // 入金済みの未発注品目 (送料・手数料は除外)
   const paidUnorderedLines = incompleteLines.filter((l) => {
@@ -528,10 +530,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <span className="text-2xl font-extrabold font-mono text-orange-600">
                 {leakageAlertsCount}
               </span>
-              <span className="text-xs text-orange-600 font-bold">件</span>
+              <span className="text-xs text-orange-600 font-bold">明細</span>
             </div>
-            <span className="text-[11px] text-slate-400 mt-1 block leading-tight">
-              発注・入力漏れ等の警告案件
+            <div className="mt-1 flex flex-wrap gap-1 text-[10px] font-bold text-orange-800">
+              <span className="px-1.5 py-0.5 rounded bg-orange-100">発注漏れ {missedOrderLinesCount}</span>
+              <span className="px-1.5 py-0.5 rounded bg-orange-100">納期未設定 {missingDueDateLinesCount}</span>
+            </div>
+            <span className="text-[11px] text-slate-500 mt-1 block leading-tight">
+              受注日から3日以上たっても未発注の明細と、納品予定日が未入力の明細（見積・出荷済みの伝票は除く）
             </span>
           </div>
           <div className="mt-3 pt-2.5 border-t border-orange-100 flex items-center justify-between">
