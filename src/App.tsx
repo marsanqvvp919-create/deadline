@@ -1162,6 +1162,7 @@ export default function App() {
             <ArrivalTrackingView
               orders={deliveryData.orders}
               shipments={shipments}
+              onSelectOrder={handleOpenDetail}
             />
           )}
         </main>

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { classifyNumber, carrierName, hintedCarrier } from '../utils/trackingNumbers';
-import { parseYmd } from '../utils';
+import { parseYmd, isShippingOrFee } from '../utils';
 import { useUrlState } from '../utils/listState';
 import { Order, ShipmentItem } from '../types';
 import { getConfiguredUrls, getLocalClinics } from '../api';
@@ -148,7 +148,11 @@ function carrierOf(s: TrackingShipment, c: CarrierStatus | undefined, boxes: str
 const ACTIVE_DAYS = 21;
 const RECENT_DELIVERED_DAYS = 7;
 
-export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: ShipmentItem[] }> = ({ orders, shipments }) => {
+export const ArrivalTrackingView: React.FC<{
+  orders: Order[];
+  shipments: ShipmentItem[];
+  onSelectOrder?: (order: Order, lineKey?: string) => void;
+}> = ({ orders, shipments, onSelectOrder }) => {
   const [stageFilter, setStageFilter] = useUrlState<NowStatus | 'all'>('now', 'all');
   const [warehouseFilter, setWarehouseFilter] = useUrlState<string>('wh', 'all');
   const [sortKey, setSortKey] = useUrlState<SortKey>('sort', 'status');
@@ -211,6 +215,31 @@ export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: Shipmen
     return m;
   }, [orders]);
   const repByOrder = useMemo(() => new Map(orders.map((o) => [o.orderId, o.salesRep])), [orders]);
+  const orderById = useMemo(() => new Map(orders.map((o) => [o.orderId, o])), [orders]);
+  const productNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    orders.forEach((o) => o.lines.forEach((l) => l.productId && !m.has(l.productId) && m.set(l.productId, l.productName)));
+    return m;
+  }, [orders]);
+  // 受注に紐づかない出荷で、押して中身を開いている出荷ID
+  const [expanded, setExpanded] = useState<string | null>(null);
+
+  // この出荷の中身：明細の受注ID・商品ID（出荷管理の明細）から、受注日と商品名・数量を出す
+  const contentsOf = (s: TrackingShipment) => {
+    const refs: { orderId: string; productId: string }[] = ((s as any).lineRefs || []).filter((r: any) => r?.productId);
+    const orderIds = Array.from(new Set([...(refs.map((r) => r.orderId).filter(Boolean)), s.orderId].filter((id) => id && id !== '—')));
+    const ordersHere = orderIds.map((id) => orderById.get(id)).filter((o): o is Order => !!o);
+    const items =
+      refs.length > 0
+        ? refs.map((r) => {
+            const line = orderById.get(r.orderId)?.lines.find((l) => l.productId === r.productId);
+            return { name: line?.productName || productNameById.get(r.productId) || `商品ID ${r.productId}`, qty: line?.quantity, lineKey: line?.lineKey, orderId: r.orderId };
+          })
+        : (ordersHere[0]?.lines || [])
+            .filter((l) => !isShippingOrFee(l.productName, l.productId))
+            .map((l) => ({ name: l.productName, qty: l.quantity, lineKey: l.lineKey, orderId: ordersHere[0].orderId }));
+    return { order: ordersHere[0], orderDates: ordersHere.map((o) => o.orderDate).filter(Boolean), items };
+  };
 
   const items = useMemo(() => {
     const today = new Date();
@@ -524,6 +553,7 @@ export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: Shipmen
             const eta = c && c.status !== 'delivered' ? ymd(c.estimatedDelivery) : '';
             const deliveredOn = now === 'delivered' ? ymd(c?.deliveredAt || c?.lastEventAt) || ymd(s.deliveredDate) : '';
             const shippedOn = blank(s.warehouseShippedDate) ? (blank(s.shippedDate) ? '' : s.shippedDate) : s.warehouseShippedDate;
+            const contents = contentsOf(s);
             return (
               <div key={s.shipmentId} className={`bg-white border border-slate-200 border-l-4 ${st.border} rounded-2xl shadow-xs flex flex-col overflow-hidden`}>
                 {/* 今の状況（いちばん大きく） */}
@@ -540,12 +570,51 @@ export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: Shipmen
                   </span>
                 </div>
                 <div className="p-4 flex flex-col gap-2.5 flex-1">
-                  <div className="min-w-0">
-                    <div className="font-bold text-sm text-slate-900 truncate">{customerName}</div>
+                  {/* 押すと伝票の詳細（いつ受注の、どんな商品か）を開く */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (contents.order && onSelectOrder) onSelectOrder(contents.order, contents.items.find((i) => i.lineKey)?.lineKey);
+                      else setExpanded(expanded === s.shipmentId ? null : s.shipmentId);
+                    }}
+                    className="min-w-0 text-left rounded-lg -m-1 p-1 hover:bg-slate-50 group"
+                    title={contents.order ? '押すと伝票の詳細を開きます' : '押すと出荷の中身を表示します'}
+                  >
+                    <div className="font-bold text-sm text-slate-900 truncate group-hover:text-blue-700">{customerName}</div>
                     <div className="text-[11px] text-slate-500 font-mono">
                       {s.shipmentId} ／ {s.orderId && s.orderId !== '—' ? `受注 ${s.orderId}` : '受注の紐づけなし'}
                     </div>
-                  </div>
+                    <div className="text-[11px] text-slate-700 mt-1">
+                      {contents.orderDates.length > 0 && <span className="font-bold">受注日 {contents.orderDates.map((d) => d.replace(/-/g, '/')).join('・')}　</span>}
+                      {contents.items.length > 0 ? (
+                        <span>
+                          {contents.items
+                            .slice(0, 2)
+                            .map((i) => `${i.name}${i.qty ? ` ×${i.qty}` : ''}`)
+                            .join('、')}
+                          {contents.items.length > 2 && ` ほか${contents.items.length - 2}点`}
+                        </span>
+                      ) : (
+                        <span className="text-slate-400">商品の情報なし</span>
+                      )}
+                      <span className="text-blue-600 font-bold ml-1">{contents.order ? '詳細 ›' : expanded === s.shipmentId ? '閉じる' : '中身 ›'}</span>
+                    </div>
+                  </button>
+                  {expanded === s.shipmentId && !contents.order && (
+                    <ul className="text-[11px] text-slate-700 bg-slate-50 rounded-lg px-3 py-2 space-y-0.5 list-disc list-inside">
+                      {contents.items.length > 0 ? (
+                        contents.items.map((i, idx) => (
+                          <li key={idx}>
+                            {i.name}
+                            {i.qty ? ` ×${i.qty}` : ''}
+                            {i.orderId && <span className="text-slate-400 font-mono ml-1">（受注 {i.orderId}）</span>}
+                          </li>
+                        ))
+                      ) : (
+                        <li>楽楽販売の出荷管理に明細がありません</li>
+                      )}
+                    </ul>
+                  )}
 
                   {/* 配送会社の最新の記録 */}
                   {c ? (

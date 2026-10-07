@@ -2835,7 +2835,8 @@ async function runCarrierWriteback(): Promise<{ rows: number; succeedCount?: num
         failure += result.failureCount || 0;
         if (result.failureCount === 0) chunk.forEach((r) => (carrierWritten[r[0]] = r.slice(1).join('|')));
       } catch (e: any) {
-        error = e?.message || String(e);
+        // 楽楽販売の応答（status・json・text）をそのまま残す
+        error = e?.message || (typeof e === 'object' ? JSON.stringify(e).slice(0, 800) : String(e));
         break;
       }
     }
@@ -2968,6 +2969,10 @@ setInterval(() => {
 setTimeout(() => {
   runCarrierAutoRefresh().catch((e) => console.warn('[Carriers] Auto refresh failed:', e?.message || e));
 }, 3 * 60 * 1000);
+// 書き戻しの1回目は、起動から11分後（10分は内容を確認できるよう書き込まない）
+setTimeout(() => {
+  runCarrierWriteback().catch((e) => console.warn('[Carriers] Write-back failed:', e?.message || e));
+}, 11 * 60 * 1000);
 
 async function startServer() {
   const distPath = path.resolve(process.cwd(), 'dist');
