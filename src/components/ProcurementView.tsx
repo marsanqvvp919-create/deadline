@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Order, OrderLine, PaymentStatus } from '../types';
 import { formatDate, getRemainingDaysInfo, getOrderBorderColor, buildRakurakuUrl, openRakurakuWithCopiedId, isShippingOrFee, parseYmd, startOfToday, todayYmd } from '../utils';
 import { getConfiguredUrls } from '../api';
@@ -78,7 +78,11 @@ export const ProcurementView: React.FC<ProcurementViewProps> = ({
   // UI States
   const [activeFilter, setActiveFilter] = useState<ProcurementFilter>('paid_unordered');
   const [viewMode, setViewMode] = useState<ViewMode>('by_supplier');
-  const [localSearch, setLocalSearch] = useState<string>('');
+  // 画面上部の検索語もこの検索欄に出す（以前は上部の検索で絞り込まれても欄が空のままで、0件の理由がわからなかった）
+  const [localSearch, setLocalSearch] = useState<string>(globalSearchQuery);
+  useEffect(() => {
+    setLocalSearch(globalSearchQuery);
+  }, [globalSearchQuery]);
   const [selectedSupplier, setSelectedSupplier] = useState<string>('all');
   const [selectedLineKeys, setSelectedLineKeys] = useState<Set<string>>(new Set());
 
@@ -200,7 +204,7 @@ export const ProcurementView: React.FC<ProcurementViewProps> = ({
 
   // 3. フィルタリング
   const filteredItems = useMemo(() => {
-    const q = (localSearch || globalSearchQuery).trim().toLowerCase();
+    const q = localSearch.trim().toLowerCase();
 
     return flatItems.filter((it) => {
       // フィルタ種別
@@ -803,6 +807,26 @@ ${linesText}
         </div>
       </div>
 
+      {/* 絞り込み中の表示（どの表示形式でも出す） */}
+      {(localSearch.trim() || selectedSupplier !== 'all') && (
+        <div className="flex flex-wrap items-center gap-2 text-xs font-bold text-blue-800 bg-blue-50 border border-blue-200 rounded-xl px-3 py-2">
+          <span>
+            絞り込み中：{localSearch.trim() && `検索「${localSearch.trim()}」`}
+            {selectedSupplier !== 'all' && ` 仕入先「${selectedSupplier}」`}（{filteredItems.length}品目を表示）
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              setLocalSearch('');
+              setSelectedSupplier('all');
+            }}
+            className="underline text-blue-700"
+          >
+            解除
+          </button>
+        </div>
+      )}
+
       {/* VIEW 1: 仕入先別まとめ（発注書一括モード） */}
       {viewMode === 'by_supplier' && (
         <div className="space-y-5">
@@ -813,8 +837,22 @@ ${linesText}
                 該当する未発注商品はありません
               </h3>
               <p className="text-xs text-slate-500">
-                選択中のフィルター条件を満たす発注待ち商品は現在0件です。
+                {localSearch.trim() || selectedSupplier !== 'all'
+                  ? `検索「${localSearch.trim() || '—'}」${selectedSupplier !== 'all' ? `・仕入先「${selectedSupplier}」` : ''}で絞り込んでいるため、表示が0件です。`
+                  : '選択中のフィルター条件を満たす発注待ち商品は現在0件です。'}
               </p>
+              {(localSearch.trim() || selectedSupplier !== 'all') && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLocalSearch('');
+                    setSelectedSupplier('all');
+                  }}
+                  className="mt-2 px-3 py-1.5 rounded-lg bg-slate-900 text-white text-xs font-bold"
+                >
+                  絞り込みを解除
+                </button>
+              )}
             </div>
           ) : (
             groupedBySupplier.map((group) => {

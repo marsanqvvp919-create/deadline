@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useUrlState } from '../utils/listState';
 import { Order, OrderLine, ViewTab, ClinicItem } from '../types';
 import { formatDate, getRemainingDaysInfo, getOrderBorderColor, buildRakurakuUrl, isShippingOrFee } from '../utils';
@@ -85,7 +85,11 @@ export const UnshippedClinicsView: React.FC<UnshippedClinicsViewProps> = ({
 
   // UI States
   const [activeFilter, setActiveFilter] = useUrlState<ClinicFilter>('filter', initialFilter);
-  const [localSearch, setLocalSearch] = useState<string>('');
+  // 画面上部の検索語もこの検索欄に出す（隠れた絞り込みで0件にならないように）
+  const [localSearch, setLocalSearch] = useState<string>(globalSearchQuery);
+  useEffect(() => {
+    setLocalSearch(globalSearchQuery);
+  }, [globalSearchQuery]);
   const [selectedSalesRep, setSelectedSalesRep] = useState<string>('all');
   const [expandedClinics, setExpandedClinics] = useState<Set<string>>(new Set());
 
@@ -277,7 +281,7 @@ export const UnshippedClinicsView: React.FC<UnshippedClinicsViewProps> = ({
 
   // 3. フィルタリング
   const filteredClinics = useMemo(() => {
-    const q = (localSearch || globalSearchQuery).trim().toLowerCase();
+    const q = localSearch.trim().toLowerCase();
 
     return clinicGroups.filter((g) => {
       // フィルタ判定
