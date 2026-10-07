@@ -169,11 +169,14 @@ export default function App() {
   }, [cooldownRemainingSec, lastManualFetchTime]);
 
   useEffect(() => {
-    const seen = sessionStorage.getItem('nouki_seen_digest_v2');
-    if (!seen) {
-      setIsDailyDigestOpen(true);
-      sessionStorage.setItem('nouki_seen_digest_v2', 'true');
-    }
+    // 今日のダイジェストは1日1回だけ自動で開く（以降はヘッダーのボタンから）
+    try {
+      const today = new Date().toLocaleDateString('ja-JP');
+      if (localStorage.getItem('nouki_seen_digest_date') !== today) {
+        setIsDailyDigestOpen(true);
+        localStorage.setItem('nouki_seen_digest_date', today);
+      }
+    } catch {}
   }, []);
 
   const [clinics, setClinics] = useState<ClinicItem[]>(() => getLocalClinics());
@@ -574,15 +577,22 @@ export default function App() {
   ];
 
   // 納期・進捗管理セクション Items
+  const NAV_GROUPS = [
+    { id: 'today', label: '今日の対応' },
+    { id: 'progress', label: '出荷・進捗' },
+    { id: 'logistics', label: '通関・物流' },
+  ];
   const deliveryNavItems = [
     {
       id: 'dashboard' as ViewTab,
-      label: '総合納期・進捗スケジュール',
+      group: 'today',
+      label: 'ダッシュボード',
       icon: LayoutDashboard,
       badge: null,
     },
     {
       id: 'procurement' as ViewTab,
+      group: 'today',
       label: '発注管理（未発注）',
       icon: ShoppingCart,
       badge: paidUnorderedCount > 0 ? `${paidUnorderedCount}` : null,
@@ -590,6 +600,7 @@ export default function App() {
     },
     {
       id: 'unshipped_clinics' as ViewTab,
+      group: 'progress',
       label: '未出荷クリニック',
       icon: Truck,
       badge: unshippedClinicsCount > 0 ? `${unshippedClinicsCount}` : null,
@@ -597,6 +608,7 @@ export default function App() {
     },
     {
       id: 'partial_shipment' as ViewTab,
+      group: 'progress',
       label: '一部未出荷・残あり伝票',
       icon: Layers,
       badge: partialShipmentCount > 0 ? `${partialShipmentCount}` : null,
@@ -604,6 +616,7 @@ export default function App() {
     },
     {
       id: 'overdue' as ViewTab,
+      group: 'today',
       label: '納期超過一覧',
       icon: AlertTriangle,
       badge: overdueCounts.ordersCount > 0 ? `${overdueCounts.ordersCount}件（${overdueCounts.linesCount}明細）` : null,
@@ -612,19 +625,22 @@ export default function App() {
 
     {
       id: 'completed' as ViewTab,
+      group: 'progress',
       label: '出荷伝票',
       icon: CheckCircle2,
       badge: null,
     },
     {
       id: 'customs_management' as ViewTab,
-      label: '通関・輸入管理 (101270)',
+      group: 'logistics',
+      label: '通関・輸入管理',
       icon: Plane,
       badge: `${shipments.length}`,
       badgeColor: 'bg-indigo-600 text-white font-bold',
     },
     {
       id: 'cool_missing' as ViewTab,
+      group: 'logistics',
       label: 'クール手配漏れ',
       icon: Thermometer,
       badge: coolMissingCount > 0 ? `${coolMissingCount}` : null,
@@ -632,6 +648,7 @@ export default function App() {
     },
     {
       id: 'kanto_customs_ng' as ViewTab,
+      group: 'logistics',
       label: '通関NG',
       icon: ShieldAlert,
       badge: kantoNgCount > 0 ? `${kantoNgCount}` : null,
@@ -639,6 +656,7 @@ export default function App() {
     },
     {
       id: 'unmatched_sheets' as ViewTab,
+      group: 'today',
       label: '楽楽販売と未照合',
       icon: FileWarning,
       badge: sheetUnmatchedCount ? `${sheetUnmatchedCount}` : null,
@@ -646,12 +664,14 @@ export default function App() {
     },
     {
       id: 'inventory_management' as ViewTab,
+      group: 'logistics',
       label: '韓国・シンガポール倉庫在庫',
       icon: Building,
       badge: null,
     },
     {
       id: 'arrival_tracking' as ViewTab,
+      group: 'progress',
       label: '到着トラッキング',
       icon: Clock,
       badge: null,
@@ -721,11 +741,10 @@ export default function App() {
         <nav className="p-3 space-y-4 flex-1 overflow-y-auto">
           {/* Section: 納期・進捗管理セクション */}
           <div className="space-y-1">
-            <div className="px-3 flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-slate-400">
-              <span>【納期・進行管理部門】</span>
-              <span className="text-[9px] bg-indigo-900/60 text-indigo-300 px-1.5 py-0.2 rounded font-mono">出荷・進捗</span>
-            </div>
-            {deliveryNavItems.map((item) => {
+            {NAV_GROUPS.map((group) => (
+              <div key={group.id} className="space-y-1 pt-2 first:pt-0">
+                <div className="px-3 text-[10px] font-bold tracking-wider text-slate-400">{group.label}</div>
+            {deliveryNavItems.filter((item) => item.group === group.id).map((item) => {
               const isActive = activeTab === item.id;
               const Icon = item.icon;
 
@@ -758,13 +777,14 @@ export default function App() {
                 </button>
               );
             })}
+              </div>
+            ))}
           </div>
 
           {/* Section: 楽楽販売 マスタ管理 */}
           <div className="space-y-1 pt-2 border-t border-slate-800/80">
             <div className="px-3 flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-slate-400">
-              <span>楽楽販売 マスタ管理</span>
-              <span className="text-[9px] bg-slate-800 text-blue-300 font-mono px-1.5 py-0.2 rounded border border-slate-700">Number1</span>
+              <span>マスタ</span>
             </div>
             {masterNavItems.map((item) => {
               const isActive = activeTab === item.id;
@@ -789,13 +809,7 @@ export default function App() {
                     <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-white' : 'text-slate-400'}`} />
                     <span className="truncate">{item.label}</span>
                   </div>
-                  <span
-                    className={`text-[9px] font-mono px-1.5 py-0.2 rounded font-bold shrink-0 ${
-                      isActive ? 'bg-white/20 text-white' : 'bg-slate-800 text-slate-400 border border-slate-700'
-                    }`}
-                  >
-                    {item.schemaId}
-                  </span>
+
                 </button>
               );
             })}

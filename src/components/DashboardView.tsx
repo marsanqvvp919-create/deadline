@@ -338,7 +338,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       : '';
 
   // カード内用の更新経過時間インジケーターコンポーネント
-  const FreshnessBadge = ({ info }: { info: ElapsedTimeInfo }) => (
+  // 更新時刻のバッジ。ページ見出しでは常に表示し、カードではデータが古いときだけ警告として出す
+  const FreshnessBadge = ({ info, always = false }: { info: ElapsedTimeInfo; always?: boolean }) =>
+    !always && info.status === 'fresh' ? null : (
     <span
       title={info.description}
       className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-bold border ${info.badgeBg} ${info.badgeText} ${info.badgeBorder} shadow-2xs transition-all select-none`}
@@ -361,7 +363,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <h1 className="text-xl font-bold text-slate-900 tracking-tight">
               全体ダッシュボード
             </h1>
-            <FreshnessBadge info={freshness} />
+            <FreshnessBadge info={freshness} always />
           </div>
           <p className="text-xs text-slate-500 mt-1 flex flex-wrap items-center gap-2">
             <span>全伝票・商品明細の進捗状況と遅延リスクを俯瞰します</span>

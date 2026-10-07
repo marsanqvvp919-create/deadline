@@ -126,9 +126,6 @@ export const ArrivalTrackingView: React.FC<ArrivalTrackingViewProps> = ({ orders
                 <h1 className="text-xl font-bold tracking-tight">
                   直近の流通トランザクション & 到着トラッキング
                 </h1>
-                <span className="text-xs font-bold px-3 py-1 rounded-full bg-indigo-500/30 text-indigo-200 border border-indigo-400/30 font-mono">
-                  Real-time Shipment & Arrival Tracking
-                </span>
               </div>
               <p className="text-xs text-slate-300 mt-2 leading-relaxed max-w-3xl">
                 韓国倉庫 (KR) およびシンガポール倉庫 (SIN) から各クリニックへの出荷、国際輸送、通関・国内配送を経て商品が到着するまでの全ステップをリアルタイムで追跡・管理します。

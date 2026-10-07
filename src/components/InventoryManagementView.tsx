@@ -416,7 +416,7 @@ export const InventoryManagementView: React.FC<InventoryManagementViewProps> = (
         <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between flex-wrap gap-2">
           <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
             <Package className="w-4 h-4 text-blue-600" />
-            マルチ倉庫 在庫マスタ一覧 (Multi-Warehouse Stock Ledger)
+            倉庫別 在庫一覧
           </h2>
           <div className="flex items-center gap-3 text-xs text-slate-500">
             <span>表示中: <strong className="text-slate-800 font-mono">{filteredRecords.length}</strong> 品目</span>
