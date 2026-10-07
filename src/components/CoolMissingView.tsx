@@ -58,6 +58,14 @@ export const CoolMissingView: React.FC<CoolMissingViewProps> = ({
         );
       }
       return true;
+    })
+    // 出荷管理の「次の期限」が近い順（期限が空のものは後ろ）
+    .sort((a, b) => {
+      const da = ((a as any).nextDeadline || '').replace(/\//g, '-');
+      const db = ((b as any).nextDeadline || '').replace(/\//g, '-');
+      const va = da && da !== '—' ? da : '9999';
+      const vb = db && db !== '—' ? db : '9999';
+      return va.localeCompare(vb);
     });
   }, [shipments, orders, clinics, searchQuery]);
 
@@ -279,6 +287,7 @@ export const CoolMissingView: React.FC<CoolMissingViewProps> = ({
             <thead>
               <tr className="bg-slate-50 text-slate-500 border-b border-slate-200 font-semibold">
                 <th className="py-3 px-3">出荷ID</th>
+                <th className="py-3 px-3">次の期限</th>
                 <th className="py-3 px-3">受注ID</th>
                 <th className="py-3 px-4">クリニック名</th>
                 <th className="py-3 px-3">出荷元倉庫</th>
@@ -301,7 +310,7 @@ export const CoolMissingView: React.FC<CoolMissingViewProps> = ({
                   error={error}
                   lastSuccessTime={lastSuccessTime}
                   onRetry={onRetry}
-                  colSpan={14}
+                  colSpan={15}
                   emptyMessage="該当するクール手配漏れ案件はありません"
                 />
               ) : (
@@ -317,6 +326,11 @@ export const CoolMissingView: React.FC<CoolMissingViewProps> = ({
                       {/* 出荷ID */}
                       <td className="py-3 px-3 font-mono font-bold text-slate-900 whitespace-nowrap">
                         {formatValue(item.shipmentId)}
+                      </td>
+
+                      {/* 次の期限 */}
+                      <td className="py-3 px-3 font-mono font-bold text-amber-700 whitespace-nowrap">
+                        {formatValue((item as any).nextDeadline)}
                       </td>
 
                       {/* 受注ID */}

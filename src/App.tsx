@@ -12,7 +12,7 @@ import {
 import { fetchData, getConfiguredUrls, saveConnectionConfig, saveCachedDeliveryData } from './api';
 import { syncAndDiffOrders } from './utils/syncEngine';
 import { isWithinPeriod } from './utils';
-import { isCoolMissingShipment, isCustomsNgShipment } from './utils/customsUtils';
+import { isCoolMissingShipment, isCustomsNgShipment, isOpenShipment } from './utils/customsUtils';
 import { Navbar } from './components/Navbar';
 import { SettingsModal } from './components/SettingsModal';
 import { DetailDrawer } from './components/DetailDrawer';
@@ -657,7 +657,8 @@ export default function App() {
       group: 'logistics',
       label: '通関・輸入管理',
       icon: Plane,
-      badge: `${shipments.length}`,
+      // バッジは未完了（出荷待ち・配達前）の出荷数
+      badge: `${shipments.filter((sh) => isOpenShipment(sh)).length}`,
       badgeColor: 'bg-indigo-600 text-white font-bold',
     },
     {

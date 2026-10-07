@@ -16,6 +16,7 @@ import {
   resolveClinicName,
   getRakurakuUrl,
   formatValue,
+  isOpenShipment,
 } from '../utils/customsUtils';
 import { TableEmptyState } from './TableEmptyState';
 
@@ -41,10 +42,12 @@ export const CustomsManagementView: React.FC<CustomsManagementViewProps> = ({
   onRetry,
 }) => {
   const [selectedAirport, setSelectedAirport] = useState<string>('all');
-  const [selectedStatus, setSelectedStatus] = useState<string>('all');
+  // 最初は対応中の出荷だけを表示する（全件だと過去の出荷が大半を占めるため）
+  const [selectedStatus, setSelectedStatus] = useState<string>('open');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
   const rakurakuUrl = getRakurakuUrl();
+
 
   const filteredShipments = useMemo(() => {
     return shipments.filter((item) => {
@@ -63,6 +66,9 @@ export const CustomsManagementView: React.FC<CustomsManagementViewProps> = ({
       }
 
       // ステータスフィルター
+      if (selectedStatus === 'open' && !isOpenShipment(item)) {
+        return false;
+      }
       if (selectedStatus === 'review' && !item.importStatus.includes('審査') && !item.customsStatus?.includes('審査')) {
         return false;
       }
@@ -307,6 +313,7 @@ export const CustomsManagementView: React.FC<CustomsManagementViewProps> = ({
           <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs">
             <span className="px-2 font-bold text-slate-500">絞込:</span>
             {[
+              { id: 'open', label: '未完了' },
               { id: 'all', label: 'すべて' },
               { id: 'cool_missing', label: 'クール漏れ' },
               { id: 'customs_ng', label: '通関NG' },
