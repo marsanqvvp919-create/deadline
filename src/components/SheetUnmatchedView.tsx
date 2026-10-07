@@ -77,6 +77,14 @@ function formatTime(iso?: string | null): string {
   return d.toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
+function dayDiffLabel(sheetDate: string, rakurakuDate?: string): string {
+  const a = new Date((sheetDate || '').replace(/\//g, '-') + 'T00:00:00');
+  const b = new Date((rakurakuDate || '').replace(/\//g, '-') + 'T00:00:00');
+  if (isNaN(a.getTime()) || isNaN(b.getTime())) return '';
+  const diff = Math.round((b.getTime() - a.getTime()) / 86400000);
+  return diff > 0 ? `${diff}日後` : `${-diff}日前`;
+}
+
 export async function fetchSheetUnmatched(refresh = false): Promise<UnmatchedResponse> {
   const res = await fetch(`/api/shipment-sheet/unmatched${refresh ? '?refresh=1' : ''}`);
   return res.json();
@@ -276,7 +284,9 @@ export const SheetUnmatchedView: React.FC<{ onCountChange?: (count: number | nul
                     <div className="text-[11px] text-slate-500 flex flex-wrap gap-x-3">
                       <span>シート出荷日 {i.shipDate || '—'}</span>
                       {i.issue === 'ship_date_mismatch' && (
-                        <span className="text-amber-700 font-bold">楽楽販売の出荷日 {i.rakurakuShipDate}</span>
+                        <span className="text-amber-700 font-bold">
+                          楽楽販売の出荷日 {i.rakurakuShipDate}（{dayDiffLabel(i.shipDate, i.rakurakuShipDate)}）
+                        </span>
                       )}
                       <span>出荷元 {i.origin || '—'}</span>
                       <span>{i.courier}</span>

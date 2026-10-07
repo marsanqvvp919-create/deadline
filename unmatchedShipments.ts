@@ -15,6 +15,7 @@ export interface SheetShipmentRow {
 
 export interface ShipmentLike {
   shipmentId: string;
+  customerId?: string;
   orderId: string;
   customerName: string;
   trackingNo: string;
@@ -26,6 +27,7 @@ export interface ShipmentLike {
 }
 
 export interface ClinicLike {
+  clinicId?: string;
   clinicName: string;
   clinicNameEn?: string;
 }
@@ -194,11 +196,9 @@ export function findUnmatched(
   );
   const issues: MatchedIssue[] = [];
 
-  // シートのクリニック名から、顧客マスタ（顧客名・英語表記）で確認できる名前の一覧
-  const resolveClinicNames = (sheetName: string) =>
-    clinics
-      .filter((c) => namesMatch(sheetName, c.clinicName) || (c.clinicNameEn && namesMatch(sheetName, c.clinicNameEn)))
-      .map((c) => c.clinicName);
+  // シートのクリニック名に当たる顧客マスタの行（顧客名・英語表記で照合）
+  const resolveClinics = (sheetName: string) =>
+    clinics.filter((c) => namesMatch(sheetName, c.clinicName) || (c.clinicNameEn && namesMatch(sheetName, c.clinicNameEn)));
 
   const shipmentsByInvoice = new Map<string, ShipmentLike[]>();
   shipments.forEach((s) => {
@@ -222,10 +222,14 @@ export function findUnmatched(
     const hits = Array.from(new Set(digits.flatMap((d) => shipmentsByTracking.get(d) || [])));
     if (hits.length > 0) {
       matchedCount++;
-      // 別のクリニックの受注に登録済み：シートのクリニック名を顧客マスタで確認でき、どの出荷とも一致しない場合
-      const resolved = resolveClinicNames(row.clinicName);
-      const names = [row.clinicName, ...resolved];
-      const sameClinic = hits.some((s) => names.some((n) => namesMatch(n, s.customerName || '')));
+      // 別のクリニックの受注に登録済み：シートのクリニック名を顧客マスタで確認でき、
+      // 出荷の顧客IDもクリニック名も一致しない場合（受注のクリニック名欄には院長名などが入っていることがあるため、顧客IDで比べる）
+      const resolved = resolveClinics(row.clinicName);
+      const resolvedIds = new Set(resolved.map((c) => c.clinicId).filter(Boolean));
+      const names = [row.clinicName, ...resolved.map((c) => c.clinicName)];
+      const sameClinic = hits.some(
+        (s) => (s.customerId && resolvedIds.has(s.customerId)) || names.some((n) => namesMatch(n, s.customerName || ''))
+      );
       if (!sameClinic && resolved.length > 0) {
         issues.push({ ...row, issue: 'registered_elsewhere', shipments: hits });
         continue;
@@ -293,5 +297,6 @@ export function findUnmatched(
   });
 
   unmatched.sort((a, b) => (parseDate(b.shipDate)?.getTime() || 0) - (parseDate(a.shipDate)?.getTime() || 0));
+  issues.sort((a, b) => (parseDate(b.shipDate)?.getTime() || 0) - (parseDate(a.shipDate)?.getTime() || 0));
   return { rows: unmatched, issues, targetCount: targets.length, matchedCount, noTrackingCount };
 }
