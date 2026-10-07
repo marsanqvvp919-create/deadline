@@ -5,7 +5,8 @@ import { useUrlState } from '../utils/listState';
 import { Order, ShipmentItem } from '../types';
 import { getConfiguredUrls, getLocalClinics } from '../api';
 import { openRakurakuWithCopiedId } from '../utils';
-import { Search, Truck, ExternalLink, Snowflake, Copy, RefreshCw, AlertTriangle, Package, Plane, ShieldCheck, CheckCircle2, HelpCircle, Link2Off } from 'lucide-react';
+import { Search, Truck, ExternalLink, Snowflake, Copy, RefreshCw, AlertTriangle, Package, PackageCheck, Plane, ShieldCheck, CheckCircle2, HelpCircle, Link2Off } from 'lucide-react';
+import { summarizeBoxes, usableStatus } from '../utils/shipmentTracking';
 import { CARRIER_STATUS_LABEL, CARRIER_STATUS_STYLE, CarrierStatus, CarrierStatusSnapshot, digitsOf, fetchCarrierStatuses, fetchSavedCarrierStatuses } from '../utils/carriers';
 
 // 出荷管理（101270）の実データから、出荷ごとに「今どの段階か」を表示する。
@@ -47,7 +48,7 @@ function stageOf(s: TrackingShipment, c?: CarrierStatus): Stage {
 }
 
 // 「今の状況」：楽楽販売の段階と配送会社の最新状況を合わせて、出荷ごとに1つに決める（一目でわかる表示用）
-type NowStatus = 'attention' | 'waiting' | 'pickup' | 'abroad' | 'customs' | 'domestic' | 'delivered' | 'no_info' | 'not_linked';
+type NowStatus = 'attention' | 'waiting' | 'pickup' | 'abroad' | 'customs' | 'domestic' | 'partial' | 'delivered' | 'no_info' | 'not_linked';
 
 const NOW_STATUS: Record<NowStatus, { label: string; hint: string; color: string; soft: string; border: string; Icon: React.FC<{ className?: string }> }> = {
   attention: { label: '要確認', hint: '配送会社が通関・配達の例外を返している', color: 'bg-rose-600 text-white', soft: 'bg-rose-50 text-rose-800 border-rose-200', border: 'border-l-rose-500', Icon: AlertTriangle },
@@ -56,14 +57,16 @@ const NOW_STATUS: Record<NowStatus, { label: string; hint: string; color: string
   abroad: { label: '海外から輸送中', hint: '配送会社が輸送中（まだ日本の拠点に着いていない）', color: 'bg-indigo-600 text-white', soft: 'bg-indigo-50 text-indigo-800 border-indigo-200', border: 'border-l-indigo-500', Icon: Plane },
   customs: { label: '日本で通関中', hint: '日本の拠点に到着し、通関が終わっていない', color: 'bg-blue-600 text-white', soft: 'bg-blue-50 text-blue-800 border-blue-200', border: 'border-l-blue-500', Icon: ShieldCheck },
   domestic: { label: '国内配送中', hint: '通関が終わり、配達前', color: 'bg-teal-600 text-white', soft: 'bg-teal-50 text-teal-800 border-teal-200', border: 'border-l-teal-500', Icon: Truck },
+  partial: { label: '一部配達', hint: '複数口の出荷で、一部の箱だけ配達完了（残りの箱の追跡番号は楽楽販売の対応メモ）', color: 'bg-lime-600 text-white', soft: 'bg-lime-50 text-lime-800 border-lime-200', border: 'border-l-lime-500', Icon: PackageCheck },
   delivered: { label: '配達完了', hint: '配送会社または楽楽販売で配達完了', color: 'bg-emerald-600 text-white', soft: 'bg-emerald-50 text-emerald-800 border-emerald-200', border: 'border-l-emerald-500', Icon: CheckCircle2 },
   no_info: { label: '未取得', hint: 'APIでつないでいる配送会社の出荷で、まだ状況を取得していない（DHL は2時間ごとに自動で取得）', color: 'bg-slate-200 text-slate-700', soft: 'bg-slate-50 text-slate-600 border-slate-200', border: 'border-l-slate-300', Icon: HelpCircle },
   not_linked: { label: '追跡未連携', hint: 'ヤマト・佐川などAPIでつないでいない配送会社の出荷、または追跡番号の形から配送会社がわからない出荷', color: 'bg-slate-100 text-slate-600', soft: 'bg-slate-50 text-slate-500 border-slate-200', border: 'border-l-slate-200', Icon: Link2Off },
 };
-const NOW_ORDER: NowStatus[] = ['attention', 'waiting', 'pickup', 'abroad', 'customs', 'domestic', 'delivered', 'no_info', 'not_linked'];
+const NOW_ORDER: NowStatus[] = ['attention', 'waiting', 'pickup', 'abroad', 'customs', 'domestic', 'partial', 'delivered', 'no_info', 'not_linked'];
 
-function nowStatusOf(stage: Stage, c?: CarrierStatus, linked = true): NowStatus {
+function nowStatusOf(stage: Stage, c?: CarrierStatus, linked = true, partial = false): NowStatus {
   if (c?.status === 'exception') return 'attention';
+  if (partial) return 'partial';
   if (stage === 'delivered') return 'delivered';
   if (stage === 'waiting') return 'waiting';
   if (stage === 'domestic') return 'domestic';
@@ -174,12 +177,13 @@ export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: Shipmen
     return (shipments as TrackingShipment[])
       .map((s) => {
         // 配送会社で「見つからない」だった番号は、状況がないものとして扱う
-        const raw = carrierStatus[digitsOf(s.trackingNo)];
-        const c = raw && !(raw.status === 'unknown' && raw.error) ? raw : undefined;
+        // 複数口は箱ごとの状況をまとめる（全部届いたら配達完了、一部なら一部配達）
+        const box = summarizeBoxes(s, carrierStatus);
+        const c = box.rep;
         const stage = stageOf(s, c);
         // いまAPIでつないでいるのは DHL だけ（FedEx は鍵を入れたら同じように取得する）
         const linked = carrierOf(s.courier, s.trackingNo).label === 'DHL' || (carrierOf(s.courier, s.trackingNo).label === 'FedEx' && fedexLinked);
-        return { s, c, stage, now: nowStatusOf(stage, c, linked), shipped: toDate(s.warehouseShippedDate) || toDate(s.shippedDate) };
+        return { s, c, box, stage, now: nowStatusOf(stage, c, linked, box.partial), shipped: toDate(s.warehouseShippedDate) || toDate(s.shippedDate) };
       })
       .filter(({ s, c, stage, shipped }) => {
         if (stage === 'waiting') return true;
@@ -266,7 +270,7 @@ export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: Shipmen
           </p>
         </div>
         {/* 今の状況ごとの件数（押すと絞り込み） */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-9 gap-2">
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
           {NOW_ORDER.map((k) => {
             const st = NOW_STATUS[k];
             const active = stageFilter === k;
@@ -343,7 +347,7 @@ export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: Shipmen
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {visible.slice(0, 300).map(({ s, c, now, customerName }) => {
+          {visible.slice(0, 300).map(({ s, c, box, now, customerName }) => {
             const st = NOW_STATUS[now];
             const carrier = carrierOf(s.courier, s.trackingNo);
             const trackUrl = carrier.url;
@@ -358,6 +362,9 @@ export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: Shipmen
                   <span className="flex items-center gap-2 font-bold text-sm">
                     <st.Icon className="w-4 h-4" />
                     {st.label}
+                    {box.total > 1 && (
+                      <span className="text-xs font-bold opacity-90">（{box.delivered}/{box.total}箱 配達）</span>
+                    )}
                   </span>
                   <span className="text-xs font-bold text-right">
                     {deliveredOn ? `${deliveredOn} 配達` : eta ? `配達予定 ${eta}` : !blank(s.deliveryEta) ? `配達予定 ${s.deliveryEta}` : ''}
@@ -396,6 +403,11 @@ export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: Shipmen
                     <span>出荷元 {blank(s.warehouse) ? '—' : s.warehouse}</span>
                     <span>到着空港 {blank(s.arrivalAirport) ? '—' : s.arrivalAirport}</span>
                     <span>輸入確認 {blank(s.importStatus) ? '—' : s.importStatus}</span>
+                    {box.total > 1 && (
+                      <span className="col-span-2 font-mono text-[10px] text-slate-500">
+                        残りの箱 {(s.extraTrackingNos || []).map((n) => `${n}${usableStatus(carrierStatus[n])?.status === 'delivered' ? '✓' : ''}`).join('、')}
+                      </span>
+                    )}
                     <span className="col-span-2 font-mono">
                       追跡 {carrier.label} {blank(s.trackingNo) ? '—' : s.trackingNo}
                       {carrier.mismatch && (

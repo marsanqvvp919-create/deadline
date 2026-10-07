@@ -37,6 +37,7 @@ import { SheetUnmatchedView, fetchSheetUnmatched } from './components/SheetUnmat
 import { SheetImportView } from './components/SheetImportView';
 import { ActionListView } from './components/ActionListView';
 import { CarrierSettingsView } from './components/CarrierSettingsView';
+import { MorningMeetingView } from './components/MorningMeetingView';
 import { BudgetSettingsModal } from './components/BudgetSettingsModal';
 import { DailyDigestModal } from './components/DailyDigestModal';
 import { ClinicProductStatusDrawer } from './components/ClinicProductStatusDrawer';
@@ -74,11 +75,12 @@ import {
   Clock,
   Plane,
   Thermometer,
-  FileWarning
+  FileWarning,
+  CalendarCheck,
 } from 'lucide-react';
 
 const KNOWN_TABS: ViewTab[] = [
-  'dashboard', 'alerts', 'procurement', 'unshipped_clinics', 'partial_shipment', 'overdue', 'completed',
+  'dashboard', 'morning_meeting', 'alerts', 'procurement', 'unshipped_clinics', 'partial_shipment', 'overdue', 'completed',
   'customs_management', 'cool_missing', 'kanto_customs_ng', 'unmatched_sheets', 'inventory_management',
   'sheet_import', 'arrival_tracking', 'products', 'clinics', 'carrier_settings',
   'sales_dashboard', 'sales_rep_sales', 'sales_clinic_master', 'reorder_prediction', 'rep_ranking',
@@ -623,6 +625,13 @@ export default function App() {
       badge: null,
     },
     {
+      id: 'morning_meeting' as ViewTab,
+      group: 'today',
+      label: '朝の納期会議',
+      icon: CalendarCheck,
+      badge: null,
+    },
+    {
       id: 'alerts' as ViewTab,
       group: 'today',
       label: '要対応リスト',
@@ -1118,6 +1127,17 @@ export default function App() {
           {activeTab === 'sheet_import' && <SheetImportView />}
 
           {activeTab === 'carrier_settings' && <CarrierSettingsView />}
+
+          {activeTab === 'morning_meeting' && (
+            <MorningMeetingView
+              orders={deliveryData.orders}
+              shipments={shipments}
+              sheetUnmatchedCount={sheetUnmatchedCount ?? null}
+              generatedAt={deliveryData.generatedAt}
+              onSelectOrder={handleOpenDetail}
+              onNavigateToTab={setActiveTab}
+            />
+          )}
 
           {activeTab === 'alerts' && (
             <ActionListView orders={filteredOrders} alerts={filteredAlerts} onSelectOrder={handleOpenDetail} repFilter={selectedRep} onClearRepFilter={() => setSelectedRep('')} />

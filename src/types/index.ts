@@ -58,6 +58,7 @@ export interface Order {
   paymentDueDate?: string | null; // 入金予定日・支払期日 YYYY-MM-DD
   paymentMethod?: string;
   totalAmount?: number;
+  handlingMemo?: string;           // 楽楽販売「対応メモ」（ご注文管理にある場合）
 
   // 見積もり管理項目（要件1: 見積期日1週間超過の自動除外用）
   quoteDate?: string | null;          // 見積提出日 YYYY-MM-DD
@@ -113,6 +114,11 @@ export interface ShipmentItem {
   isCoolMissing: boolean;          // クール手配漏れ (クール申請・委任状・伝票のどれかが「未」)
   memo?: string;
   updatedAt?: string;
+  handlingMemo?: string;           // 楽楽販売「対応メモ」
+  extraTrackingNos?: string[];     // 複数口：対応メモに並べた残りの箱の追跡番号
+  courier?: string;
+  shipStatus?: string;
+  lastEventAt?: string;
 }
 
 export interface SupplierItem {
@@ -177,7 +183,8 @@ export type ViewTab =
   | 'kanto_customs_ng'
   | 'unmatched_sheets'
   | 'sheet_import'
-  | 'carrier_settings';
+  | 'carrier_settings'
+  | 'morning_meeting';
 
 export interface WarehouseStockRecord {
   productId: string;

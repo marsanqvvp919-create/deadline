@@ -66,6 +66,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     return getElapsedTimeInfo(generatedAt, 0);
   }, [generatedAt, ticker]);
 
+  // 追跡のカバー率（サーバーがシートと楽楽販売・配送会社の状況から計算）
+  const [coverage, setCoverage] = useState<{ denominator: number; tracked: number; notFetched: number; untracked: number } | null>(null);
+  useEffect(() => {
+    fetch('/api/tracking/coverage')
+      .then((r) => r.json())
+      .then((j) => j?.success && setCoverage(j))
+      .catch(() => {});
+  }, [generatedAt]);
+
   const today = useMemo(() => {
     const d = new Date();
     d.setHours(0, 0, 0, 0);
@@ -609,6 +618,50 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       </div>
 
       {/* 状況（参考の数値） */}
+      {/* 追跡のカバー率：直近30日のシートの出荷のうち、まだ配達完了でないもの */}
+      {coverage && (
+        <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h3 className="text-sm font-bold text-slate-900">追跡のカバー率</h3>
+            <span className="text-[11px] text-slate-500">
+              直近30日の「◆出荷ステータス」の出荷のうち、まだ配達完了でない {coverage.denominator}件が対象
+            </span>
+          </div>
+          <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
+              <span className="text-xs font-bold text-emerald-800">追跡できている</span>
+              <div className="flex items-baseline gap-1.5">
+                <span className="text-2xl font-extrabold font-mono text-emerald-700">{coverage.tracked}</span>
+                <span className="text-xs font-bold text-emerald-700">
+                  件{coverage.denominator > 0 && `（${Math.round((coverage.tracked / coverage.denominator) * 100)}%）`}
+                </span>
+              </div>
+              <span className="text-[11px] text-emerald-800/80">楽楽販売に追跡番号があり、DHL・FedEx から状況が取れている</span>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+              <span className="text-xs font-bold text-slate-700">照合済み・状況まだ</span>
+              <div className="flex items-baseline gap-1.5">
+                <span className="text-2xl font-extrabold font-mono text-slate-700">{coverage.notFetched}</span>
+                <span className="text-xs font-bold text-slate-600">件</span>
+              </div>
+              <span className="text-[11px] text-slate-500">楽楽販売に追跡番号はあるが、まだ状況を取得していない（自動取得の順番待ち・未連携の配送会社）</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => onNavigateToTab('unmatched_sheets')}
+              className="text-left rounded-xl border border-amber-200 bg-amber-50 p-3 hover:bg-amber-100 transition"
+            >
+              <span className="text-xs font-bold text-amber-800">追跡できていない（未照合）</span>
+              <div className="flex items-baseline gap-1.5">
+                <span className="text-2xl font-extrabold font-mono text-amber-700">{coverage.untracked}</span>
+                <span className="text-xs font-bold text-amber-700">件</span>
+              </div>
+              <span className="text-[11px] text-amber-800/80">追跡番号が楽楽販売にない。押すと未照合の一覧へ</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       <h2 className="text-sm font-bold text-slate-600 -mb-2 pt-1">状況</h2>
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3.5">
         {/* 1. 未完了明細数 */}
