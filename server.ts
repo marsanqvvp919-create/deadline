@@ -1040,6 +1040,7 @@ interface RakurakuServerStore {
   refreshIntervalMinutes: number;
   sourceHeaders: Record<string, string[]>;
   lastFullSyncTime: number | null;
+  masterStatus: Record<string, { ok: boolean; count: number; error?: string; at: string }>;
   lastError: {
     type: 'rate_limit' | 'ip_blocked' | 'auth_error' | 'network_error';
     message: string;
@@ -1064,8 +1065,18 @@ const serverRakurakuStore: RakurakuServerStore = {
   refreshIntervalMinutes: 15, // 15分おき自動同期
   sourceHeaders: {},
   lastFullSyncTime: null,
+  masterStatus: {},
   lastError: null,
 };
+
+function recordMasterStatus(schemaId: string, count: number, err?: any) {
+  serverRakurakuStore.masterStatus[schemaId] = {
+    ok: !err && count > 0,
+    count,
+    error: err ? parseRakurakuError(err).message + (err?.message ? `（${err.message}）` : '') : count === 0 ? '0件でした（一覧画面の表示設定・項目名を確認してください）' : undefined,
+    at: new Date().toISOString(),
+  };
+}
 
 // 差分取得用の楽楽販売の絞込みID（「更新日時が直近2日以内」などの絞込みを楽楽販売で作って設定する）
 const RECENT_ORDERS_SEARCH_ID = process.env.RAKURAKU_ORDERS_RECENT_SEARCH_ID || '';
@@ -1196,6 +1207,68 @@ async function syncAllRakurakuData(isManual = false): Promise<boolean> {
   try {
     console.log(`[Rakuraku Sync Start] isManual=${isManual}, baseUrl=${baseUrl}`);
 
+    // マスタ系（商品・クリニック・仕入先）は1日1回（24時間）または手動時のみ取得。
+    // 件数が少ないので先に取得する（後ろにあると、出荷・注文の取得が失敗したときに一度も取得されない）
+    const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+    const needMasters =
+      isManual ||
+      !serverRakurakuStore.lastMastersTime ||
+      Date.now() - serverRakurakuStore.lastMastersTime > ONE_DAY_MS;
+
+    if (needMasters) {
+      console.log('[Rakuraku Sync] Fetching masters (products, clinics, suppliers)...');
+      let mastersOk = true;
+      // 仕入先マスタ (101253)
+      await new Promise((r) => setTimeout(r, 2000));
+      try {
+        const resSup = await fetchRakurakuCsv(baseUrl, token, '101253', '103962', '101061', 50);
+        const parsedSuppliers = transformCsvToSuppliers(resSup.csv);
+        if (parsedSuppliers && parsedSuppliers.length > 0) {
+          serverRakurakuStore.suppliers = parsedSuppliers;
+        }
+        recordMasterStatus('101253', parsedSuppliers?.length || 0);
+      } catch (e) {
+        console.warn('[Rakuraku Sync] Suppliers master warning:', e);
+        mastersOk = false;
+        recordMasterStatus('101253', 0, e);
+      }
+
+      // 商品マスタ (101252)
+      await new Promise((r) => setTimeout(r, 2000));
+      try {
+        const resProd = await fetchRakurakuCsv(baseUrl, token, '101252', 50);
+        const parsedProducts = transformCsvToProducts(resProd.csv);
+        if (parsedProducts && parsedProducts.length > 0) {
+          serverRakurakuStore.products = parsedProducts;
+        }
+        recordMasterStatus('101252', parsedProducts?.length || 0);
+      } catch (e) {
+        console.warn('[Rakuraku Sync] Products master warning:', e);
+        mastersOk = false;
+        recordMasterStatus('101252', 0, e);
+      }
+
+      // 顧客マスタ (101250)
+      await new Promise((r) => setTimeout(r, 2000));
+      try {
+        const resClinics = await fetchRakurakuCsv(baseUrl, token, '101250', 50);
+        const parsedClinics = transformCsvToClinics(resClinics.csv);
+        if (parsedClinics && parsedClinics.length > 0) {
+          serverRakurakuStore.clinics = parsedClinics;
+        }
+        recordMasterStatus('101250', parsedClinics?.length || 0);
+      } catch (e) {
+        console.warn('[Rakuraku Sync] Clinics master warning:', e);
+        mastersOk = false;
+        recordMasterStatus('101250', 0, e);
+      }
+
+      // 3つとも取得できたときだけ「本日取得済み」にする（失敗したら次の同期で再試行）
+      if (mastersOk) {
+        serverRakurakuStore.lastMastersTime = Date.now();
+      }
+    }
+
     // 差分取得：楽楽販売に「最近更新されたレコード」の絞込みがあれば、それだけを取得して差し替える。
     // 全件の取り直しは1日1回（初回・手動・前回の全件取得から24時間後）。絞込みが無い間は毎回全件を取る。
     const fullSyncDue =
@@ -1254,61 +1327,6 @@ async function syncAllRakurakuData(isManual = false): Promise<boolean> {
       throw e;
     }
     if (!useIncremental) serverRakurakuStore.lastFullSyncTime = Date.now();
-
-    // マスタ系（商品・クリニック・仕入先）は1日1回（24時間）または手動時のみ取得
-    const ONE_DAY_MS = 24 * 60 * 60 * 1000;
-    const needMasters =
-      isManual ||
-      !serverRakurakuStore.lastMastersTime ||
-      Date.now() - serverRakurakuStore.lastMastersTime > ONE_DAY_MS;
-
-    if (needMasters) {
-      console.log('[Rakuraku Sync] Fetching masters (products, clinics, suppliers)...');
-      let mastersOk = true;
-      // 仕入先マスタ (101253)
-      await new Promise((r) => setTimeout(r, 2000));
-      try {
-        const resSup = await fetchRakurakuCsv(baseUrl, token, '101253', '103962', '101061', 5);
-        const parsedSuppliers = transformCsvToSuppliers(resSup.csv);
-        if (parsedSuppliers && parsedSuppliers.length > 0) {
-          serverRakurakuStore.suppliers = parsedSuppliers;
-        }
-      } catch (e) {
-        console.warn('[Rakuraku Sync] Suppliers master warning:', e);
-        mastersOk = false;
-      }
-
-      // 商品マスタ (101252)
-      await new Promise((r) => setTimeout(r, 2000));
-      try {
-        const resProd = await fetchRakurakuCsv(baseUrl, token, '101252', 5);
-        const parsedProducts = transformCsvToProducts(resProd.csv);
-        if (parsedProducts && parsedProducts.length > 0) {
-          serverRakurakuStore.products = parsedProducts;
-        }
-      } catch (e) {
-        console.warn('[Rakuraku Sync] Products master warning:', e);
-        mastersOk = false;
-      }
-
-      // 顧客マスタ (101250)
-      await new Promise((r) => setTimeout(r, 2000));
-      try {
-        const resClinics = await fetchRakurakuCsv(baseUrl, token, '101250', 5);
-        const parsedClinics = transformCsvToClinics(resClinics.csv);
-        if (parsedClinics && parsedClinics.length > 0) {
-          serverRakurakuStore.clinics = parsedClinics;
-        }
-      } catch (e) {
-        console.warn('[Rakuraku Sync] Clinics master warning:', e);
-        mastersOk = false;
-      }
-
-      // 3つとも取得できたときだけ「本日取得済み」にする（失敗したら次の同期で再試行）
-      if (mastersOk) {
-        serverRakurakuStore.lastMastersTime = Date.now();
-      }
-    }
 
     // 成功処理
     serverRakurakuStore.lastSuccessTime = new Date().toISOString();
@@ -1385,6 +1403,7 @@ app.get('/api/rakuraku/all-data', async (_req, res) => {
     rateLimitRemainingSec: serverRakurakuStore.rateLimitUntil ? Math.max(0, Math.ceil((serverRakurakuStore.rateLimitUntil - Date.now()) / 1000)) : 0,
     refreshIntervalMinutes: serverRakurakuStore.refreshIntervalMinutes,
     sourceHeaders: serverRakurakuStore.sourceHeaders,
+    masterStatus: serverRakurakuStore.masterStatus,
     lastError: serverRakurakuStore.lastError,
     serverIp: currentIp,
   });
