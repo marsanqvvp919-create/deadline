@@ -1824,6 +1824,71 @@ app.get('/api/shipment-sheet/unmatched', async (req, res) => {
   }
 });
 
+// ----------------------------------------------------------------------
+// チームで共有するメモ（納期超過の対応状況・クリニックメモ・未照合の対応済みなど）
+// 以前は各ブラウザにだけ保存していたため、他の人には見えなかった。Cloud Storage に保存して共有する。
+// ----------------------------------------------------------------------
+const SHARED_NOTES_OBJECT = 'shared-notes.json';
+const SHARED_NOTE_SCOPES = ['overdue_followups', 'overdue_clinic_notes', 'unmatched_done'];
+let sharedNotes: Record<string, Record<string, any>> = {};
+let sharedNotesLoaded = false;
+let sharedNotesSaveTimer: NodeJS.Timeout | null = null;
+
+async function loadSharedNotes() {
+  if (sharedNotesLoaded) return;
+  sharedNotesLoaded = true;
+  if (!CACHE_BUCKET) return;
+  try {
+    const [buf] = await new Storage().bucket(CACHE_BUCKET).file(SHARED_NOTES_OBJECT).download();
+    sharedNotes = JSON.parse(buf.toString('utf-8')) || {};
+  } catch (e: any) {
+    if (e?.code !== 404) console.warn('[Shared Notes] Load failed:', e?.message || e);
+  }
+}
+
+function scheduleSharedNotesSave() {
+  if (!CACHE_BUCKET) return;
+  if (sharedNotesSaveTimer) clearTimeout(sharedNotesSaveTimer);
+  sharedNotesSaveTimer = setTimeout(async () => {
+    try {
+      await new Storage().bucket(CACHE_BUCKET).file(SHARED_NOTES_OBJECT).save(JSON.stringify(sharedNotes), {
+        contentType: 'application/json',
+        resumable: false,
+      });
+    } catch (e: any) {
+      console.warn('[Shared Notes] Save failed:', e?.message || e);
+    }
+  }, 1000);
+}
+
+app.get('/api/shared-notes/:scope', async (req, res) => {
+  const scope = req.params.scope;
+  if (!SHARED_NOTE_SCOPES.includes(scope)) return res.status(404).json({ error: 'unknown scope' });
+  await loadSharedNotes();
+  return res.json({ scope, notes: sharedNotes[scope] || {} });
+});
+
+// 1件ずつ更新する。value が null なら削除。entries を送るとまとめて追加（ブラウザに残っていた分の移行用。既にある値は上書きしない）
+app.put('/api/shared-notes/:scope', async (req, res) => {
+  const scope = req.params.scope;
+  if (!SHARED_NOTE_SCOPES.includes(scope)) return res.status(404).json({ error: 'unknown scope' });
+  await loadSharedNotes();
+  const bucket = (sharedNotes[scope] = sharedNotes[scope] || {});
+  const { key, value, entries } = req.body || {};
+  if (entries && typeof entries === 'object') {
+    for (const [k, v] of Object.entries(entries)) {
+      if (bucket[k] === undefined) bucket[k] = v;
+    }
+  } else if (typeof key === 'string' && key.length > 0 && key.length < 300) {
+    if (value === null) delete bucket[key];
+    else bucket[key] = value;
+  } else {
+    return res.status(400).json({ error: 'key or entries required' });
+  }
+  scheduleSharedNotesSave();
+  return res.json({ scope, notes: bucket });
+});
+
 // 現在のサーバー発信元IP確認API
 app.get('/api/server-ip', async (_req, res) => {
   const ip = await getOutboundIp();

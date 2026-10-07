@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { AlertCircle, CheckCircle2, Copy, ExternalLink, Layers, RefreshCw, Search, Truck } from 'lucide-react';
 import { getRakurakuUrl } from '../utils/customsUtils';
+import { useSharedNotes } from '../utils/sharedNotes';
 
 // 「◆出荷ステータス」シートの行のうち、楽楽販売の出荷管理（101270）と追跡番号で照合できなかったもの。
 // アプリからはどこにも書き込まない。追跡番号の入力は楽楽販売で行う。
@@ -96,6 +97,10 @@ export const SheetUnmatchedView: React.FC<{ onCountChange?: (count: number | nul
   const [loading, setLoading] = useState(true);
   const [kindFilter, setKindFilter] = useState<'all' | UnmatchedRow['kind']>('all');
   const [view, setView] = useState<'unmatched' | MatchedIssue['issue']>('unmatched');
+  // 対応済みの印（チームで共有）。キーは追跡番号（シートの行が並べ替わっても同じ行を指すように）
+  const [doneMarks, setDoneMark] = useSharedNotes<{ by?: string; at: string }>('unmatched_done');
+  const [showDone, setShowDone] = useState(false);
+  const doneKey = (r: { trackingNo: string }) => (r.trackingNo || '').replace(/\D/g, '');
   const [query, setQuery] = useState('');
   const [copied, setCopied] = useState<string | null>(null);
 
@@ -135,6 +140,7 @@ export const SheetUnmatchedView: React.FC<{ onCountChange?: (count: number | nul
   const groups = useMemo(() => {
     const q = query.trim().toLowerCase();
     const filtered = rows.filter((r) => {
+      if (!showDone && doneMarks[doneKey(r)]) return false;
       if (kindFilter !== 'all' && r.kind !== kindFilter) return false;
       if (!q) return true;
       return [r.clinicName, r.trackingNo, r.invoiceNo, r.courier, r.origin].some((v) => (v || '').toLowerCase().includes(q));
@@ -146,7 +152,7 @@ export const SheetUnmatchedView: React.FC<{ onCountChange?: (count: number | nul
       map.get(key)!.push(r);
     });
     return Array.from(map.entries()).map(([key, items]) => ({ key, items, isBulk: !!items[0].bulkGroupKey }));
-  }, [rows, kindFilter, query]);
+  }, [rows, kindFilter, query, showDone, doneMarks]);
 
   const copyShipmentId = async (shipmentId: string) => {
     try {
@@ -330,6 +336,10 @@ export const SheetUnmatchedView: React.FC<{ onCountChange?: (count: number | nul
 
       {data?.success && view === 'unmatched' && rows.length > 0 && (
         <div className="space-y-3">
+          <label className="flex items-center gap-2 text-xs text-slate-600">
+            <input type="checkbox" checked={showDone} onChange={(e) => setShowDone(e.target.checked)} />
+            対応済みも表示（{rows.filter((r) => doneMarks[doneKey(r)]).length}件）
+          </label>
           <div className="relative max-w-sm">
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
@@ -366,6 +376,20 @@ export const SheetUnmatchedView: React.FC<{ onCountChange?: (count: number | nul
                         <span>シート{r.rowNumber}行目</span>
                       </div>
                       <div className="font-mono text-xs text-slate-800">追跡番号 {r.trackingNo}</div>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setDoneMark(doneKey(r), doneMarks[doneKey(r)] ? null : { at: new Date().toISOString() })
+                        }
+                        className={`mt-1 px-2 py-0.5 rounded text-[11px] font-bold border ${
+                          doneMarks[doneKey(r)]
+                            ? 'bg-emerald-50 border-emerald-300 text-emerald-800'
+                            : 'bg-white border-slate-300 text-slate-700'
+                        }`}
+                        title="楽楽販売に追跡番号を入れたら押してください（チームで共有されます）"
+                      >
+                        {doneMarks[doneKey(r)] ? '対応済み（取り消す）' : '対応済みにする'}
+                      </button>
                       {r.matchedClinicNames.length > 0 && (
                         <div className="text-[11px] text-slate-500">顧客マスタ：{r.matchedClinicNames.join('、')}</div>
                       )}

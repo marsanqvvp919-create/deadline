@@ -23,6 +23,7 @@ import {
   formatDelayString,
 } from '../utils/delayCalculation';
 import { TableEmptyState } from './TableEmptyState';
+import { useSharedNotes } from '../utils/sharedNotes';
 import {
   AlertTriangle,
   Clock,
@@ -91,24 +92,9 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
   // Expanded clinics in clinic view
   const [expandedClinics, setExpandedClinics] = useState<Set<string>>(new Set());
 
-  // Followup state persistence
-  const [followups, setFollowups] = useState<Record<string, OverdueFollowupRecord>>(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_FOLLOWUP_KEY);
-      return raw ? JSON.parse(raw) : {};
-    } catch {
-      return {};
-    }
-  });
-
-  const [clinicNotes, setClinicNotes] = useState<Record<string, string>>(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_CLINIC_NOTES_KEY);
-      return raw ? JSON.parse(raw) : {};
-    } catch {
-      return {};
-    }
-  });
+  // 対応状況・クリニックメモはチームで共有（サーバーに保存）。以前このブラウザに保存した分は自動で移す
+  const [followups, setFollowup] = useSharedNotes<OverdueFollowupRecord>('overdue_followups', STORAGE_FOLLOWUP_KEY);
+  const [clinicNotes, setClinicNote] = useSharedNotes<string>('overdue_clinic_notes', STORAGE_CLINIC_NOTES_KEY);
 
   // Modal states for action / contact template
   const [activeTemplateModal, setActiveTemplateModal] = useState<{
@@ -135,7 +121,7 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
     return map;
   }, []);
 
-  // Save followups to localStorage
+  // 対応状況を更新（チームで共有）
   const updateFollowup = (orderId: string, status: OverdueFollowupStatus, note?: string, nextActionDate?: string) => {
     const current = followups[orderId] || {
       status: '未対応',
@@ -148,19 +134,11 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
       nextActionDate: nextActionDate !== undefined ? nextActionDate : current.nextActionDate,
       updatedAt: new Date().toISOString(),
     };
-    const newMap = { ...followups, [orderId]: updated };
-    setFollowups(newMap);
-    try {
-      localStorage.setItem(STORAGE_FOLLOWUP_KEY, JSON.stringify(newMap));
-    } catch {}
+    setFollowup(orderId, updated);
   };
 
   const updateClinicNote = (clinicName: string, note: string) => {
-    const newNotes = { ...clinicNotes, [clinicName]: note };
-    setClinicNotes(newNotes);
-    try {
-      localStorage.setItem(STORAGE_CLINIC_NOTES_KEY, JSON.stringify(newNotes));
-    } catch {}
+    setClinicNote(clinicName, note);
   };
 
   // 1. Calculate all overdue orders (isLineDelayed統一) and approaching orders (5日以内分離)
