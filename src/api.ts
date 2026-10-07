@@ -161,16 +161,13 @@ export function mergeWithDiffCache(cachedData: DeliveryData | null, freshData: D
       mergedOrders.push(freshOrd);
     } else {
       const isChanged =
+        cachedOrd.status !== freshOrd.status ||
         cachedOrd.orderState !== freshOrd.orderState ||
         cachedOrd.paymentStatus !== freshOrd.paymentStatus ||
         JSON.stringify(cachedOrd.lines) !== JSON.stringify(freshOrd.lines);
-
-      if (isChanged) {
-        updatedCount++;
-        mergedOrders.push(freshOrd);
-      } else {
-        mergedOrders.push(cachedOrd);
-      }
+      if (isChanged) updatedCount++;
+      // 件数の集計だけに使い、表示は常に最新データにする（古い保存データだとステータス変更が反映されない）
+      mergedOrders.push(freshOrd);
     }
   });
 

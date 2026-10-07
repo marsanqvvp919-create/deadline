@@ -72,7 +72,9 @@ export function syncAndDiffOrders(newOrders: Order[]): {
   const invoicesMap = getStoredInvoices();
   const nowIso = new Date().toISOString();
 
-  const updatedOrders: Record<string, Order> = { ...storedOrders };
+  // 画面に出すのは常に楽楽販売の最新データ。保存済みの伝票は変更履歴を作るための比較にだけ使う
+  // （以前は変更がない伝票に古い保存データを使っており、出荷日などの更新が反映されず、削除済みの伝票も残っていた）
+  const updatedOrders: Record<string, Order> = {};
   const newHistoryItems: SalesChangeHistoryItem[] = [];
 
   newOrders.forEach((newOrder) => {
@@ -189,13 +191,13 @@ export function syncAndDiffOrders(newOrders: Order[]): {
         });
       }
 
+      updatedOrders[key] = {
+        ...newOrder,
+        totalAmount: newTotalAmount,
+      };
+
       if (changes.length > 0) {
-        // 変更がある項目だけ更新し、変更履歴を残す
-        updatedOrders[key] = {
-          ...existing,
-          ...newOrder,
-          totalAmount: newTotalAmount,
-        };
+        // 変更があった項目の履歴を残す
 
         changes.forEach((c) => {
           newHistoryItems.unshift({
@@ -210,9 +212,6 @@ export function syncAndDiffOrders(newOrders: Order[]): {
             syncedAt: nowIso,
           });
         });
-      } else {
-        // 変更がない場合は既存データを維持（冪等性保証）
-        updatedOrders[key] = existing;
       }
     }
   });
