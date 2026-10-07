@@ -3,7 +3,8 @@ import { useUrlState } from '../utils/listState';
 import { Order, ShipmentItem } from '../types';
 import { getConfiguredUrls, getLocalClinics } from '../api';
 import { openRakurakuWithCopiedId } from '../utils';
-import { Search, Truck, ExternalLink, Snowflake, Copy } from 'lucide-react';
+import { Search, Truck, ExternalLink, Snowflake, Copy, RefreshCw } from 'lucide-react';
+import { CARRIER_STATUS_LABEL, CARRIER_STATUS_STYLE, CarrierStatus, digitsOf, fetchCarrierStatuses } from '../utils/carriers';
 
 // 出荷管理（101270）の実データから、出荷ごとに「今どの段階か」を表示する。
 // 段階は楽楽販売の項目（ステータス・輸入確認ステータス・通関完了日・配達完了日）から決める。
@@ -67,6 +68,10 @@ export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: Shipmen
   const [warehouseFilter, setWarehouseFilter] = useUrlState<string>('wh', 'all');
   const [query, setQuery] = useState('');
   const [copied, setCopied] = useState<string | null>(null);
+  // 配送会社APIから取得した最新状況（追跡番号の数字 → 結果）
+  const [carrierStatus, setCarrierStatus] = useState<Record<string, CarrierStatus>>({});
+  const [carrierLoading, setCarrierLoading] = useState(false);
+  const [carrierMessage, setCarrierMessage] = useState<string | null>(null);
   const { rakurakuBaseUrl } = getConfiguredUrls();
 
   const clinicById = useMemo(() => {
@@ -124,6 +129,32 @@ export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: Shipmen
     return [i.customerName, i.s.shipmentId, i.s.orderId, i.s.trackingNo].some((v) => (v || '').toLowerCase().includes(q));
   });
 
+  // 表示中の出荷（最大120件）について、配送会社の最新状況を取得する
+  const loadCarrierStatus = async () => {
+    setCarrierLoading(true);
+    setCarrierMessage(null);
+    try {
+      const items = visible
+        .slice(0, 120)
+        .filter((v) => digitsOf(v.s.trackingNo).length >= 8)
+        .map((v) => ({ trackingNo: v.s.trackingNo, courier: v.s.courier }));
+      const json = await fetchCarrierStatuses(items);
+      const map: Record<string, CarrierStatus> = { ...carrierStatus };
+      json.results.forEach((r) => (map[r.trackingNo] = r));
+      setCarrierStatus(map);
+      const errs = Object.values(json.errors);
+      setCarrierMessage(
+        errs.length > 0
+          ? errs.join('／') + '（メニュー「配送会社API連携」で設定できます）'
+          : `${json.results.length}件の最新状況を取得しました`
+      );
+    } catch (e: any) {
+      setCarrierMessage(`取得できませんでした：${e?.message || e}`);
+    } finally {
+      setCarrierLoading(false);
+    }
+  };
+
   const copyAndOpen = (shipmentId: string) => {
     openRakurakuWithCopiedId(rakurakuBaseUrl, shipmentId);
     setCopied(shipmentId);
@@ -177,7 +208,16 @@ export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: Shipmen
             />
           </div>
           <span className="text-xs text-slate-500">{visible.length}件</span>
+          <button
+            type="button"
+            onClick={loadCarrierStatus}
+            disabled={carrierLoading}
+            className="ml-auto px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-700 flex items-center gap-1.5 disabled:opacity-50"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${carrierLoading ? 'animate-spin' : ''}`} /> 配送会社から最新状況を取得
+          </button>
         </div>
+        {carrierMessage && <p className="text-xs text-slate-600">{carrierMessage}</p>}
       </div>
 
       {visible.length === 0 ? (
@@ -231,6 +271,18 @@ export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: Shipmen
                   {!blank(s.deliveredDate) && <span className="text-emerald-700 font-bold">配達完了 {s.deliveredDate}</span>}
                   {!blank(s.nextDeadline) && <span className="text-amber-700 font-bold">次の期限 {s.nextDeadline}</span>}
                 </div>
+
+                {carrierStatus[digitsOf(s.trackingNo)] && (
+                  <div className="text-[11px] flex items-center gap-1.5 flex-wrap">
+                    <span className={`px-1.5 py-0.5 rounded font-bold ${CARRIER_STATUS_STYLE[carrierStatus[digitsOf(s.trackingNo)].status]}`}>
+                      {s.courier || '配送会社'}：{CARRIER_STATUS_LABEL[carrierStatus[digitsOf(s.trackingNo)].status]}
+                    </span>
+                    <span className="text-slate-600">{carrierStatus[digitsOf(s.trackingNo)].statusText}</span>
+                    {carrierStatus[digitsOf(s.trackingNo)].lastLocation && (
+                      <span className="text-slate-500">／ {carrierStatus[digitsOf(s.trackingNo)].lastLocation}</span>
+                    )}
+                  </div>
+                )}
 
                 {coolPending && (
                   <div className="text-[11px] font-bold text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1 flex items-center gap-1">

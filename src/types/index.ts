@@ -175,7 +175,8 @@ export type ViewTab =
   | 'cool_missing'
   | 'kanto_customs_ng'
   | 'unmatched_sheets'
-  | 'sheet_import';
+  | 'sheet_import'
+  | 'carrier_settings';
 
 export interface WarehouseStockRecord {
   productId: string;

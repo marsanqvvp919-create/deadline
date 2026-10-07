@@ -9,6 +9,7 @@ import { Storage } from '@google-cloud/storage';
 import { GoogleAuth } from 'google-auth-library';
 import { parseSheetRows, findUnmatched } from './unmatchedShipments';
 import { buildImportPreview } from './sheetImport';
+import { CarrierCredentials, CarrierId, CarrierStatus, detectCarrier, trackFedex, trackDhl, testCarrier } from './carriers';
 
 dotenv.config();
 
@@ -2229,95 +2230,148 @@ app.get('/api/rakuraku/schemas', (_req, res) => {
   });
 });
 
-// FedEx Live Tracking API 連携エンドポイント (Sandbox / Production)
-app.post('/api/tracking/fedex/live', async (req, res) => {
-  const { trackingNumber } = req.body;
-  const targetTrackingNo = trackingNumber || '877696538713';
-  const clientId = 'l742a9c1bb81044c379da95be1341dab83';
-  const clientSecret = '7dc4a334b466474a87583c4b39028104';
+// ----------------------------------------------------------------------
+// 配送会社（FedEx・DHL）の追跡API連携
+// 認証情報は環境変数（FEDEX_CLIENT_ID / FEDEX_CLIENT_SECRET / FEDEX_ENV / DHL_API_KEY）を優先し、
+// 無ければ画面から保存したもの（Cloud Storage の carrier-credentials.json）を使う。
+// 画面からの保存には管理用パスコード（環境変数 ADMIN_PASSCODE）が必要。保存した値はブラウザに返さない。
+// ----------------------------------------------------------------------
+const CARRIER_CRED_OBJECT = 'carrier-credentials.json';
+let savedCarrierCreds: CarrierCredentials = {};
+let carrierCredsLoaded = false;
+let carrierLastTest: Record<string, { ok: boolean; message: string; at: string }> = {};
+const carrierCache = new Map<string, CarrierStatus>();
+const CARRIER_CACHE_MS = 30 * 60 * 1000;
 
-  const KNOWN_DELIVERED: Record<string, string> = {
-    '877479395153': '配達完了 (2026/09/29 11:45 配達済み)',
-    '877053808617': '配達完了 (2026/09/17 11:20 大阪市北区にて配達済み)',
-    '877206321790': '配達完了 (2026/09/28 09:00 配達済み / 署名: 佐川クール)',
-  };
-
-  if (KNOWN_DELIVERED[targetTrackingNo]) {
-    return res.json({
-      success: true,
-      trackingNo: targetTrackingNo,
-      carrier: 'FedEx',
-      locationStatus: KNOWN_DELIVERED[targetTrackingNo],
-      account: '740980114',
-      summary: 'FedEx APIライブ同期: 配達完了を確認しました。',
-    });
-  }
-
+async function loadCarrierCreds() {
+  if (carrierCredsLoaded) return;
+  carrierCredsLoaded = true;
+  if (!CACHE_BUCKET) return;
   try {
-    // 1. OAuth トークン取得 (FedEx Sandbox)
-    const tokenRes = await fetch('https://apis-sandbox.fedex.com/oauth/token', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: new URLSearchParams({
-        grant_type: 'client_credentials',
-        client_id: clientId,
-        client_secret: clientSecret,
-      }),
-    });
-
-    const tokenData: any = await tokenRes.json();
-    if (!tokenRes.ok || !tokenData.access_token) {
-      return res.json({
-        success: false,
-        error: tokenData.errors?.[0]?.message || 'FedEx OAuth 認証エラー',
-        locationStatus: '成田国際空港 税関通関手続き中 (Sandbox接続確認済)',
-        account: '740980114',
-      });
-    }
-
-    const accessToken = tokenData.access_token;
-
-    // 2. FedEx Tracking API 呼び出し
-    const trackRes = await fetch('https://apis-sandbox.fedex.com/track/v1/trackingnumbers', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-        'X-Customer-Transaction-Id': `track_${Date.now()}`,
-      },
-      body: JSON.stringify({
-        includeDetailedScans: true,
-        trackingInfo: [
-          {
-            trackingNumberInfo: {
-              trackingNumber: targetTrackingNo,
-            },
-          },
-        ],
-      }),
-    });
-
-    const trackData: any = await trackRes.json();
-
-    return res.json({
-      success: true,
-      apiResponse: trackData,
-      trackingNo: targetTrackingNo,
-      carrier: 'FedEx',
-      locationStatus: '成田国際空港 税関通関手続き中 (FedEx APIライブ同期)',
-      account: '740980114',
-      summary: 'FedEx APIとのOAuth認証およびトラッキングデータ取得に成功しました。',
-    });
-  } catch (err: any) {
-    return res.json({
-      success: false,
-      error: err.message,
-      locationStatus: '成田国際空港 税関通関手続き中',
-      account: '740980114',
-    });
+    const [buf] = await new Storage().bucket(CACHE_BUCKET).file(CARRIER_CRED_OBJECT).download();
+    savedCarrierCreds = JSON.parse(buf.toString('utf-8')) || {};
+  } catch (e: any) {
+    if (e?.code !== 404) console.warn('[Carriers] Load failed:', e?.message || e);
   }
+}
+
+async function effectiveCarrierCreds(): Promise<{ creds: CarrierCredentials; source: Record<CarrierId, 'env' | 'saved' | null> }> {
+  await loadCarrierCreds();
+  const creds: CarrierCredentials = {};
+  const source: Record<CarrierId, 'env' | 'saved' | null> = { fedex: null, dhl: null };
+  if (process.env.FEDEX_CLIENT_ID && process.env.FEDEX_CLIENT_SECRET) {
+    creds.fedex = {
+      clientId: process.env.FEDEX_CLIENT_ID,
+      clientSecret: process.env.FEDEX_CLIENT_SECRET,
+      env: process.env.FEDEX_ENV === 'production' ? 'production' : 'sandbox',
+    };
+    source.fedex = 'env';
+  } else if (savedCarrierCreds.fedex?.clientId && savedCarrierCreds.fedex?.clientSecret) {
+    creds.fedex = savedCarrierCreds.fedex;
+    source.fedex = 'saved';
+  }
+  if (process.env.DHL_API_KEY) {
+    creds.dhl = { apiKey: process.env.DHL_API_KEY };
+    source.dhl = 'env';
+  } else if (savedCarrierCreds.dhl?.apiKey) {
+    creds.dhl = savedCarrierCreds.dhl;
+    source.dhl = 'saved';
+  }
+  return { creds, source };
+}
+
+const mask = (v?: string) => (v ? `${v.slice(0, 4)}…${v.slice(-2)}` : '');
+
+app.get('/api/carriers/settings', async (_req, res) => {
+  const { creds, source } = await effectiveCarrierCreds();
+  return res.json({
+    fedex: { configured: !!creds.fedex, source: source.fedex, env: creds.fedex?.env, clientIdMasked: mask(creds.fedex?.clientId) },
+    dhl: { configured: !!creds.dhl, source: source.dhl, apiKeyMasked: mask(creds.dhl?.apiKey) },
+    passcodeConfigured: !!process.env.ADMIN_PASSCODE,
+    storageConfigured: !!CACHE_BUCKET,
+    lastTest: carrierLastTest,
+  });
+});
+
+app.put('/api/carriers/settings', async (req, res) => {
+  if (!process.env.ADMIN_PASSCODE) {
+    return res.status(403).json({ error: '管理用パスコード（ADMIN_PASSCODE）がサーバーに設定されていないため保存できません' });
+  }
+  if (req.get('X-Admin-Passcode') !== process.env.ADMIN_PASSCODE) {
+    return res.status(403).json({ error: '管理用パスコードが違います' });
+  }
+  if (!CACHE_BUCKET) return res.status(500).json({ error: '保存先（Cloud Storage）が設定されていません' });
+  await loadCarrierCreds();
+  const { fedex, dhl, clear } = req.body || {};
+  if (clear === 'fedex') delete savedCarrierCreds.fedex;
+  if (clear === 'dhl') delete savedCarrierCreds.dhl;
+  if (fedex && fedex.clientId && fedex.clientSecret) {
+    savedCarrierCreds.fedex = {
+      clientId: String(fedex.clientId).trim(),
+      clientSecret: String(fedex.clientSecret).trim(),
+      env: fedex.env === 'production' ? 'production' : 'sandbox',
+    };
+  }
+  if (dhl && dhl.apiKey) savedCarrierCreds.dhl = { apiKey: String(dhl.apiKey).trim() };
+  try {
+    await new Storage().bucket(CACHE_BUCKET).file(CARRIER_CRED_OBJECT).save(JSON.stringify(savedCarrierCreds), {
+      contentType: 'application/json',
+      resumable: false,
+    });
+  } catch (e: any) {
+    return res.status(500).json({ error: `保存できませんでした: ${e?.message || e}` });
+  }
+  carrierCache.clear();
+  return res.json({ success: true });
+});
+
+app.post('/api/carriers/test', async (req, res) => {
+  const carrier = req.body?.carrier as CarrierId;
+  if (carrier !== 'fedex' && carrier !== 'dhl') return res.status(400).json({ error: 'carrier は fedex か dhl' });
+  const { creds } = await effectiveCarrierCreds();
+  try {
+    const message = await testCarrier(carrier, creds, req.body?.trackingNo ? String(req.body.trackingNo) : undefined);
+    carrierLastTest[carrier] = { ok: true, message, at: new Date().toISOString() };
+  } catch (e: any) {
+    carrierLastTest[carrier] = { ok: false, message: e?.message || String(e), at: new Date().toISOString() };
+  }
+  return res.json(carrierLastTest[carrier]);
+});
+
+// 追跡番号の一覧を受け取り、配送会社ごとにまとめて問い合わせる（30分は同じ結果を使う）
+app.post('/api/carriers/track', async (req, res) => {
+  const items: { trackingNo: string; courier?: string }[] = Array.isArray(req.body?.items) ? req.body.items.slice(0, 120) : [];
+  const { creds } = await effectiveCarrierCreds();
+  const results: CarrierStatus[] = [];
+  const pending: Record<CarrierId, string[]> = { fedex: [], dhl: [] };
+  for (const it of items) {
+    const digits = String(it.trackingNo || '').replace(/\D/g, '');
+    if (digits.length < 8) continue;
+    const carrier = detectCarrier(digits, it.courier);
+    if (!carrier) continue;
+    const cached = carrierCache.get(`${carrier}:${digits}`);
+    if (cached && Date.now() - new Date(cached.fetchedAt).getTime() < CARRIER_CACHE_MS) results.push(cached);
+    else pending[carrier].push(digits);
+  }
+  const errors: Record<string, string> = {};
+  for (const carrier of ['fedex', 'dhl'] as CarrierId[]) {
+    const nos = Array.from(new Set(pending[carrier]));
+    if (nos.length === 0) continue;
+    if (!creds[carrier]) {
+      errors[carrier] = `${carrier === 'fedex' ? 'FedEx' : 'DHL'} のAPIが未設定です`;
+      continue;
+    }
+    try {
+      const got = carrier === 'fedex' ? await trackFedex(creds.fedex!, nos) : await trackDhl(creds.dhl!, nos);
+      got.forEach((g) => {
+        carrierCache.set(`${carrier}:${g.trackingNo}`, g);
+        results.push(g);
+      });
+    } catch (e: any) {
+      errors[carrier] = e?.message || String(e);
+    }
+  }
+  return res.json({ results, errors, configured: { fedex: !!creds.fedex, dhl: !!creds.dhl } });
 });
 
 async function startServer() {

@@ -38,6 +38,7 @@ import { KantoCustomsNgView } from './components/KantoCustomsNgView';
 import { SheetUnmatchedView, fetchSheetUnmatched } from './components/SheetUnmatchedView';
 import { SheetImportView } from './components/SheetImportView';
 import { ActionListView } from './components/ActionListView';
+import { CarrierSettingsView } from './components/CarrierSettingsView';
 import { BudgetSettingsModal } from './components/BudgetSettingsModal';
 import { DailyDigestModal } from './components/DailyDigestModal';
 import { ClinicProductStatusDrawer } from './components/ClinicProductStatusDrawer';
@@ -741,6 +742,12 @@ export default function App() {
       schemaId: '101250',
       icon: Building2,
     },
+    {
+      id: 'carrier_settings' as ViewTab,
+      label: '配送会社API連携',
+      schemaId: '',
+      icon: Truck,
+    },
   ];
 
   return (
@@ -1133,6 +1140,8 @@ export default function App() {
           )}
 
           {activeTab === 'sheet_import' && <SheetImportView />}
+
+          {activeTab === 'carrier_settings' && <CarrierSettingsView />}
 
           {activeTab === 'alerts' && (
             <ActionListView orders={filteredOrders} alerts={filteredAlerts} onSelectOrder={handleOpenDetail} />
