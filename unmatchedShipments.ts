@@ -52,6 +52,8 @@ export interface UnmatchedRow extends SheetShipmentRow {
   matchedClinicNames: string[];
   noCandidateReason?: string;
   bulkGroupKey: string | null;
+  // 似た名前（表記ゆれ）で顧客マスタ・受注のクリニックを見つけたとき：シートの名前と相手の名前
+  nameVariants?: { sheetName: string; matchedName: string }[];
 }
 
 const EXCLUDED_MEMO_WORDS = ['配達完了', 'キャンセル', '荷送人へ返送', '返却'];
@@ -123,13 +125,29 @@ export function normalizeClinicName(value: string): string {
   return normalized;
 }
 
+const CORPORATE_PREFIX =
+  /(医療法人社団|医療法人財団|社会医療法人|特定医療法人|医療法人|一般社団法人|一般財団法人|社団法人|財団法人|株式会社|有限会社|合同会社|\(医\)|\(株\))/;
+const COMMON_WORDS = /(クリニック|clinic|美容外科|美容皮膚科|形成外科|皮膚科|医院|歯科|クリニーク)/g;
+
 function normalizeClinicNameUncached(value: string): string {
-  return value
-    .normalize('NFKC')
-    .toLowerCase()
-    .replace(/[\s・\-ー－.,、。()（）「」'"]/g, '')
-    .replace(/医療法人(社団|財団)?/g, '')
-    .replace(/(clinic|クリニック|美容外科|美容皮膚科|皮膚科|医院)/g, '');
+  // 全角・半角、大文字・小文字をそろえる
+  let v = value.normalize('NFKC').toLowerCase();
+  // 法人名を外す：「医療法人社団福進会 しおう…」のように空白で区切られていれば法人名の部分を捨て、
+  // 「医療法人社団福進会しおう…」のように続いていれば「…会」までを外す
+  const tokens = v.split(/\s+/).filter(Boolean);
+  if (tokens.length > 1) {
+    const rest = tokens.filter((t) => !CORPORATE_PREFIX.test(t));
+    if (rest.length > 0) v = rest.join('');
+  }
+  const withoutCorp = v
+    .replace(new RegExp(CORPORATE_PREFIX.source + '[^会]{1,10}会(?=.)'), '')
+    .replace(new RegExp(CORPORATE_PREFIX.source, 'g'), '');
+  // 法人名だけの名前（例：一般社団法人水麗会）は、法人の種類だけを外したものを使う
+  v = withoutCorp || v.replace(new RegExp(CORPORATE_PREFIX.source, 'g'), '');
+  // 空白・改行・記号を外し、共通の語を外す
+  v = v.replace(/[\s・\-ー－.,、。()（）「」'"&＆]/g, '');
+  const withoutCommon = v.replace(COMMON_WORDS, '');
+  return withoutCommon || v;
 }
 
 function normalizeWarehouse(value?: string): string {
@@ -180,17 +198,25 @@ function editDistance(a: string, b: string, max: number): number {
   return prev[b.length];
 }
 
-function namesMatch(a: string, b: string): boolean {
+type NameMatch = 'exact' | 'similar' | null;
+
+/** クリニック名の比較。一致（または片方がもう片方を含む）なら 'exact'、1〜2文字違いなら 'similar'（表記ゆれ） */
+function compareNames(a: string, b: string): NameMatch {
   const na = normalizeClinicName(a);
   const nb = normalizeClinicName(b);
-  if (!na || !nb) return false;
-  if (na === nb) return true;
+  if (!na || !nb) return null;
+  if (na === nb) return 'exact';
   const shorter = na.length <= nb.length ? na : nb;
   const longer = na.length <= nb.length ? nb : na;
-  if (shorter.length >= 4 && longer.includes(shorter)) return true;
-  // 表記ゆれ（例：中野新井薬師寺参道／中野新井薬師参道）：8文字以上なら1文字の違いまで同じとみなす。
-  // 2文字以上の違いは別の院（例：新宿院／渋谷院）のことがあるので同じとみなさない
-  return shorter.length >= 8 && editDistance(na, nb, 1) <= 1;
+  if (shorter.length >= 4 && longer.includes(shorter)) return 'exact';
+  // 表記ゆれ：4文字以上は1文字、8文字以上は2文字までの違い（例：マリージュ／マリアージュ、薬師寺参道／薬師参道）
+  const allowed = shorter.length >= 8 ? 2 : shorter.length >= 4 ? 1 : 0;
+  if (allowed > 0 && editDistance(na, nb, allowed) <= allowed) return 'similar';
+  return null;
+}
+
+function namesMatch(a: string, b: string): boolean {
+  return compareNames(a, b) !== null;
 }
 
 /** 同じ日に同じ系列へまとめて送ったもの（例：湘南美容クリニック109個口）のグループ名 */
@@ -289,9 +315,26 @@ export function findUnmatched(
     }
 
     // シートのクリニック名を、顧客マスタの「顧客名」「クリニック名英語表記」と照合
-    const matchedClinicNames = clinics
-      .filter((c) => namesMatch(row.clinicName, c.clinicName) || (c.clinicNameEn && namesMatch(row.clinicName, c.clinicNameEn)))
-      .map((c) => c.clinicName);
+    // 顧客マスタの「顧客名」「クリニック名英語表記」と比べる。完全に一致するものがあればそれだけを使い、
+    // 無いときだけ似た名前（表記ゆれ）を使う
+    const nameVariants: { sheetName: string; matchedName: string }[] = [];
+    const masterResults = clinics.map((c) => {
+      const byName = compareNames(row.clinicName, c.clinicName);
+      const byEn = c.clinicNameEn ? compareNames(row.clinicName, c.clinicNameEn) : null;
+      const level: NameMatch = byName === 'exact' || byEn === 'exact' ? 'exact' : byName || byEn;
+      return { c, level, viaEn: byName !== 'exact' && byName !== 'similar' };
+    });
+    const exactMasters = masterResults.filter((m) => m.level === 'exact');
+    const usedMasters = exactMasters.length > 0 ? exactMasters : masterResults.filter((m) => m.level === 'similar');
+    if (exactMasters.length === 0) {
+      usedMasters.forEach((m) =>
+        nameVariants.push({
+          sheetName: row.clinicName,
+          matchedName: m.viaEn && m.c.clinicNameEn ? `${m.c.clinicName}（${m.c.clinicNameEn}）` : m.c.clinicName,
+        })
+      );
+    }
+    const matchedClinicNames = usedMasters.map((m) => m.c.clinicName);
     const nameSet = [row.clinicName, ...matchedClinicNames];
 
     const sheetDate = parseDate(row.shipDate);
@@ -299,9 +342,21 @@ export function findUnmatched(
     const seen = new Set<string>();
     // クリニック名ごとにまとめた出荷から探す（出荷1件ずつ名前を比べると遅いため）
     const clinicShipments: ShipmentLike[] = [];
+    const similarGroups: [string, ShipmentLike[]][] = [];
     shipmentsByCustomer.forEach((list, customerName) => {
-      if (nameSet.some((n) => namesMatch(n, customerName))) clinicShipments.push(...list);
+      const results = nameSet.map((n) => compareNames(n, customerName));
+      if (results.includes('exact')) clinicShipments.push(...list);
+      else if (results.includes('similar')) similarGroups.push([customerName, list]);
     });
+    // 受注のクリニック名でも、完全に一致するものが無いときだけ似た名前を使う
+    if (clinicShipments.length === 0) {
+      similarGroups.forEach(([customerName, list]) => {
+        clinicShipments.push(...list);
+        if (!nameVariants.some((v) => v.matchedName.startsWith(customerName))) {
+          nameVariants.push({ sheetName: row.clinicName, matchedName: customerName });
+        }
+      });
+    }
     for (const s of clinicShipments) {
       // 出荷管理は明細ごとに行があるので、出荷IDごとに1件にする
       if (seen.has(s.shipmentId)) continue;
@@ -346,6 +401,7 @@ export function findUnmatched(
 
     unmatched.push({
       ...row,
+      nameVariants: nameVariants.length > 0 ? nameVariants : undefined,
       noCandidateReason,
       candidates: narrowed,
       kind: narrowed.length === 0 ? 'none' : narrowed.length === 1 ? 'single' : 'multiple',

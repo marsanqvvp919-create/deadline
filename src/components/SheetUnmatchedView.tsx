@@ -32,6 +32,7 @@ interface UnmatchedRow {
   matchedClinicNames: string[];
   bulkGroupKey: string | null;
   noCandidateReason?: string;
+  nameVariants?: { sheetName: string; matchedName: string }[];
 }
 
 interface MatchedIssue {
@@ -391,8 +392,20 @@ export const SheetUnmatchedView: React.FC<{ onCountChange?: (count: number | nul
                       >
                         {doneMarks[doneKey(r)] ? '対応済み（取り消す）' : '対応済みにする'}
                       </button>
-                      {r.matchedClinicNames.length > 0 && (
-                        <div className="text-[11px] text-slate-500">顧客マスタ：{r.matchedClinicNames.join('、')}</div>
+                      {r.nameVariants && r.nameVariants.length > 0 ? (
+                        <div className="text-[11px] bg-amber-50 border border-amber-200 rounded-lg px-2 py-1 space-y-0.5">
+                          <span className="px-1.5 py-0.5 rounded bg-amber-500 text-white font-bold mr-1">表記ゆれ</span>
+                          <span className="text-amber-900">似た名前で候補を探しています。入力した人に名前の確認をお願いしてください。</span>
+                          {r.nameVariants.map((v, i) => (
+                            <div key={i} className="text-slate-700">
+                              シート「<b>{v.sheetName}</b>」 ／ 楽楽販売「<b>{v.matchedName}</b>」
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        r.matchedClinicNames.length > 0 && (
+                          <div className="text-[11px] text-slate-500">顧客マスタ：{r.matchedClinicNames.join('、')}</div>
+                        )
                       )}
                     </div>
                     <div className="lg:col-span-7">
