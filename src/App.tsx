@@ -219,7 +219,8 @@ export default function App() {
     const loadCount = () =>
       fetchSheetUnmatched()
         .then((json) => {
-          if (!cancelled) setSheetUnmatchedCount(json.success ? json.rows?.length ?? 0 : null);
+          // 一括発注（湘南美容など）は未照合の件数に数えない
+          if (!cancelled) setSheetUnmatchedCount(json.success ? (json.rows || []).filter((r) => r.kind !== 'bulk').length : null);
         })
         .catch(() => {});
     loadCount();

@@ -28,7 +28,8 @@ interface UnmatchedRow {
   clinicName: string;
   trackingNo: string;
   candidates: Candidate[];
-  kind: 'single' | 'multiple' | 'none';
+  kind: 'single' | 'multiple' | 'none' | 'bulk';
+  bulkGroupLabel?: string;
   matchedClinicNames: string[];
   bulkGroupKey: string | null;
   noCandidateReason?: string;
@@ -66,12 +67,14 @@ const KIND_STYLE: Record<UnmatchedRow['kind'], { label: string; className: strin
   single: { label: '候補1件', className: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
   multiple: { label: '候補複数', className: 'bg-amber-100 text-amber-800 border-amber-200' },
   none: { label: '候補なし', className: 'bg-rose-100 text-rose-800 border-rose-200' },
+  bulk: { label: '一括発注', className: 'bg-indigo-100 text-indigo-800 border-indigo-200' },
 };
 
 const KIND_CARD_BG: Record<UnmatchedRow['kind'], string> = {
   single: 'bg-emerald-50/60',
   multiple: 'bg-amber-50/60',
   none: 'bg-rose-50/60',
+  bulk: 'bg-indigo-50/60',
 };
 
 function formatTime(iso?: string | null): string {
@@ -111,7 +114,8 @@ export const SheetUnmatchedView: React.FC<{ onCountChange?: (count: number | nul
     try {
       const json = await fetchSheetUnmatched(refresh);
       setData(json);
-      onCountChange?.(json.success ? json.rows?.length ?? 0 : null);
+      // 一括発注（湘南美容など）は追跡番号で照合できない前提なので、未照合の件数には数えない
+      onCountChange?.(json.success ? (json.rows || []).filter((r) => r.kind !== 'bulk').length : null);
     } catch (e: any) {
       setData({ success: false, error: e?.message || '照合結果を取得できませんでした' });
       onCountChange?.(null);
@@ -134,6 +138,7 @@ export const SheetUnmatchedView: React.FC<{ onCountChange?: (count: number | nul
       single: rows.filter((r) => r.kind === 'single').length,
       multiple: rows.filter((r) => r.kind === 'multiple').length,
       none: rows.filter((r) => r.kind === 'none').length,
+      bulk: rows.filter((r) => r.kind === 'bulk').length,
     }),
     [rows]
   );
@@ -191,17 +196,17 @@ export const SheetUnmatchedView: React.FC<{ onCountChange?: (count: number | nul
         </div>
 
         {data?.success && (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-3 border-t border-slate-100">
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 pt-3 border-t border-slate-100">
             <button
               type="button"
               onClick={() => setKindFilter('all')}
               className={`text-left p-3 rounded-xl border ${kindFilter === 'all' ? 'border-slate-900 bg-slate-50' : 'border-slate-200'}`}
             >
-              <span className="text-[11px] font-semibold text-slate-600 block">未照合</span>
-              <span className="text-2xl font-bold font-mono text-slate-900">{rows.length}</span>
+              <span className="text-[11px] font-semibold text-slate-600 block">未照合（一括発注を除く）</span>
+              <span className="text-2xl font-bold font-mono text-slate-900">{rows.length - counts.bulk}</span>
               <span className="text-[10px] text-slate-500 ml-1">件 ／ 照合済み {data.matchedCount ?? 0}件</span>
             </button>
-            {(['single', 'multiple', 'none'] as const).map((k) => (
+            {(['single', 'multiple', 'none', 'bulk'] as const).map((k) => (
               <button
                 key={k}
                 type="button"
@@ -378,6 +383,11 @@ export const SheetUnmatchedView: React.FC<{ onCountChange?: (count: number | nul
                         <span>シート{r.rowNumber}行目</span>
                       </div>
                       <div className="font-mono text-xs text-slate-800">追跡番号 {r.trackingNo}</div>
+                      {r.kind === 'bulk' && (
+                        <div className="text-[11px] bg-indigo-50 border border-indigo-200 rounded-lg px-2 py-1 text-indigo-900">
+                          {r.bulkGroupLabel}の一括発注です。楽楽販売では本部名の受注にまとめて登録されるため、院ごとの追跡番号では照合できません。
+                        </div>
+                      )}
                       <button
                         type="button"
                         onClick={() =>

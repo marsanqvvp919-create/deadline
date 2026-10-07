@@ -38,7 +38,16 @@ export interface ClinicLike {
   clinicNameEn?: string;
 }
 
-export type CandidateKind = 'single' | 'multiple' | 'none';
+export type CandidateKind = 'single' | 'multiple' | 'none' | 'bulk';
+
+/**
+ * 一括発注のグループ。本部の名前で1つの受注にまとめて発注し、出荷だけ各院へ送るため、
+ * シートには院ごとの追跡番号が並ぶが、楽楽販売には院ごとの出荷が無く、追跡番号では照合できない。
+ * シートの名前が sheetPattern に当たる行は、bulkCustomerNames の受注の出荷を候補にする。
+ */
+export const BULK_ORDER_GROUPS: { id: string; label: string; sheetPattern: RegExp; bulkCustomerNames: string[] }[] = [
+  { id: 'sbc', label: '湘南美容クリニック（SBC）', sheetPattern: /湘南美容|sbc|shonan/i, bulkCustomerNames: ['湘南美容クリニック'] },
+];
 export type CandidateReason = 'インボイス番号が一致' | '出荷待ち' | '出荷日が近い';
 
 function normalizeInvoice(value?: string): string {
@@ -54,6 +63,8 @@ export interface UnmatchedRow extends SheetShipmentRow {
   bulkGroupKey: string | null;
   // 似た名前（表記ゆれ）で顧客マスタ・受注のクリニックを見つけたとき：シートの名前と相手の名前
   nameVariants?: { sheetName: string; matchedName: string }[];
+  // 一括発注のグループ名（kind が 'bulk' のとき）
+  bulkGroupLabel?: string;
 }
 
 const EXCLUDED_MEMO_WORDS = ['配達完了', 'キャンセル', '荷送人へ返送', '返却'];
@@ -260,6 +271,9 @@ export function findUnmatched(
     })
   );
   const issues: MatchedIssue[] = [];
+  const bulkRoots = new Map(
+    BULK_ORDER_GROUPS.map((g) => [g.id, new Set(g.bulkCustomerNames.map((n) => normalizeClinicName(n)))])
+  );
   const shipmentsByCustomer = new Map<string, ShipmentLike[]>();
   shipments.forEach((s) => {
     const key = s.customerName || '';
@@ -315,6 +329,44 @@ export function findUnmatched(
     }
 
     // シートのクリニック名を、顧客マスタの「顧客名」「クリニック名英語表記」と照合
+    // 一括発注のグループ（湘南美容クリニックなど）：本部名の受注の出荷を候補にし、未照合とは分けて扱う
+    const bulkGroup = BULK_ORDER_GROUPS.find((g) => g.sheetPattern.test(row.clinicName));
+    if (bulkGroup) {
+      const roots = bulkRoots.get(bulkGroup.id)!;
+      const sheetDateForBulk = parseDate(row.shipDate);
+      const seenBulk = new Set<string>();
+      const bulkCandidates: UnmatchedRow['candidates'] = [];
+      const addIfOpen = (s: ShipmentLike) => {
+        const sd = parseDate(s.shippedDate || '');
+        const waiting = (s.shipStatus || '').includes('出荷待ち') || !sd;
+        const near = !!sheetDateForBulk && !!sd && Math.abs(daysBetween(sd, sheetDateForBulk)) <= NEAR_SHIP_DAYS;
+        if (!waiting && !near) return;
+        seenBulk.add(s.shipmentId);
+        bulkCandidates.push({ ...s, reason: waiting ? '出荷待ち' : '出荷日が近い' });
+      };
+      // 先にその院自身の名前の受注（例：SBC NEO Skin Clinic 銀座）、次に本部名の一括発注の出荷
+      // （本部名だけの名前は全院の名前に含まれるので、院の照合には使わない）
+      shipments.forEach((s) => {
+        const name = normalizeClinicName(s.customerName || '');
+        if (seenBulk.has(s.shipmentId) || roots.has(name)) return;
+        if (compareNames(row.clinicName, s.customerName || '') === 'exact') addIfOpen(s);
+      });
+      shipments.forEach((s) => {
+        if (seenBulk.has(s.shipmentId) || !roots.has(normalizeClinicName(s.customerName || ''))) return;
+        addIfOpen(s);
+      });
+      unmatched.push({
+        ...row,
+        candidates: bulkCandidates,
+        kind: 'bulk',
+        bulkGroupLabel: bulkGroup.label,
+        matchedClinicNames: [],
+        bulkGroupKey: null,
+        noCandidateReason: bulkCandidates.length === 0 ? `${bulkGroup.label}の一括発注で、出荷待ちの出荷がありません` : undefined,
+      });
+      continue;
+    }
+
     // 顧客マスタの「顧客名」「クリニック名英語表記」と比べる。完全に一致するものがあればそれだけを使い、
     // 無いときだけ似た名前（表記ゆれ）を使う
     const nameVariants: { sheetName: string; matchedName: string }[] = [];
