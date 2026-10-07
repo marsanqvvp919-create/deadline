@@ -2893,7 +2893,7 @@ app.get('/api/carriers/writeback', async (_req, res) => {
   });
 });
 
-// 照会の結果の内訳（報告用）：出荷から21日以内の出荷済みの出荷
+// 照会の結果の内訳（報告用）：出荷から30日以内の出荷済みの出荷
 app.get('/api/carriers/report', async (_req, res) => {
   await loadCarrierStatusCache();
   const now = Date.now();
@@ -2902,7 +2902,7 @@ app.get('/api/carriers/report', async (_req, res) => {
   for (const s of serverRakurakuStore.shipments || []) {
     if (!String(s.shipStatus || '').includes('出荷済')) continue;
     const shipped = shipDateOf(s);
-    if (!shipped || now - shipped > 21 * 86400000) continue;
+    if (!shipped || now - shipped > CARRIER_TRACK_DAYS * 86400000) continue;
     out.shipments++;
     const boxes = boxesOfShipment(s);
     if (boxes.length === 0) {
@@ -2931,6 +2931,8 @@ app.get('/api/carriers/report', async (_req, res) => {
 // 配達完了でないものは DHL 6時間・FedEx 2時間たったら取り直す。新しい出荷（7日以内）で該当なしの番号は12時間後に取り直す。
 // 取得のあと、楽楽販売へ書き戻す。
 // ----------------------------------------------------------------------
+// 自動取得と報告の対象：出荷から30日以内（ダッシュボードのカバー率と同じ範囲）
+const CARRIER_TRACK_DAYS = 30;
 let carrierLastAutoRunAt: string | null = null;
 let carrierLastErrors: Record<string, string> = {};
 let carrierAutoRunning = false;
@@ -2952,7 +2954,7 @@ async function runCarrierAutoRefresh(force = false) {
     for (const s of serverRakurakuStore.shipments) {
       if (!String(s.shipStatus || '').includes('出荷済')) continue;
       const shipped = shipDateOf(s);
-      if (!shipped || now - shipped > 21 * 86400000) continue;
+      if (!shipped || now - shipped > CARRIER_TRACK_DAYS * 86400000) continue;
       boxesOfShipment(s).forEach((d) => {
         if (!digits.includes(d)) digits.push(d);
         if (now - shipped <= 7 * 86400000) recent.add(d);
