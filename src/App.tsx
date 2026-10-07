@@ -36,6 +36,7 @@ import { CustomsManagementView } from './components/CustomsManagementView';
 import { CoolMissingView } from './components/CoolMissingView';
 import { KantoCustomsNgView } from './components/KantoCustomsNgView';
 import { SheetUnmatchedView, fetchSheetUnmatched } from './components/SheetUnmatchedView';
+import { SheetImportView } from './components/SheetImportView';
 import { BudgetSettingsModal } from './components/BudgetSettingsModal';
 import { DailyDigestModal } from './components/DailyDigestModal';
 import { ClinicProductStatusDrawer } from './components/ClinicProductStatusDrawer';
@@ -689,6 +690,13 @@ export default function App() {
       badge: null,
     },
     {
+      id: 'sheet_import' as ViewTab,
+      group: 'logistics',
+      label: 'シート取り込み（試運転）',
+      icon: FileWarning,
+      badge: null,
+    },
+    {
       id: 'arrival_tracking' as ViewTab,
       group: 'progress',
       label: '到着トラッキング',
@@ -1101,6 +1109,8 @@ export default function App() {
           {activeTab === 'unmatched_sheets' && (
             <SheetUnmatchedView onCountChange={setSheetUnmatchedCount} />
           )}
+
+          {activeTab === 'sheet_import' && <SheetImportView />}
 
           {activeTab === 'inventory_management' && (
             <InventoryManagementView

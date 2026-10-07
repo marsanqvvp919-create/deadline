@@ -8,6 +8,7 @@ import dotenv from 'dotenv';
 import { Storage } from '@google-cloud/storage';
 import { GoogleAuth } from 'google-auth-library';
 import { parseSheetRows, findUnmatched } from './unmatchedShipments';
+import { buildImportPreview } from './sheetImport';
 
 dotenv.config();
 
@@ -1906,6 +1907,99 @@ app.put('/api/shared-notes/:scope', async (req, res) => {
   }
   scheduleSharedNotesSave();
   return res.json({ scope, notes: bucket });
+});
+
+// ----------------------------------------------------------------------
+// 毎朝6時の「シート → 楽楽販売」取り込み：いまは試運転（楽楽販売には書き込まない）
+// 結果は Cloud Storage に保存し、画面で「どの出荷のどの項目が何から何に変わるか」を確認する
+// ----------------------------------------------------------------------
+const IMPORT_PREVIEW_OBJECT = 'sheet-import-preview.json';
+let importPreviewState: { latest: any | null; history: any[] } = { latest: null, history: [] };
+let importPreviewLoaded = false;
+let importRunning = false;
+
+async function loadImportPreview() {
+  if (importPreviewLoaded) return;
+  importPreviewLoaded = true;
+  if (!CACHE_BUCKET) return;
+  try {
+    const [buf] = await new Storage().bucket(CACHE_BUCKET).file(IMPORT_PREVIEW_OBJECT).download();
+    importPreviewState = JSON.parse(buf.toString('utf-8'));
+  } catch (e: any) {
+    if (e?.code !== 404) console.warn('[Sheet Import] Load failed:', e?.message || e);
+  }
+}
+
+async function runSheetImportDryRun(trigger: 'schedule' | 'manual') {
+  if (importRunning) return importPreviewState.latest;
+  importRunning = true;
+  try {
+    await loadImportPreview();
+    const shipments = serverRakurakuStore.shipments || [];
+    if (shipments.length === 0) throw new Error('楽楽販売の出荷管理データをまだ取得できていません');
+    const orderCustomer = new Map<string, string>();
+    (serverRakurakuStore.orders?.orders || []).forEach((o: any) => orderCustomer.set(o.orderId, o.customerName));
+    const sheet = await readShipmentStatusSheet(true);
+    const preview = buildImportPreview(
+      sheet.values,
+      shipments.map((sh: any) => ({ ...sh, customerName: orderCustomer.get(sh.orderId) || '' }))
+    );
+    const result = { ...preview, trigger, rakurakuDataTime: serverRakurakuStore.lastSuccessTime, failed: 0 };
+    importPreviewState.latest = result;
+    importPreviewState.history = [
+      {
+        runAt: result.runAt,
+        trigger,
+        targetRows: result.targetRows,
+        matchedRows: result.matchedRows,
+        unmatchedRows: result.unmatchedRows,
+        shipmentsUpdated: result.shipmentsUpdated,
+        changes: result.changes.length,
+        held: result.held.length,
+        failed: 0,
+      },
+      ...importPreviewState.history,
+    ].slice(0, 30);
+    return result;
+  } catch (e: any) {
+    const failed = { runAt: new Date().toISOString(), trigger, error: e?.message || String(e), failed: 1 };
+    importPreviewState.history = [failed, ...importPreviewState.history].slice(0, 30);
+    console.warn('[Sheet Import] Dry run failed:', failed.error);
+    return null;
+  } finally {
+    importRunning = false;
+    if (CACHE_BUCKET) {
+      new Storage()
+        .bucket(CACHE_BUCKET)
+        .file(IMPORT_PREVIEW_OBJECT)
+        .save(JSON.stringify(importPreviewState), { contentType: 'application/json', resumable: false })
+        .catch((e: any) => console.warn('[Sheet Import] Save failed:', e?.message || e));
+    }
+  }
+}
+
+// 日本時間で6時を過ぎていて、その日まだ実行していなければ実行（サーバーは常に1台起動しているため、ここで時刻を見て動かす）
+setInterval(async () => {
+  try {
+    await loadImportPreview();
+    const jst = new Date(Date.now() + 9 * 60 * 60 * 1000);
+    const today = jst.toISOString().slice(0, 10);
+    if (jst.getUTCHours() < 6) return;
+    const ranToday = importPreviewState.history.some(
+      (h: any) => h.trigger === 'schedule' && new Date(new Date(h.runAt).getTime() + 9 * 3600000).toISOString().slice(0, 10) === today
+    );
+    if (!ranToday) await runSheetImportDryRun('schedule');
+  } catch {}
+}, 5 * 60 * 1000);
+
+app.get('/api/sheet-import/preview', async (_req, res) => {
+  await loadImportPreview();
+  return res.json({ success: true, writeEnabled: false, ...importPreviewState });
+});
+
+app.post('/api/sheet-import/run', async (_req, res) => {
+  const result = await runSheetImportDryRun('manual');
+  return res.json({ success: !!result, writeEnabled: false, ...importPreviewState });
 });
 
 // 現在のサーバー発信元IP確認API
