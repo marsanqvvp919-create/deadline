@@ -74,10 +74,17 @@ export const SheetImportView: React.FC = () => {
     load();
   }, []);
 
-  const runNow = async () => {
+  const runNow = async (write = false) => {
+    if (
+      write &&
+      !window.confirm(
+        `楽楽販売の出荷管理に書き込みます（インポート設定 100754）。\n差分のある出荷 ${latest?.shipmentsUpdated ?? 0} 件が対象です。実行しますか？`
+      )
+    )
+      return;
     setRunning(true);
     try {
-      const res = await fetch('/api/sheet-import/run', { method: 'POST' });
+      const res = await fetch(`/api/sheet-import/run${write ? '?write=1' : ''}`, { method: 'POST' });
       setData(await res.json());
     } finally {
       setRunning(false);
@@ -107,10 +114,14 @@ export const SheetImportView: React.FC = () => {
       <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h2 className="text-lg font-bold text-slate-900">シート取り込み（試運転）</h2>
+            <h2 className="text-lg font-bold text-slate-900">シート取り込み</h2>
             <p className="text-xs text-slate-500 mt-1">
-              毎朝6時に「◆出荷ステータス」を読み、出荷管理（インポート設定 100754）に入る値を作ります。
-              <b className="text-slate-700">いまは試運転で、楽楽販売には書き込みません。</b>
+              毎朝6時に「◆出荷ステータス」を読み、差分のある出荷を出荷管理（インポート設定 100754）に取り込みます。
+              {data?.writeEnabled ? (
+                <b className="text-slate-700">楽楽販売に書き込みます。</b>
+              ) : (
+                <b className="text-slate-700">いまは書き込みを止めています（試運転のみ）。</b>
+              )}
               元からある項目（出荷番号・出荷状態・明細）と、楽楽販売の「出荷日」は対象外です。
             </p>
           </div>
@@ -124,12 +135,22 @@ export const SheetImportView: React.FC = () => {
             </button>
             <button
               type="button"
-              onClick={runNow}
+              onClick={() => runNow(false)}
               disabled={running}
-              className="px-3 py-2 bg-slate-900 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 disabled:opacity-50"
+              className="px-3 py-2 bg-white border border-slate-300 text-slate-700 rounded-xl text-xs font-bold flex items-center gap-1.5 disabled:opacity-50"
             >
-              <Play className="w-3.5 h-3.5" /> {running ? '試運転中…' : '今すぐ試運転'}
+              <Play className="w-3.5 h-3.5" /> {running ? '実行中…' : '試運転（書き込まない）'}
             </button>
+            {data?.writeEnabled && (
+              <button
+                type="button"
+                onClick={() => runNow(true)}
+                disabled={running}
+                className="px-3 py-2 bg-rose-600 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 disabled:opacity-50"
+              >
+                <Play className="w-3.5 h-3.5" /> 今すぐ取り込む
+              </button>
+            )}
           </div>
         </div>
 
@@ -305,12 +326,25 @@ export const SheetImportView: React.FC = () => {
                   {(data?.history || []).map((h, i) => (
                     <tr key={i}>
                       <td className="py-2 px-3">{fmt(h.runAt)}</td>
-                      <td className="py-2 px-3">{h.trigger === 'schedule' ? '毎朝の自動実行' : '手動'}</td>
+                      <td className="py-2 px-3">
+                        {h.trigger === 'schedule' ? '毎朝の自動実行' : '手動'}
+                        {(h as any).mode === 'write' ? '（書き込み）' : '（試運転）'}
+                      </td>
                       <td className="py-2 px-3">{h.failed ? '—' : `${h.shipmentsUpdated}件（${h.changes}項目）`}</td>
                       <td className="py-2 px-3">{h.failed ? '—' : h.unmatchedRows}</td>
                       <td className="py-2 px-3">{h.failed ? '—' : h.held}</td>
                       <td className="py-2 px-3">
-                        {h.failed ? <span className="text-rose-700 font-bold">失敗：{h.error}</span> : <span className="text-emerald-700 font-bold">成功</span>}
+                        {h.error ? (
+                          <span className="text-rose-700 font-bold">失敗：{h.error}</span>
+                        ) : (h as any).writeResult?.error ? (
+                          <span className="text-rose-700 font-bold">取り込み失敗：{(h as any).writeResult.error}</span>
+                        ) : (h as any).writeResult ? (
+                          <span className={h.failed ? 'text-amber-700 font-bold' : 'text-emerald-700 font-bold'}>
+                            取り込み {(h as any).writeResult.status}：成功 {(h as any).writeResult.succeedCount}件・失敗 {(h as any).writeResult.failureCount}件
+                          </span>
+                        ) : (
+                          <span className="text-emerald-700 font-bold">成功（試運転）</span>
+                        )}
                       </td>
                     </tr>
                   ))}

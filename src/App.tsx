@@ -702,7 +702,7 @@ export default function App() {
     {
       id: 'sheet_import' as ViewTab,
       group: 'logistics',
-      label: 'シート取り込み（試運転）',
+      label: 'シート取り込み',
       icon: FileWarning,
       badge: null,
     },

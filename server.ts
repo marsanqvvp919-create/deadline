@@ -1910,9 +1910,64 @@ app.put('/api/shared-notes/:scope', async (req, res) => {
 });
 
 // ----------------------------------------------------------------------
-// 毎朝6時の「シート → 楽楽販売」取り込み：いまは試運転（楽楽販売には書き込まない）
-// 結果は Cloud Storage に保存し、画面で「どの出荷のどの項目が何から何に変わるか」を確認する
+// 毎朝6時の「シート → 楽楽販売」取り込み（2026/10/07 から本番書き込み）
+// 差分のある出荷だけを CSVデータインポートAPI（インポート設定 100754）で取り込み、結果を記録する。
+// 環境変数 SHEET_IMPORT_WRITE=off で書き込みを止め、試運転だけにできる。
+// 結果は Cloud Storage に保存し、画面で「どの出荷のどの項目が何から何に変わったか」を確認する
 // ----------------------------------------------------------------------
+const SHEET_IMPORT_WRITE_ENABLED = process.env.SHEET_IMPORT_WRITE !== 'off';
+const SHEET_IMPORT_ID = '100754';
+
+function toCsv(columns: string[], rows: string[][]): string {
+  const esc = (v: string) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  return [columns, ...rows].map((r) => r.map(esc).join(',')).join('\r\n') + '\r\n';
+}
+
+// CSVデータインポートAPIで取り込みを予約し、完了まで待って成功・失敗件数を返す
+async function importCsvToRakuraku(csv: string): Promise<{ processId: string; succeedCount: number; failureCount: number; status: string }> {
+  const token = process.env.VITE_DATA_KEY || '';
+  const baseUrl = (process.env.VITE_RAKURAKU_BASE_URL || 'https://hnsibot.rakurakuhanbai.jp/ykbxg2a/').replace(/\/+$/, '');
+  const form = new FormData();
+  form.append('json', new Blob([JSON.stringify({ dbSchemaId: '101270', importId: SHEET_IMPORT_ID })], { type: 'application/json' }));
+  form.append('uploadFile', new Blob([csv], { type: 'text/csv' }), 'shipment_status_import.csv');
+  const res = await fetch(`${baseUrl}/api/csvdataimport/version/v1`, {
+    method: 'POST',
+    headers: { 'X-HD-apitoken': token.trim() },
+    body: form,
+    signal: AbortSignal.timeout(60000),
+  });
+  const text = await res.text();
+  let json: any = null;
+  try { json = JSON.parse(text); } catch {}
+  if (!res.ok || !json || json.status === 'error') {
+    throw { status: res.status, json, text: text.slice(0, 500) };
+  }
+  const processId = String(json.processId ?? json.items?.processId ?? json.items?.[0]?.processId ?? '');
+  if (!processId) throw { message: `インポートの予約番号が返りませんでした: ${text.slice(0, 300)}` };
+
+  // 状況確認APIで完了を待つ（最大3分）
+  for (let i = 0; i < 36; i++) {
+    await new Promise((r) => setTimeout(r, 5000));
+    const chk = await fetch(`${baseUrl}/api/checkcsvimportprocess/version/v1`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json; charset=utf-8', 'X-HD-apitoken': token.trim() },
+      body: JSON.stringify({ processId }),
+      signal: AbortSignal.timeout(30000),
+    });
+    const cj: any = await chk.json().catch(() => null);
+    const item = Array.isArray(cj?.items) ? cj.items[0] : cj?.items || cj;
+    const status = String(cj?.processStatus ?? item?.processStatus ?? '');
+    if (status === 'complete' || item?.nowCondition === 2 || item?.nowCondition === 3) {
+      return {
+        processId,
+        succeedCount: Number(item?.succeedCount ?? 0),
+        failureCount: Number(item?.failureCount ?? 0),
+        status: item?.nowCondition === 3 ? '強制終了' : '完了',
+      };
+    }
+  }
+  return { processId, succeedCount: 0, failureCount: 0, status: '確認中（3分以内に完了しませんでした）' };
+}
 const IMPORT_PREVIEW_OBJECT = 'sheet-import-preview.json';
 let importPreviewState: { latest: any | null; history: any[] } = { latest: null, history: [] };
 let importPreviewLoaded = false;
@@ -1930,7 +1985,7 @@ async function loadImportPreview() {
   }
 }
 
-async function runSheetImportDryRun(trigger: 'schedule' | 'manual') {
+async function runSheetImportDryRun(trigger: 'schedule' | 'manual', write = false) {
   if (importRunning) return importPreviewState.latest;
   importRunning = true;
   try {
@@ -1944,7 +1999,28 @@ async function runSheetImportDryRun(trigger: 'schedule' | 'manual') {
       sheet.values,
       shipments.map((sh: any) => ({ ...sh, customerName: orderCustomer.get(sh.orderId) || '' }))
     );
-    const result = { ...preview, trigger, rakurakuDataTime: serverRakurakuStore.lastSuccessTime, failed: 0 };
+    let writeResult: any = null;
+    let failedCount = 0;
+    if (write && SHEET_IMPORT_WRITE_ENABLED && preview.csvRows.length > 0) {
+      try {
+        writeResult = await importCsvToRakuraku(toCsv(preview.csvColumns, preview.csvRows));
+        failedCount = writeResult.failureCount;
+        // 取り込み結果を画面に反映するため、出荷管理を取り直す
+        setTimeout(() => syncAllRakurakuData(false).catch(() => {}), 60 * 1000);
+      } catch (err: any) {
+        const info = parseRakurakuError(err);
+        writeResult = { error: `${info.message}${err?.text ? '：' + String(err.text).slice(0, 200) : ''}` };
+        failedCount = preview.csvRows.length;
+      }
+    }
+    const result = {
+      ...preview,
+      mode: write && SHEET_IMPORT_WRITE_ENABLED ? 'write' : 'dry_run',
+      trigger,
+      rakurakuDataTime: serverRakurakuStore.lastSuccessTime,
+      writeResult,
+      failed: failedCount,
+    };
     importPreviewState.latest = result;
     importPreviewState.history = [
       {
@@ -1956,7 +2032,9 @@ async function runSheetImportDryRun(trigger: 'schedule' | 'manual') {
         shipmentsUpdated: result.shipmentsUpdated,
         changes: result.changes.length,
         held: result.held.length,
-        failed: 0,
+        mode: result.mode,
+        writeResult: result.writeResult,
+        failed: result.failed,
       },
       ...importPreviewState.history,
     ].slice(0, 30);
@@ -1988,18 +2066,20 @@ setInterval(async () => {
     const ranToday = importPreviewState.history.some(
       (h: any) => h.trigger === 'schedule' && new Date(new Date(h.runAt).getTime() + 9 * 3600000).toISOString().slice(0, 10) === today
     );
-    if (!ranToday) await runSheetImportDryRun('schedule');
+    if (!ranToday) await runSheetImportDryRun('schedule', true);
   } catch {}
 }, 5 * 60 * 1000);
 
 app.get('/api/sheet-import/preview', async (_req, res) => {
   await loadImportPreview();
-  return res.json({ success: true, writeEnabled: false, ...importPreviewState });
+  return res.json({ success: true, writeEnabled: SHEET_IMPORT_WRITE_ENABLED, ...importPreviewState });
 });
 
-app.post('/api/sheet-import/run', async (_req, res) => {
-  const result = await runSheetImportDryRun('manual');
-  return res.json({ success: !!result, writeEnabled: false, ...importPreviewState });
+// write=1 で楽楽販売に書き込む（画面の「今すぐ取り込む」）。指定がなければ試運転
+app.post('/api/sheet-import/run', async (req, res) => {
+  const write = req.query.write === '1';
+  const result = await runSheetImportDryRun('manual', write);
+  return res.json({ success: !!result, writeEnabled: SHEET_IMPORT_WRITE_ENABLED, ...importPreviewState });
 });
 
 // 現在のサーバー発信元IP確認API

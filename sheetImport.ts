@@ -1,6 +1,8 @@
-// 毎朝6時の「シート → 楽楽販売」取り込みの試運転（楽楽販売には書き込まない）。
+// 毎朝6時の「シート → 楽楽販売」取り込み。
 // 「◆出荷ステータス」の行を出荷管理の出荷番号と照合し、インポート設定 100754 の列に入る値と、
-// 今の楽楽販売の値との差分を作る。変換ルールが指示書3章で確定していないものは「仮」として印を付ける。
+// 今の楽楽販売の値との差分を作る（書き込みはサーバー側で CSVデータインポートAPI を使う）。
+// 変換ルール（2026/10/07 確定）：出荷元倉庫は選択肢にない値を「その他」、輸入確認「申請済」→「申請中」、
+// クール申請・委任状・伝票はクール便の行だけ TRUE→済／FALSE→未。
 
 import { SheetShipmentRow, isTargetRow, trackingDigits } from './unmatchedShipments';
 
@@ -54,7 +56,7 @@ export interface HeldValue {
 
 export interface ImportPreview {
   runAt: string;
-  mode: 'dry_run';
+  mode: 'dry_run' | 'write';
   targetRows: number;
   matchedRows: number;
   unmatchedRows: number;
@@ -154,21 +156,21 @@ export function buildImportPreview(values: string[][], shipments: ImportShipment
         else hold('到着空港', row.airport, 'KIX・NRT・NGO 以外の値');
       }
 
-      // 仮：出荷元倉庫（楽楽販売の選択肢にあるものだけ）
+      // 出荷元倉庫：楽楽販売の選択肢にない値（JD bio など）は「その他」
       if (!blank(row.origin)) {
-        if (WAREHOUSE_OPTIONS.includes(row.origin)) values['出荷元倉庫'] = { to: row.origin, rule: '仮' };
-        else hold('出荷元倉庫', row.origin, '楽楽販売の選択肢にない（「その他」にするか要確認）');
+        if (WAREHOUSE_OPTIONS.includes(row.origin)) values['出荷元倉庫'] = { to: row.origin, rule: '確定' };
+        else values['出荷元倉庫'] = { to: 'その他', rule: '確定', note: `シートの値：${row.origin}` };
       }
 
-      // 仮：輸入確認ステータス
+      // 輸入確認ステータス：下書き→下書き、申請済→申請中
       if (!blank(row.importStatus)) {
-        if (row.importStatus === '下書き') values['輸入確認ステータス'] = { to: '下書き', rule: '仮' };
+        if (row.importStatus === '下書き') values['輸入確認ステータス'] = { to: '下書き', rule: '確定' };
         else if (row.importStatus === '申請済')
-          values['輸入確認ステータス'] = { to: '申請中', rule: '仮', note: 'シートの「申請済」を「申請中」として扱っています' };
-        else hold('輸入確認ステータス', row.importStatus, '対応する楽楽販売の選択肢が未確定');
+          values['輸入確認ステータス'] = { to: '申請中', rule: '確定', note: 'シートの「申請済」を「申請中」として取り込み' };
+        else hold('輸入確認ステータス', row.importStatus, '対応する楽楽販売の選択肢がない');
       }
 
-      // 仮：クール申請・委任状・伝票（クール便の行だけ。常温の行は書き込まない）
+      // クール申請・委任状・伝票（クール便の行だけ。常温の行は書き込まない）
       if (row.coolType === 'クール') {
         const cool: [string, string][] = [
           ['クール申請', row.coolApplication],
@@ -178,7 +180,7 @@ export function buildImportPreview(values: string[][], shipments: ImportShipment
         cool.forEach(([field, v]) => {
           if (blank(v)) return;
           const mapped = boolToDone(v);
-          if (mapped) values[field] = { to: mapped, rule: '仮', note: 'TRUE→済、FALSE→未' };
+          if (mapped) values[field] = { to: mapped, rule: '確定', note: 'TRUE→済、FALSE→未' };
           else hold(field, v, 'TRUE/FALSE 以外の値（メモが入っている可能性）');
         });
       }
@@ -226,7 +228,7 @@ export function buildImportPreview(values: string[][], shipments: ImportShipment
 
   return {
     runAt: new Date().toISOString(),
-    mode: 'dry_run',
+    mode: 'dry_run' as const,
     targetRows: sheetRows.length,
     matchedRows,
     unmatchedRows: sheetRows.length - matchedRows,
