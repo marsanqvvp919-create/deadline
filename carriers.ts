@@ -151,14 +151,26 @@ function normalizeDhl(trackingNo: string, s: any): CarrierStatus {
   };
 }
 
+// DHL の無料枠は1日あたりの回数が少ない。上限に当たったら、しばらく問い合わせを止める
+export let dhlPausedUntil = 0;
+
 export async function trackDhl(cred: NonNullable<CarrierCredentials['dhl']>, trackingNos: string[]): Promise<CarrierStatus[]> {
   const results: CarrierStatus[] = [];
+  if (Date.now() < dhlPausedUntil) {
+    throw new Error('DHL の回数上限に達したため、しばらく取得を止めています（1日の無料枠）');
+  }
   for (const n of trackingNos) {
     const res = await fetch(`https://api-eu.dhl.com/track/shipments?trackingNumber=${encodeURIComponent(n)}&language=ja`, {
       headers: { 'DHL-API-Key': cred.apiKey, Accept: 'application/json' },
       signal: AbortSignal.timeout(20000),
     });
     const json: any = await res.json().catch(() => ({}));
+    if (res.status === 429) {
+      // 回数上限：ここまでの結果は返し、1時間は問い合わせない
+      dhlPausedUntil = Date.now() + 60 * 60 * 1000;
+      if (results.length === 0) throw new Error('DHL の回数上限に達しました（1日の無料枠）。時間をおいて再度お試しください');
+      break;
+    }
     if (res.status === 404) {
       results.push({ carrier: 'dhl', trackingNo: n, status: 'unknown', statusText: '見つかりません', fetchedAt: new Date().toISOString() });
     } else if (!res.ok) {

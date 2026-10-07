@@ -147,11 +147,9 @@ export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: Shipmen
       json.results.forEach((r) => (map[r.trackingNo] = r));
       setCarrierStatus(map);
       const errs = Object.values(json.errors);
-      setCarrierMessage(
-        errs.length > 0
-          ? errs.join('／') + '（メニュー「配送会社API連携」で設定できます）'
-          : `${json.results.length}件の最新状況を取得しました`
-      );
+      // 取得できた件数を先に出し、未設定・回数制限などのお知らせは後ろに添える
+      const notes = errs.map((e) => (e.includes('未設定') ? `${e}（メニュー「配送会社API連携」で設定できます）` : e));
+      setCarrierMessage([`${json.results.length}件の最新状況を取得しました`, ...notes].join('／'));
     } catch (e: any) {
       setCarrierMessage(`取得できませんでした：${e?.message || e}`);
     } finally {

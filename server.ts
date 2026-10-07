@@ -2252,6 +2252,11 @@ let carrierCredsLoaded = false;
 let carrierLastTest: Record<string, { ok: boolean; message: string; at: string }> = {};
 const carrierCache = new Map<string, CarrierStatus>();
 const CARRIER_CACHE_MS = 30 * 60 * 1000;
+// DHL は1日の回数が少ないので長めに使い回す。配達完了は変わらないので1日
+const carrierCacheMs = (c: CarrierStatus) =>
+  c.status === 'delivered' ? 24 * 60 * 60 * 1000 : c.carrier === 'dhl' ? 2 * 60 * 60 * 1000 : CARRIER_CACHE_MS;
+// 1回の取得で DHL に新しく問い合わせる件数の上限
+const DHL_MAX_PER_REQUEST = 40;
 
 async function loadCarrierCreds() {
   if (carrierCredsLoaded) return;
@@ -2360,12 +2365,16 @@ app.post('/api/carriers/track', async (req, res) => {
     const carrier = detectCarrier(digits, it.courier);
     if (!carrier) continue;
     const cached = carrierCache.get(`${carrier}:${digits}`);
-    if (cached && Date.now() - new Date(cached.fetchedAt).getTime() < CARRIER_CACHE_MS) results.push(cached);
+    if (cached && Date.now() - new Date(cached.fetchedAt).getTime() < carrierCacheMs(cached)) results.push(cached);
     else pending[carrier].push(digits);
   }
   const errors: Record<string, string> = {};
   for (const carrier of ['fedex', 'dhl'] as CarrierId[]) {
-    const nos = Array.from(new Set(pending[carrier]));
+    const all = Array.from(new Set(pending[carrier]));
+    const nos = carrier === 'dhl' ? all.slice(0, DHL_MAX_PER_REQUEST) : all;
+    if (all.length > nos.length) {
+      errors[carrier] = `DHL は回数制限があるため、今回は${nos.length}件だけ取得しました（残り${all.length - nos.length}件はもう一度押すと取得します）`;
+    }
     if (nos.length === 0) continue;
     if (!creds[carrier]) {
       errors[carrier] = `${carrier === 'fedex' ? 'FedEx' : 'DHL'} のAPIが未設定です`;
