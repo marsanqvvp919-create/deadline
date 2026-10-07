@@ -55,6 +55,7 @@ export function digitsOf(trackingNo?: string): string {
 export interface CarrierStatusSnapshot {
   statuses: CarrierStatus[];
   dhl: { usedToday: number; budget: number; lastAutoRunAt: string | null; autoEnabled: boolean };
+  fedex?: { lastAutoRunAt: string | null; autoEnabled: boolean; lastError: string | null };
 }
 
 /** サーバーが自動取得して持っている最新状況（配送会社には問い合わせない） */

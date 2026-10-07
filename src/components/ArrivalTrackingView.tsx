@@ -116,6 +116,7 @@ export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: Shipmen
   const [carrierLoading, setCarrierLoading] = useState(false);
   const [carrierMessage, setCarrierMessage] = useState<string | null>(null);
   const [dhlInfo, setDhlInfo] = useState<CarrierStatusSnapshot['dhl'] | null>(null);
+  const [fedexInfo, setFedexInfo] = useState<CarrierStatusSnapshot['fedex'] | null>(null);
   const [fedexLinked, setFedexLinked] = useState(false);
   useEffect(() => {
     fetch('/api/carriers/settings')
@@ -133,6 +134,7 @@ export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: Shipmen
       snap.statuses.forEach((r) => (map[r.trackingNo] = r));
       setCarrierStatus((prev) => ({ ...map, ...prev }));
       setDhlInfo(snap.dhl);
+      setFedexInfo(snap.fedex || null);
     });
   }, []);
 
@@ -299,6 +301,13 @@ export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: Shipmen
           </button>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-xs">
+          {fedexInfo?.autoEnabled && (
+            <span className={fedexInfo.lastError ? 'text-rose-700 font-bold' : 'text-slate-500'}>
+              {fedexInfo.lastError
+                ? `FedEx の自動取得でエラー：${fedexInfo.lastError}（配送会社API連携で確認してください）`
+                : `FedEx は2時間ごとに自動で取得しています（最終 ${fedexInfo.lastAutoRunAt ? new Date(fedexInfo.lastAutoRunAt).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }) : '—'}）`}
+            </span>
+          )}
           {dhlInfo?.autoEnabled && (
             <span className="text-slate-500">
               DHL は2時間ごとに自動で取得しています（最終 {dhlInfo.lastAutoRunAt ? new Date(dhlInfo.lastAutoRunAt).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }) : '—'}・今日 {dhlInfo.usedToday}/{dhlInfo.budget}回）

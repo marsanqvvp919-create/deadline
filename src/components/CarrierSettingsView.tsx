@@ -18,7 +18,8 @@ const sourceLabel = (s: 'env' | 'saved' | null) =>
 export const CarrierSettingsView: React.FC = () => {
   const [settings, setSettings] = useState<SettingsResponse | null>(null);
   const [passcode, setPasscode] = useState('');
-  const [fedex, setFedex] = useState({ clientId: '', clientSecret: '', env: 'sandbox' });
+  // 接続先の既定は本番。保存済みならその接続先を表示する
+  const [fedex, setFedex] = useState({ clientId: '', clientSecret: '', env: 'production' });
   const [dhlKey, setDhlKey] = useState('');
   const [testNo, setTestNo] = useState({ fedex: '', dhl: '' });
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null);
@@ -27,7 +28,10 @@ export const CarrierSettingsView: React.FC = () => {
   const load = () =>
     fetch('/api/carriers/settings')
       .then((r) => r.json())
-      .then(setSettings)
+      .then((j: SettingsResponse) => {
+        setSettings(j);
+        if (j?.fedex?.configured && j.fedex.env) setFedex((f) => ({ ...f, env: j.fedex.env as string }));
+      })
       .catch(() => {});
   useEffect(() => {
     load();
@@ -154,7 +158,7 @@ export const CarrierSettingsView: React.FC = () => {
           />
         </div>
         <div className="flex flex-wrap items-center gap-2 text-xs">
-          <span className="text-slate-600">接続先：</span>
+          <span className="text-slate-600">接続先（キーと同じものを選んでください）：</span>
           {(['sandbox', 'production'] as const).map((env) => (
             <label key={env} className="flex items-center gap-1">
               <input type="radio" checked={fedex.env === env} onChange={() => setFedex({ ...fedex, env })} />
@@ -165,8 +169,14 @@ export const CarrierSettingsView: React.FC = () => {
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            disabled={!canSave || !fedex.clientId || !fedex.clientSecret}
-            onClick={() => save({ fedex })}
+            disabled={
+              !canSave ||
+              // キーを入れたとき、または保存済みのキーの接続先だけを変えたときに保存できる
+              !((fedex.clientId && fedex.clientSecret) || (settings?.fedex.source === 'saved' && settings.fedex.env !== fedex.env))
+            }
+            onClick={() =>
+              save(fedex.clientId && fedex.clientSecret ? { fedex } : { fedex: { env: fedex.env } })
+            }
             className="px-3 py-2 rounded-xl bg-slate-900 text-white text-xs font-bold disabled:opacity-40"
           >
             保存

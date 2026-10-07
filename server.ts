@@ -2399,6 +2399,10 @@ app.put('/api/carriers/settings', async (req, res) => {
   const { fedex, dhl, clear } = req.body || {};
   if (clear === 'fedex') delete savedCarrierCreds.fedex;
   if (clear === 'dhl') delete savedCarrierCreds.dhl;
+  // 接続先（テスト環境／本番）だけの変更は、キーを入れ直さずにできる
+  if (fedex && !fedex.clientId && !fedex.clientSecret && fedex.env && savedCarrierCreds.fedex) {
+    savedCarrierCreds.fedex.env = fedex.env === 'production' ? 'production' : 'sandbox';
+  }
   if (fedex && fedex.clientId && fedex.clientSecret) {
     savedCarrierCreds.fedex = {
       clientId: String(fedex.clientId).trim(),
@@ -2415,7 +2419,9 @@ app.put('/api/carriers/settings', async (req, res) => {
   } catch (e: any) {
     return res.status(500).json({ error: `保存できませんでした: ${e?.message || e}` });
   }
-  // 取得済みの状況は本物なので、キーを変えても消さない
+  // 取得済みの状況は本物なので、キーを変えても消さない。新しいキーで FedEx の自動取得をすぐ試す
+  fedexLastAutoRunAt = null;
+  setTimeout(() => runFedexAutoRefresh().catch(() => {}), 2000);
   return res.json({ success: true });
 });
 
@@ -2493,6 +2499,7 @@ app.get('/api/carriers/statuses', async (_req, res) => {
   return res.json({
     statuses: Array.from(carrierCache.values()).filter((c) => new Date(c.fetchedAt).getTime() > cutoff),
     dhl: { usedToday: dhlUsedToday(), budget: DHL_DAILY_BUDGET, lastAutoRunAt: dhlLastAutoRunAt, autoEnabled: !!creds.dhl },
+    fedex: { lastAutoRunAt: fedexLastAutoRunAt, autoEnabled: !!creds.fedex, lastError: fedexLastError },
   });
 });
 
@@ -2544,12 +2551,56 @@ async function runDhlAutoRefresh(force = false) {
   console.log(`[Carriers] DHL auto refresh: ${got.length}/${list.length} updated, used today ${dhlUsedToday()}${error ? `, error: ${error}` : ''}`);
 }
 
+// FedEx の自動取得：回数の上限が大きいので、出荷から21日以内で配達完了でないものを2時間ごとにまとめて取り直す
+const FEDEX_AUTO_INTERVAL_MS = 2 * 60 * 60 * 1000;
+const FEDEX_AUTO_PER_RUN = 300;
+let fedexLastAutoRunAt: string | null = null;
+let fedexLastError: string | null = null;
+
+async function runFedexAutoRefresh() {
+  const { creds } = await effectiveCarrierCreds();
+  if (!creds.fedex) return;
+  if (!serverRakurakuStore.shipments || serverRakurakuStore.shipments.length === 0) return;
+  await loadCarrierStatusCache();
+  const hour = jstHour();
+  if (hour < 7 || hour > 21) return;
+  if (fedexLastAutoRunAt && Date.now() - new Date(fedexLastAutoRunAt).getTime() < FEDEX_AUTO_INTERVAL_MS) return;
+  const now = Date.now();
+  const list = new Set<string>();
+  for (const s of serverRakurakuStore.shipments) {
+    if (!String(s.shipStatus || '').includes('出荷済')) continue;
+    const digits = shipDigits(s.trackingNo);
+    if (digits.length < 8 || detectCarrier(digits, s.courier) !== 'fedex') continue;
+    const shipped = shipDateOf(s);
+    if (!shipped || now - shipped > 21 * 86400000) continue;
+    const cached = carrierCache.get(`fedex:${digits}`);
+    if (cached?.status === 'delivered') continue;
+    if (cached && now - new Date(cached.fetchedAt).getTime() < FEDEX_AUTO_INTERVAL_MS) continue;
+    list.add(digits);
+  }
+  fedexLastAutoRunAt = new Date().toISOString();
+  const nos = Array.from(list).slice(0, FEDEX_AUTO_PER_RUN);
+  if (nos.length === 0) return;
+  try {
+    const got = await trackFedex(creds.fedex, nos);
+    got.forEach((g) => carrierCache.set(`fedex:${g.trackingNo}`, g));
+    fedexLastError = null;
+    scheduleCarrierStatusSave();
+    console.log(`[Carriers] FedEx auto refresh: ${got.length}/${nos.length} updated`);
+  } catch (e: any) {
+    fedexLastError = e?.message || String(e);
+    console.warn('[Carriers] FedEx auto refresh failed:', fedexLastError);
+  }
+}
+
 setInterval(() => {
   runDhlAutoRefresh().catch((e) => console.warn('[Carriers] DHL auto refresh failed:', e?.message || e));
+  runFedexAutoRefresh().catch((e) => console.warn('[Carriers] FedEx auto refresh failed:', e?.message || e));
 }, 20 * 60 * 1000);
 // 起動して楽楽販売のデータがそろったころに1回目
 setTimeout(() => {
   runDhlAutoRefresh().catch((e) => console.warn('[Carriers] DHL auto refresh failed:', e?.message || e));
+  runFedexAutoRefresh().catch((e) => console.warn('[Carriers] FedEx auto refresh failed:', e?.message || e));
 }, 3 * 60 * 1000);
 
 async function startServer() {
