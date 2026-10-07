@@ -2507,9 +2507,12 @@ async function runDhlAutoRefresh(force = false) {
   const { creds } = await effectiveCarrierCreds();
   if (!creds.dhl) return;
   await loadCarrierStatusCache();
+  // 楽楽販売の出荷データがまだ読み込まれていなければ、今回は見送る（空のまま「実行済み」にしない）
+  if (!serverRakurakuStore.shipments || serverRakurakuStore.shipments.length === 0) return;
   const hour = jstHour();
   if (!force && (hour < 7 || hour > 21)) return;
-  if (!force && dhlLastAutoRunAt && Date.now() - new Date(dhlLastAutoRunAt).getTime() < DHL_AUTO_INTERVAL_MS) return;
+  const hasAnyDhl = Array.from(carrierCache.keys()).some((k) => k.startsWith('dhl:'));
+  if (!force && hasAnyDhl && dhlLastAutoRunAt && Date.now() - new Date(dhlLastAutoRunAt).getTime() < DHL_AUTO_INTERVAL_MS) return;
   const room = DHL_DAILY_BUDGET - DHL_MANUAL_RESERVE - dhlUsedToday();
   if (room <= 0) return;
 

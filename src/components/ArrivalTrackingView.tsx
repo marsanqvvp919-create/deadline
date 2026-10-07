@@ -5,7 +5,7 @@ import { useUrlState } from '../utils/listState';
 import { Order, ShipmentItem } from '../types';
 import { getConfiguredUrls, getLocalClinics } from '../api';
 import { openRakurakuWithCopiedId } from '../utils';
-import { Search, Truck, ExternalLink, Snowflake, Copy, RefreshCw } from 'lucide-react';
+import { Search, Truck, ExternalLink, Snowflake, Copy, RefreshCw, AlertTriangle, Package, Plane, ShieldCheck, CheckCircle2, HelpCircle } from 'lucide-react';
 import { CARRIER_STATUS_LABEL, CARRIER_STATUS_STYLE, CarrierStatus, CarrierStatusSnapshot, digitsOf, fetchCarrierStatuses, fetchSavedCarrierStatuses } from '../utils/carriers';
 
 // 出荷管理（101270）の実データから、出荷ごとに「今どの段階か」を表示する。
@@ -46,6 +46,43 @@ function stageOf(s: TrackingShipment, c?: CarrierStatus): Stage {
   return 'in_transit';
 }
 
+// 「今の状況」：楽楽販売の段階と配送会社の最新状況を合わせて、出荷ごとに1つに決める（一目でわかる表示用）
+type NowStatus = 'attention' | 'waiting' | 'pickup' | 'abroad' | 'customs' | 'domestic' | 'delivered' | 'no_info';
+
+const NOW_STATUS: Record<NowStatus, { label: string; hint: string; color: string; soft: string; border: string; Icon: React.FC<{ className?: string }> }> = {
+  attention: { label: '要確認', hint: '配送会社が通関・配達の例外を返している', color: 'bg-rose-600 text-white', soft: 'bg-rose-50 text-rose-800 border-rose-200', border: 'border-l-rose-500', Icon: AlertTriangle },
+  waiting: { label: '出荷待ち', hint: '楽楽販売のステータスが出荷待ち', color: 'bg-slate-500 text-white', soft: 'bg-slate-50 text-slate-700 border-slate-200', border: 'border-l-slate-400', Icon: Package },
+  pickup: { label: '集荷待ち', hint: '送り状は作成済み。配送会社の集荷前', color: 'bg-amber-500 text-white', soft: 'bg-amber-50 text-amber-800 border-amber-200', border: 'border-l-amber-400', Icon: Package },
+  abroad: { label: '海外から輸送中', hint: '配送会社が輸送中（まだ日本の拠点に着いていない）', color: 'bg-indigo-600 text-white', soft: 'bg-indigo-50 text-indigo-800 border-indigo-200', border: 'border-l-indigo-500', Icon: Plane },
+  customs: { label: '日本で通関中', hint: '日本の拠点に到着し、通関が終わっていない', color: 'bg-blue-600 text-white', soft: 'bg-blue-50 text-blue-800 border-blue-200', border: 'border-l-blue-500', Icon: ShieldCheck },
+  domestic: { label: '国内配送中', hint: '通関が終わり、配達前', color: 'bg-teal-600 text-white', soft: 'bg-teal-50 text-teal-800 border-teal-200', border: 'border-l-teal-500', Icon: Truck },
+  delivered: { label: '配達完了', hint: '配送会社または楽楽販売で配達完了', color: 'bg-emerald-600 text-white', soft: 'bg-emerald-50 text-emerald-800 border-emerald-200', border: 'border-l-emerald-500', Icon: CheckCircle2 },
+  no_info: { label: '状況未取得', hint: '出荷済みだが、配送会社の状況をまだ取得していない（FedEx は未連携）', color: 'bg-slate-200 text-slate-700', soft: 'bg-slate-50 text-slate-600 border-slate-200', border: 'border-l-slate-300', Icon: HelpCircle },
+};
+const NOW_ORDER: NowStatus[] = ['attention', 'waiting', 'pickup', 'abroad', 'customs', 'domestic', 'delivered', 'no_info'];
+
+function nowStatusOf(stage: Stage, c?: CarrierStatus): NowStatus {
+  if (c?.status === 'exception') return 'attention';
+  if (stage === 'delivered') return 'delivered';
+  if (stage === 'waiting') return 'waiting';
+  if (stage === 'domestic') return 'domestic';
+  if (c?.status === 'pre_transit') return 'pickup';
+  if (c?.status === 'in_transit') return c.arrivedJapan ? 'customs' : 'abroad';
+  return 'no_info';
+}
+
+// 「3時間前」「2日前」
+function ago(iso?: string): string {
+  if (!iso) return '';
+  const t = new Date(iso).getTime();
+  if (isNaN(t)) return '';
+  const min = Math.max(0, Math.round((Date.now() - t) / 60000));
+  if (min < 60) return `${min}分前`;
+  if (min < 48 * 60) return `${Math.round(min / 60)}時間前`;
+  return `${Math.round(min / 1440)}日前`;
+}
+const ymd = (v?: string) => (v ? String(v).slice(0, 10).replace(/-/g, '/') : '');
+
 function toDate(v?: string): Date | null {
   if (blank(v)) return null;
   return parseYmd(String(v));
@@ -69,7 +106,7 @@ const ACTIVE_DAYS = 21;
 const RECENT_DELIVERED_DAYS = 7;
 
 export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: ShipmentItem[] }> = ({ orders, shipments }) => {
-  const [stageFilter, setStageFilter] = useUrlState<Stage | 'all'>('stage', 'all');
+  const [stageFilter, setStageFilter] = useUrlState<NowStatus | 'all'>('now', 'all');
   const [warehouseFilter, setWarehouseFilter] = useUrlState<string>('wh', 'all');
   const [query, setQuery] = useState('');
   const [copied, setCopied] = useState<string | null>(null);
@@ -78,7 +115,6 @@ export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: Shipmen
   const [carrierLoading, setCarrierLoading] = useState(false);
   const [carrierMessage, setCarrierMessage] = useState<string | null>(null);
   const [dhlInfo, setDhlInfo] = useState<CarrierStatusSnapshot['dhl'] | null>(null);
-  const [exceptionOnly, setExceptionOnly] = useUrlState<string>('exc', '');
   const { rakurakuBaseUrl } = getConfiguredUrls();
 
   // 画面を開いたら、サーバーが自動取得した最新状況を読み込む（配送会社には問い合わせない）
@@ -110,7 +146,8 @@ export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: Shipmen
     return (shipments as TrackingShipment[])
       .map((s) => {
         const c = carrierStatus[digitsOf(s.trackingNo)];
-        return { s, c, stage: stageOf(s, c), shipped: toDate(s.warehouseShippedDate) || toDate(s.shippedDate) };
+        const stage = stageOf(s, c);
+        return { s, c, stage, now: nowStatusOf(stage, c), shipped: toDate(s.warehouseShippedDate) || toDate(s.shippedDate) };
       })
       .filter(({ s, c, stage, shipped }) => {
         if (stage === 'waiting') return true;
@@ -128,11 +165,14 @@ export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: Shipmen
           (x.s.customerId ? clinicById.get(x.s.customerId) : '') ||
           '（クリニック名不明）',
       }))
-      .sort((a, b) => (b.shipped?.getTime() || 0) - (a.shipped?.getTime() || 0));
+      // 要確認を先頭に、あとは新しい出荷から
+      .sort(
+        (a, b) =>
+          Number(b.now === 'attention') - Number(a.now === 'attention') ||
+          (b.shipped?.getTime() || 0) - (a.shipped?.getTime() || 0)
+      );
   }, [shipments, customerByOrder, clinicById, carrierStatus]);
 
-  // 配送会社が「要確認」（通関・配達の例外）を返している出荷
-  const exceptionCount = items.filter((i) => i.c?.status === 'exception').length;
 
   const warehouses = useMemo(
     () => Array.from(new Set(items.map((i) => i.s.warehouse).filter((w) => !blank(w)))) as string[],
@@ -140,14 +180,13 @@ export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: Shipmen
   );
 
   const counts = useMemo(() => {
-    const c: Record<Stage, number> = { waiting: 0, import_check: 0, in_transit: 0, domestic: 0, delivered: 0 };
-    items.forEach((i) => c[i.stage]++);
+    const c = Object.fromEntries(NOW_ORDER.map((k) => [k, 0])) as Record<NowStatus, number>;
+    items.forEach((i) => c[i.now]++);
     return c;
   }, [items]);
 
   const visible = items.filter((i) => {
-    if (stageFilter !== 'all' && i.stage !== stageFilter) return false;
-    if (exceptionOnly && i.c?.status !== 'exception') return false;
+    if (stageFilter !== 'all' && i.now !== stageFilter) return false;
     if (warehouseFilter !== 'all' && i.s.warehouse !== warehouseFilter) return false;
     const q = query.trim().toLowerCase();
     if (!q) return true;
@@ -194,20 +233,28 @@ export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: Shipmen
             楽楽販売の出荷管理から、出荷ごとに今どの段階かを表示します。対象は出荷待ちと、出荷から{ACTIVE_DAYS}日以内でまだ配達完了していない出荷、直近{RECENT_DELIVERED_DAYS}日に配達完了した出荷です。
           </p>
         </div>
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-          {STAGES.map((st) => (
-            <button
-              key={st.id}
-              type="button"
-              title={st.hint}
-              onClick={() => setStageFilter(stageFilter === st.id ? 'all' : st.id)}
-              className={`text-left p-3 rounded-xl border ${stageFilter === st.id ? 'border-slate-900 bg-slate-50' : 'border-slate-200'}`}
-            >
-              <span className="text-[11px] font-semibold text-slate-600 block">{st.label}</span>
-              <span className="text-2xl font-bold font-mono text-slate-900">{counts[st.id]}</span>
-              <span className="text-[10px] text-slate-500 ml-1">件</span>
-            </button>
-          ))}
+        {/* 今の状況ごとの件数（押すと絞り込み） */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 gap-2">
+          {NOW_ORDER.map((k) => {
+            const st = NOW_STATUS[k];
+            const active = stageFilter === k;
+            return (
+              <button
+                key={k}
+                type="button"
+                title={st.hint}
+                onClick={() => setStageFilter(active ? 'all' : k)}
+                className={`text-left p-2.5 rounded-xl border transition ${active ? `${st.color} border-transparent` : `${st.soft}`} ${counts[k] === 0 && !active ? 'opacity-50' : ''}`}
+              >
+                <span className="text-[11px] font-bold flex items-center gap-1">
+                  <st.Icon className="w-3.5 h-3.5" />
+                  {st.label}
+                </span>
+                <span className="text-2xl font-bold font-mono">{counts[k]}</span>
+                <span className="text-[10px] ml-1 opacity-80">件</span>
+              </button>
+            );
+          })}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <select
@@ -242,15 +289,6 @@ export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: Shipmen
           </button>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-xs">
-          {exceptionCount > 0 && (
-            <button
-              type="button"
-              onClick={() => setExceptionOnly(exceptionOnly ? '' : '1')}
-              className={`px-2.5 py-1 rounded-lg font-bold border ${exceptionOnly ? 'bg-rose-600 text-white border-rose-600' : 'bg-rose-50 text-rose-800 border-rose-200'}`}
-            >
-              配送会社で要確認 {exceptionCount}件
-            </button>
-          )}
           {dhlInfo?.autoEnabled && (
             <span className="text-slate-500">
               DHL は2時間ごとに自動で取得しています（最終 {dhlInfo.lastAutoRunAt ? new Date(dhlInfo.lastAutoRunAt).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }) : '—'}・今日 {dhlInfo.usedToday}/{dhlInfo.budget}回）
@@ -266,75 +304,57 @@ export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: Shipmen
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {visible.slice(0, 300).map(({ s, stage, customerName }) => {
-            const stageIndex = STAGES.findIndex((x) => x.id === stage);
+          {visible.slice(0, 300).map(({ s, c, now, customerName }) => {
+            const st = NOW_STATUS[now];
             const carrier = carrierOf(s.courier, s.trackingNo);
             const trackUrl = carrier.url;
             const coolPending = s.isCoolMissing;
+            const eta = c && c.status !== 'delivered' ? ymd(c.estimatedDelivery) : '';
+            const deliveredOn = now === 'delivered' ? ymd(c?.deliveredAt || c?.lastEventAt) || ymd(s.deliveredDate) : '';
+            const shippedOn = blank(s.warehouseShippedDate) ? (blank(s.shippedDate) ? '' : s.shippedDate) : s.warehouseShippedDate;
             return (
-              <div key={s.shipmentId} className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs flex flex-col gap-3">
-                <div className="flex items-start justify-between gap-2">
+              <div key={s.shipmentId} className={`bg-white border border-slate-200 border-l-4 ${st.border} rounded-2xl shadow-xs flex flex-col overflow-hidden`}>
+                {/* 今の状況（いちばん大きく） */}
+                <div className={`px-4 py-2.5 flex items-center justify-between gap-2 ${st.color}`}>
+                  <span className="flex items-center gap-2 font-bold text-sm">
+                    <st.Icon className="w-4 h-4" />
+                    {st.label}
+                  </span>
+                  <span className="text-xs font-bold text-right">
+                    {deliveredOn ? `${deliveredOn} 配達` : eta ? `配達予定 ${eta}` : !blank(s.deliveryEta) ? `配達予定 ${s.deliveryEta}` : ''}
+                  </span>
+                </div>
+                <div className="p-4 flex flex-col gap-2.5 flex-1">
                   <div className="min-w-0">
                     <div className="font-bold text-sm text-slate-900 truncate">{customerName}</div>
                     <div className="text-[11px] text-slate-500 font-mono">
                       {s.shipmentId} ／ {s.orderId && s.orderId !== '—' ? `受注 ${s.orderId}` : '受注の紐づけなし'}
                     </div>
                   </div>
-                  <span className="px-2 py-0.5 rounded-md text-[11px] font-bold bg-slate-900 text-white shrink-0">
-                    {STAGES[stageIndex].label}
-                  </span>
-                </div>
 
-                {/* 段階のバー */}
-                <div>
-                  <div className="flex gap-1">
-                    {STAGES.map((st, i) => (
-                      <div
-                        key={st.id}
-                        className={`h-1.5 flex-1 rounded-full ${i <= stageIndex ? (stage === 'delivered' ? 'bg-emerald-500' : 'bg-blue-600') : 'bg-slate-200'}`}
-                      />
-                    ))}
-                  </div>
-                  <div className="flex justify-between text-[10px] text-slate-400 mt-1">
-                    {STAGES.map((st) => (
-                      <span key={st.id}>{st.label}</span>
-                    ))}
-                  </div>
-                </div>
+                  {/* 配送会社の最新の記録 */}
+                  {c ? (
+                    <div className={`text-[11px] rounded-lg border px-2.5 py-1.5 ${st.soft}`}>
+                      <div className="font-bold">{c.statusText}</div>
+                      <div className="opacity-80">
+                        {[c.lastLocation, c.lastEventAt ? ago(c.lastEventAt) : ''].filter(Boolean).join('・')}
+                      </div>
+                    </div>
+                  ) : (
+                    now === 'no_info' && (
+                      <div className="text-[11px] text-slate-500 bg-slate-50 rounded-lg px-2.5 py-1.5">
+                        {carrier.label === 'DHL' ? 'DHL の状況はまだ取得していません（自動取得を待つか、上のボタンで取得）' : `${carrier.label} の状況は取得できません`}
+                      </div>
+                    )
+                  )}
 
-                <div className="text-[11px] text-slate-600 grid grid-cols-2 gap-x-3 gap-y-1">
-                  <span>出荷元 {blank(s.warehouse) ? '—' : s.warehouse}</span>
-                  <span>到着空港 {blank(s.arrivalAirport) ? '—' : s.arrivalAirport}</span>
-                  <span>出荷日 {blank(s.warehouseShippedDate) ? (blank(s.shippedDate) ? '—' : s.shippedDate) : s.warehouseShippedDate}</span>
-                  <span>輸入確認 {blank(s.importStatus) ? '—' : s.importStatus}</span>
-                  {!blank(s.customsEta) && stageIndex < 3 && <span>通関予定 {s.customsEta}</span>}
-                  {!blank(s.deliveryEta) && stageIndex < 4 && <span>配達予定 {s.deliveryEta}</span>}
-                  {!blank(s.deliveredDate) && <span className="text-emerald-700 font-bold">配達完了 {s.deliveredDate}</span>}
-                  {!blank(s.nextDeadline) && <span className="text-amber-700 font-bold">次の期限 {s.nextDeadline}</span>}
-                </div>
-
-                {carrierStatus[digitsOf(s.trackingNo)] && (
-                  <div className="text-[11px] flex items-center gap-1.5 flex-wrap">
-                    <span className={`px-1.5 py-0.5 rounded font-bold ${CARRIER_STATUS_STYLE[carrierStatus[digitsOf(s.trackingNo)].status]}`}>
-                      {carrier.label}：{CARRIER_STATUS_LABEL[carrierStatus[digitsOf(s.trackingNo)].status]}
-                    </span>
-                    <span className="text-slate-600">{carrierStatus[digitsOf(s.trackingNo)].statusText}</span>
-                    {carrierStatus[digitsOf(s.trackingNo)].lastLocation && (
-                      <span className="text-slate-500">／ {carrierStatus[digitsOf(s.trackingNo)].lastLocation}</span>
-                    )}
-                    {carrierStatus[digitsOf(s.trackingNo)].status !== 'delivered' &&
-                      carrierStatus[digitsOf(s.trackingNo)].estimatedDelivery && (
-                        <span className="text-slate-700 font-bold">
-                          ／ 配達予定 {String(carrierStatus[digitsOf(s.trackingNo)].estimatedDelivery).slice(0, 10).replace(/-/g, '/')}
-                        </span>
-                      )}
-                    {carrierStatus[digitsOf(s.trackingNo)].status === 'delivered' && (
-                      <span className="text-emerald-700 font-bold">
-                        ／ {String(carrierStatus[digitsOf(s.trackingNo)].deliveredAt || carrierStatus[digitsOf(s.trackingNo)].lastEventAt || '').slice(0, 10).replace(/-/g, '/')}
-                      </span>
-                    )}
+                  <div className="text-[11px] text-slate-600 grid grid-cols-2 gap-x-3 gap-y-0.5">
+                    <span>出荷日 {shippedOn || '—'}</span>
+                    <span>出荷元 {blank(s.warehouse) ? '—' : s.warehouse}</span>
+                    <span>到着空港 {blank(s.arrivalAirport) ? '—' : s.arrivalAirport}</span>
+                    <span>輸入確認 {blank(s.importStatus) ? '—' : s.importStatus}</span>
+                    {!blank(s.nextDeadline) && <span className="text-amber-700 font-bold col-span-2">次の期限 {s.nextDeadline}</span>}
                   </div>
-                )}
 
                 {coolPending && (
                   <div className="text-[11px] font-bold text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1 flex items-center gap-1">
@@ -377,6 +397,7 @@ export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: Shipmen
                       {copied === s.shipmentId ? 'コピー済み' : '楽楽販売で開く'}
                     </button>
                   </div>
+                </div>
                 </div>
               </div>
             );
