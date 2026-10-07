@@ -223,3 +223,19 @@ export function getApproachingCounts(orders: Order[], referenceDate?: Date, days
 export function formatDelayString(counts: DelayCounts): string {
   return `${counts.ordersCount}件（${counts.linesCount}明細）`;
 }
+
+/**
+ * 受注から60日以上たって未入金の伝票（要対応リストの対象外）。
+ * 楽楽販売の入金ステータスが「入金済」以外で、受注日から60日以上たっているもの。
+ * 入金ステータスや受注日が無い伝票は判断できないので対象外にしない。
+ */
+export const STALE_UNPAID_DAYS = 60;
+
+export function isStaleUnpaid(order: Order, referenceDate?: Date): boolean {
+  if (!order.paymentStatus || order.paymentStatus === '入金済') return false;
+  if (!order.orderDate) return false;
+  const d = new Date(order.orderDate.replace(/\//g, '-').slice(0, 10) + 'T00:00:00');
+  if (isNaN(d.getTime())) return false;
+  const ref = referenceDate || new Date();
+  return (startOfDay(ref) - d.getTime()) / 86400000 >= STALE_UNPAID_DAYS;
+}

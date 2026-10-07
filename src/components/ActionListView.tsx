@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { AlertItem, Order } from '../types';
 import { useUrlState } from '../utils/listState';
-import { isOrderDelayed, isLineDelayed, getOrderMaxDelayDays } from '../utils/delayCalculation';
+import { isOrderDelayed, isLineDelayed, getOrderMaxDelayDays, isStaleUnpaid, STALE_UNPAID_DAYS } from '../utils/delayCalculation';
 
 // 要対応リスト：納期超過・発注漏れ・納期未設定のある伝票を、ルールごとにまとめて表示する（朝会用）。
 // 1つの伝票に複数の明細が当たっていても1行にまとめる。
@@ -28,12 +28,18 @@ export const ActionListView: React.FC<{
   const [rule, setRule] = useUrlState<string>('rule', 'B1');
   const orderById = useMemo(() => new Map(orders.map((o) => [o.orderId, o])), [orders]);
 
+  // 受注から60日以上たって未入金の伝票は対象外
+  const excludedOrderIds = useMemo(
+    () => new Set(orders.filter((o) => isStaleUnpaid(o)).map((o) => o.orderId)),
+    [orders]
+  );
+
   const byRule = useMemo(() => {
     const result: Record<string, Row[]> = {};
     RULES.forEach(({ id }) => {
       const m = new Map<string, Row>();
       alerts
-        .filter((a) => a.ruleId === id)
+        .filter((a) => a.ruleId === id && !excludedOrderIds.has(a.orderId))
         .forEach((a) => {
           const row = m.get(a.orderId) || {
             order: orderById.get(a.orderId),
@@ -50,7 +56,7 @@ export const ActionListView: React.FC<{
     });
     // 納期超過は、他の画面と同じ判定（楽楽販売「①超過」と同じ条件）で数える
     result['A1'] = orders
-      .filter((o) => isOrderDelayed(o))
+      .filter((o) => isOrderDelayed(o) && !excludedOrderIds.has(o.orderId))
       .map((o) => ({
         order: o,
         orderId: o.orderId,
@@ -60,7 +66,19 @@ export const ActionListView: React.FC<{
       }))
       .sort((x, y) => y.maxDays - x.maxDays);
     return result;
-  }, [alerts, orderById, orders]);
+  }, [alerts, orderById, orders, excludedOrderIds]);
+
+  // 対象外にした伝票のうち、要対応の理由があったものの数（画面の注記用）
+  const excludedCount = useMemo(() => {
+    const ids = new Set<string>();
+    alerts.forEach((a) => {
+      if (['B1', 'B2'].includes(a.ruleId) && excludedOrderIds.has(a.orderId)) ids.add(a.orderId);
+    });
+    orders.forEach((o) => {
+      if (excludedOrderIds.has(o.orderId) && isOrderDelayed(o)) ids.add(o.orderId);
+    });
+    return ids.size;
+  }, [alerts, orders, excludedOrderIds]);
 
   const current = RULES.find((r) => r.id === rule) || RULES[0];
   const rows = byRule[current.id] || [];
@@ -72,6 +90,8 @@ export const ActionListView: React.FC<{
           <h2 className="text-lg font-bold text-slate-900">要対応リスト</h2>
           <p className="text-xs text-slate-500 mt-1">
             対応が必要な伝票を、理由ごとにまとめています（見積・出荷済みの伝票は除く）。行を押すと伝票の詳細が開きます。
+            <br />
+            受注から{STALE_UNPAID_DAYS}日以上たって未入金の伝票（{excludedCount}件）は対象外にしています。
           </p>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">

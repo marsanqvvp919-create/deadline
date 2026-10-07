@@ -44,7 +44,7 @@ import { ClinicProductStatusDrawer } from './components/ClinicProductStatusDrawe
 import { getLocalClinics, getLocalShipments } from './api';
 import { getSalesRepsList } from './utils/salesRepMapping';
 import { isShippingOrFee } from './utils';
-import { isOrderDelayed, getDelayCounts } from './utils/delayCalculation';
+import { isOrderDelayed, getDelayCounts, isStaleUnpaid } from './utils/delayCalculation';
 import {
   LayoutDashboard,
   ShoppingCart,
@@ -443,7 +443,18 @@ export default function App() {
   // アラート総数および高重要度数
   const totalAlertsCount = filteredAlerts.length;
   // 要対応＝納期超過・発注漏れ・納期未設定のアラートがある伝票の数（明細の数ではなく伝票の数）
-  const highSeverityCount = new Set(filteredAlerts.filter((a) => a.severity === '高').map((a) => a.orderId)).size;
+  // 受注から60日以上たって未入金の伝票は要対応から外す（要対応リストと同じ数え方）
+  const highSeverityCount = useMemo(() => {
+    const stale = new Set(filteredOrders.filter((o) => isStaleUnpaid(o)).map((o) => o.orderId));
+    const ids = new Set<string>();
+    filteredAlerts.forEach((a) => {
+      if ((a.ruleId === 'B1' || a.ruleId === 'B2') && !stale.has(a.orderId)) ids.add(a.orderId);
+    });
+    filteredOrders.forEach((o) => {
+      if (isOrderDelayed(o) && !stale.has(o.orderId)) ids.add(o.orderId);
+    });
+    return ids.size;
+  }, [filteredAlerts, filteredOrders]);
 
   // 最長納期超過 伝票・明細数の計算（isLineDelayed統一: ○件○明細）
   const overdueCounts = useMemo(() => {
