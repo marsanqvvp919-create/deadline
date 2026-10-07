@@ -12,7 +12,9 @@ interface Candidate {
   trackingNo: string;
   shippedDate: string;
   shipStatus?: string;
-  reason: '出荷待ち' | '出荷日が近い';
+  reason: 'インボイス番号が一致' | '出荷待ち' | '出荷日が近い';
+  warehouse?: string;
+  warehouseInvoiceNo?: string;
 }
 
 interface UnmatchedRow {
@@ -241,6 +243,7 @@ export const SheetUnmatchedView: React.FC<{ onCountChange?: (count: number | nul
                       <div className="text-[11px] text-slate-500 flex flex-wrap gap-x-3">
                         <span>出荷日 {r.shipDate || '—'}</span>
                         <span>出荷元 {r.origin || '—'}</span>
+                        {r.invoiceNo && <span>INVOICE {r.invoiceNo}</span>}
                         <span className="flex items-center gap-1"><Truck className="w-3 h-3" />{r.courier || '—'}</span>
                         <span>シート{r.rowNumber}行目</span>
                       </div>
@@ -263,9 +266,22 @@ export const SheetUnmatchedView: React.FC<{ onCountChange?: (count: number | nul
                                 <span className="font-mono font-bold text-slate-900">{c.shipmentId}</span>
                                 <span>受注 {c.orderId}</span>
                                 <span>{c.customerName}</span>
-                                <span className={c.reason === '出荷待ち' ? 'text-amber-700 font-bold' : 'text-slate-500'}>
-                                  {c.reason === '出荷待ち' ? '出荷待ち' : `出荷日 ${c.shippedDate}`}
+                                <span
+                                  className={
+                                    c.reason === 'インボイス番号が一致'
+                                      ? 'text-emerald-700 font-bold'
+                                      : c.reason === '出荷待ち'
+                                      ? 'text-amber-700 font-bold'
+                                      : 'text-slate-500'
+                                  }
+                                >
+                                  {c.reason === 'インボイス番号が一致'
+                                    ? `インボイス番号が一致（${c.warehouseInvoiceNo}）`
+                                    : c.reason === '出荷待ち'
+                                    ? '出荷待ち'
+                                    : `出荷日 ${c.shippedDate}`}
                                 </span>
+                                {c.warehouse && c.warehouse !== '—' && <span className="text-slate-500">{c.warehouse}</span>}
                               </div>
                               <div className="flex items-center gap-1.5">
                                 <button

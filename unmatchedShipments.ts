@@ -20,6 +20,8 @@ export interface ShipmentLike {
   trackingNo: string;
   shippedDate: string;
   shipStatus?: string;
+  warehouse?: string;
+  warehouseInvoiceNo?: string;
 }
 
 export interface ClinicLike {
@@ -28,9 +30,15 @@ export interface ClinicLike {
 }
 
 export type CandidateKind = 'single' | 'multiple' | 'none';
+export type CandidateReason = 'インボイス番号が一致' | '出荷待ち' | '出荷日が近い';
+
+function normalizeInvoice(value?: string): string {
+  const v = (value || '').normalize('NFKC').toUpperCase().replace(/[\s\-_/]/g, '');
+  return v === '—' ? '' : v;
+}
 
 export interface UnmatchedRow extends SheetShipmentRow {
-  candidates: (ShipmentLike & { reason: '出荷待ち' | '出荷日が近い' })[];
+  candidates: (ShipmentLike & { reason: CandidateReason })[];
   kind: CandidateKind;
   matchedClinicNames: string[];
   bulkGroupKey: string | null;
@@ -103,6 +111,26 @@ export function normalizeClinicName(value: string): string {
     .replace(/(clinic|クリニック|美容外科|美容皮膚科|皮膚科|医院)/g, '');
 }
 
+function normalizeWarehouse(value?: string): string {
+  const v = (value || '').normalize('NFKC').toLowerCase().replace(/\s/g, '');
+  return v === '—' || v === '-' ? '' : v;
+}
+
+/**
+ * 出荷元で候補を絞る：シートの出荷元と出荷管理の出荷元倉庫がどちらも入っていて違うものは外し、
+ * 一致するものがあればそれだけを残す（出荷元倉庫が空の古い出荷は判断できないので残す）
+ */
+function narrowByWarehouse<T extends ShipmentLike>(origin: string, candidates: T[]): T[] {
+  const o = normalizeWarehouse(origin);
+  if (!o) return candidates;
+  const notConflicting = candidates.filter((c) => {
+    const w = normalizeWarehouse(c.warehouse);
+    return !w || w === o;
+  });
+  const exact = notConflicting.filter((c) => normalizeWarehouse(c.warehouse) === o);
+  return exact.length > 0 ? exact : notConflicting;
+}
+
 function namesMatch(a: string, b: string): boolean {
   const na = normalizeClinicName(a);
   const nb = normalizeClinicName(b);
@@ -130,6 +158,14 @@ export function findUnmatched(
 ): { rows: UnmatchedRow[]; targetCount: number; matchedCount: number; noTrackingCount: number } {
   const knownTracking = new Set<string>();
   shipments.forEach((s) => trackingDigits(s.trackingNo || '').forEach((d) => knownTracking.add(d)));
+
+  const shipmentsByInvoice = new Map<string, ShipmentLike[]>();
+  shipments.forEach((s) => {
+    const key = normalizeInvoice(s.warehouseInvoiceNo);
+    if (!key) return;
+    if (!shipmentsByInvoice.has(key)) shipmentsByInvoice.set(key, []);
+    shipmentsByInvoice.get(key)!.push(s);
+  });
 
   const targets = sheetRows.filter((r) => isTargetRow(r, today));
   let matchedCount = 0;
@@ -173,10 +209,17 @@ export function findUnmatched(
       }
     }
 
+    // シートのINVOICE NO.が出荷管理の倉庫インボイス番号と一致すれば、その出荷が最有力（クリニック名に関係なく）
+    const invoiceHits = shipmentsByInvoice.get(normalizeInvoice(row.invoiceNo)) || [];
+    const narrowed =
+      invoiceHits.length > 0
+        ? invoiceHits.map((s) => ({ ...s, reason: 'インボイス番号が一致' as const }))
+        : narrowByWarehouse(row.origin, candidates);
+
     unmatched.push({
       ...row,
-      candidates,
-      kind: candidates.length === 0 ? 'none' : candidates.length === 1 ? 'single' : 'multiple',
+      candidates: narrowed,
+      kind: narrowed.length === 0 ? 'none' : narrowed.length === 1 ? 'single' : 'multiple',
       matchedClinicNames,
       bulkGroupKey: null,
     });
