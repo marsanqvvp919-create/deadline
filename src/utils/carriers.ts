@@ -13,6 +13,8 @@ export interface CarrierStatus {
   estimatedDelivery?: string;
   fetchedAt: string;
   error?: string;
+  arrivedJapan?: boolean;
+  customsCleared?: boolean;
 }
 
 export const CARRIER_STATUS_LABEL: Record<NormalizedStatus, string> = {
@@ -48,4 +50,20 @@ export async function fetchCarrierStatuses(items: { trackingNo: string; courier?
 
 export function digitsOf(trackingNo?: string): string {
   return (trackingNo || '').replace(/\D/g, '');
+}
+
+export interface CarrierStatusSnapshot {
+  statuses: CarrierStatus[];
+  dhl: { usedToday: number; budget: number; lastAutoRunAt: string | null; autoEnabled: boolean };
+}
+
+/** サーバーが自動取得して持っている最新状況（配送会社には問い合わせない） */
+export async function fetchSavedCarrierStatuses(): Promise<CarrierStatusSnapshot | null> {
+  try {
+    const res = await fetch('/api/carriers/statuses');
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
 }

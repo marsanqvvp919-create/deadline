@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { detectCarrier, courierMismatch } from '../utils/tracking';
 import { parseYmd } from '../utils';
 import { useUrlState } from '../utils/listState';
@@ -6,7 +6,7 @@ import { Order, ShipmentItem } from '../types';
 import { getConfiguredUrls, getLocalClinics } from '../api';
 import { openRakurakuWithCopiedId } from '../utils';
 import { Search, Truck, ExternalLink, Snowflake, Copy, RefreshCw } from 'lucide-react';
-import { CARRIER_STATUS_LABEL, CARRIER_STATUS_STYLE, CarrierStatus, digitsOf, fetchCarrierStatuses } from '../utils/carriers';
+import { CARRIER_STATUS_LABEL, CARRIER_STATUS_STYLE, CarrierStatus, CarrierStatusSnapshot, digitsOf, fetchCarrierStatuses, fetchSavedCarrierStatuses } from '../utils/carriers';
 
 // 出荷管理（101270）の実データから、出荷ごとに「今どの段階か」を表示する。
 // 段階は楽楽販売の項目（ステータス・輸入確認ステータス・通関完了日・配達完了日）から決める。
@@ -37,10 +37,11 @@ type TrackingShipment = ShipmentItem & {
 
 const blank = (v?: string) => !v || v === '—';
 
-function stageOf(s: TrackingShipment): Stage {
-  if (!blank(s.deliveredDate)) return 'delivered';
+// 段階は楽楽販売の項目を基本に、配送会社（DHLなど）の最新状況で先に進める
+function stageOf(s: TrackingShipment, c?: CarrierStatus): Stage {
+  if (!blank(s.deliveredDate) || c?.status === 'delivered') return 'delivered';
   if ((s.shipStatus || '').includes('出荷待ち')) return 'waiting';
-  if (!blank(s.customsClearedDate)) return 'domestic';
+  if (!blank(s.customsClearedDate) || c?.customsCleared) return 'domestic';
   if (IMPORT_IN_PROGRESS.includes(s.importStatus)) return 'import_check';
   return 'in_transit';
 }
@@ -76,7 +77,20 @@ export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: Shipmen
   const [carrierStatus, setCarrierStatus] = useState<Record<string, CarrierStatus>>({});
   const [carrierLoading, setCarrierLoading] = useState(false);
   const [carrierMessage, setCarrierMessage] = useState<string | null>(null);
+  const [dhlInfo, setDhlInfo] = useState<CarrierStatusSnapshot['dhl'] | null>(null);
+  const [exceptionOnly, setExceptionOnly] = useUrlState<string>('exc', '');
   const { rakurakuBaseUrl } = getConfiguredUrls();
+
+  // 画面を開いたら、サーバーが自動取得した最新状況を読み込む（配送会社には問い合わせない）
+  useEffect(() => {
+    fetchSavedCarrierStatuses().then((snap) => {
+      if (!snap) return;
+      const map: Record<string, CarrierStatus> = {};
+      snap.statuses.forEach((r) => (map[r.trackingNo] = r));
+      setCarrierStatus((prev) => ({ ...map, ...prev }));
+      setDhlInfo(snap.dhl);
+    });
+  }, []);
 
   const clinicById = useMemo(() => {
     const m = new Map<string, string>();
@@ -94,11 +108,14 @@ export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: Shipmen
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     return (shipments as TrackingShipment[])
-      .map((s) => ({ s, stage: stageOf(s), shipped: toDate(s.warehouseShippedDate) || toDate(s.shippedDate) }))
-      .filter(({ s, stage, shipped }) => {
+      .map((s) => {
+        const c = carrierStatus[digitsOf(s.trackingNo)];
+        return { s, c, stage: stageOf(s, c), shipped: toDate(s.warehouseShippedDate) || toDate(s.shippedDate) };
+      })
+      .filter(({ s, c, stage, shipped }) => {
         if (stage === 'waiting') return true;
         if (stage === 'delivered') {
-          const d = toDate(s.deliveredDate);
+          const d = toDate(s.deliveredDate) || toDate(c?.deliveredAt || c?.lastEventAt);
           return !!d && (today.getTime() - d.getTime()) / 86400000 <= RECENT_DELIVERED_DAYS;
         }
         return !!shipped && (today.getTime() - shipped.getTime()) / 86400000 <= ACTIVE_DAYS;
@@ -112,7 +129,10 @@ export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: Shipmen
           '（クリニック名不明）',
       }))
       .sort((a, b) => (b.shipped?.getTime() || 0) - (a.shipped?.getTime() || 0));
-  }, [shipments, customerByOrder, clinicById]);
+  }, [shipments, customerByOrder, clinicById, carrierStatus]);
+
+  // 配送会社が「要確認」（通関・配達の例外）を返している出荷
+  const exceptionCount = items.filter((i) => i.c?.status === 'exception').length;
 
   const warehouses = useMemo(
     () => Array.from(new Set(items.map((i) => i.s.warehouse).filter((w) => !blank(w)))) as string[],
@@ -127,6 +147,7 @@ export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: Shipmen
 
   const visible = items.filter((i) => {
     if (stageFilter !== 'all' && i.stage !== stageFilter) return false;
+    if (exceptionOnly && i.c?.status !== 'exception') return false;
     if (warehouseFilter !== 'all' && i.s.warehouse !== warehouseFilter) return false;
     const q = query.trim().toLowerCase();
     if (!q) return true;
@@ -150,6 +171,7 @@ export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: Shipmen
       // 取得できた件数を先に出し、未設定・回数制限などのお知らせは後ろに添える
       const notes = errs.map((e) => (e.includes('未設定') ? `${e}（メニュー「配送会社API連携」で設定できます）` : e));
       setCarrierMessage([`${json.results.length}件の最新状況を取得しました`, ...notes].join('／'));
+      fetchSavedCarrierStatuses().then((snap) => snap && setDhlInfo(snap.dhl));
     } catch (e: any) {
       setCarrierMessage(`取得できませんでした：${e?.message || e}`);
     } finally {
@@ -219,6 +241,22 @@ export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: Shipmen
             <RefreshCw className={`w-3.5 h-3.5 ${carrierLoading ? 'animate-spin' : ''}`} /> 配送会社から最新状況を取得
           </button>
         </div>
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          {exceptionCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setExceptionOnly(exceptionOnly ? '' : '1')}
+              className={`px-2.5 py-1 rounded-lg font-bold border ${exceptionOnly ? 'bg-rose-600 text-white border-rose-600' : 'bg-rose-50 text-rose-800 border-rose-200'}`}
+            >
+              配送会社で要確認 {exceptionCount}件
+            </button>
+          )}
+          {dhlInfo?.autoEnabled && (
+            <span className="text-slate-500">
+              DHL は2時間ごとに自動で取得しています（最終 {dhlInfo.lastAutoRunAt ? new Date(dhlInfo.lastAutoRunAt).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }) : '—'}・今日 {dhlInfo.usedToday}/{dhlInfo.budget}回）
+            </span>
+          )}
+        </div>
         {carrierMessage && <p className="text-xs text-slate-600">{carrierMessage}</p>}
       </div>
 
@@ -283,6 +321,17 @@ export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: Shipmen
                     <span className="text-slate-600">{carrierStatus[digitsOf(s.trackingNo)].statusText}</span>
                     {carrierStatus[digitsOf(s.trackingNo)].lastLocation && (
                       <span className="text-slate-500">／ {carrierStatus[digitsOf(s.trackingNo)].lastLocation}</span>
+                    )}
+                    {carrierStatus[digitsOf(s.trackingNo)].status !== 'delivered' &&
+                      carrierStatus[digitsOf(s.trackingNo)].estimatedDelivery && (
+                        <span className="text-slate-700 font-bold">
+                          ／ 配達予定 {String(carrierStatus[digitsOf(s.trackingNo)].estimatedDelivery).slice(0, 10).replace(/-/g, '/')}
+                        </span>
+                      )}
+                    {carrierStatus[digitsOf(s.trackingNo)].status === 'delivered' && (
+                      <span className="text-emerald-700 font-bold">
+                        ／ {String(carrierStatus[digitsOf(s.trackingNo)].deliveredAt || carrierStatus[digitsOf(s.trackingNo)].lastEventAt || '').slice(0, 10).replace(/-/g, '/')}
+                      </span>
                     )}
                   </div>
                 )}

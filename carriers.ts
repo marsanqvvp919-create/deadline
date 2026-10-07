@@ -22,6 +22,8 @@ export interface CarrierStatus {
   estimatedDelivery?: string; // ISO
   fetchedAt: string;
   error?: string;
+  arrivedJapan?: boolean; // 日本の拠点でのスキャンがある
+  customsCleared?: boolean; // 通関が終わった（配送会社の記録から判断）
 }
 
 export const NORMALIZED_LABEL: Record<NormalizedStatus, string> = {
@@ -129,9 +131,17 @@ export async function trackFedex(cred: NonNullable<CarrierCredentials['fedex']>,
 // ----------------------------------------------------------------------
 // DHL（Shipment Tracking - Unified。1件ずつ問い合わせる）
 // ----------------------------------------------------------------------
+// 通関が終わったことを表す配送会社の文言（日本語・英語）
+const CLEARED_PATTERN = /通関手続きが完了|通関が完了|clearance processing complete|cleared customs|customs clearance complete/i;
+
 function normalizeDhl(trackingNo: string, s: any): CarrierStatus {
   const st = s?.status || {};
   const code = String(st.statusCode || '').toLowerCase();
+  const events: any[] = Array.isArray(s?.events) ? s.events : [];
+  const placeOf = (e: any) => String(e?.location?.address?.addressLocality || '');
+  const arrivedJapan = [st, ...events].some((e) => /JAPAN/i.test(placeOf(e)));
+  const customsCleared =
+    code === 'delivered' || [st, ...events].some((e) => CLEARED_PATTERN.test(`${e?.description || ''} ${e?.status || ''}`));
   const map: Record<string, NormalizedStatus> = {
     delivered: 'delivered',
     transit: 'in_transit',
@@ -148,6 +158,8 @@ function normalizeDhl(trackingNo: string, s: any): CarrierStatus {
     deliveredAt: code === 'delivered' ? st.timestamp : undefined,
     estimatedDelivery: s?.estimatedTimeOfDelivery,
     fetchedAt: new Date().toISOString(),
+    arrivedJapan,
+    customsCleared,
   };
 }
 

@@ -2257,6 +2257,85 @@ const carrierCacheMs = (c: CarrierStatus) =>
   c.status === 'delivered' ? 24 * 60 * 60 * 1000 : c.carrier === 'dhl' ? 2 * 60 * 60 * 1000 : CARRIER_CACHE_MS;
 // 1回の取得で DHL に新しく問い合わせる件数の上限
 const DHL_MAX_PER_REQUEST = 40;
+// DHL に1日（日本時間）で問い合わせてよい件数。無料枠（1日250回）より少し余裕を残す
+const DHL_DAILY_BUDGET = Number(process.env.DHL_DAILY_BUDGET) || 230;
+// 自動取得：日本時間 7〜21時、2時間ごと。1回あたりの上限と、手動用に残しておく件数
+const DHL_AUTO_INTERVAL_MS = 2 * 60 * 60 * 1000;
+const DHL_AUTO_PER_RUN = 50;
+const DHL_MANUAL_RESERVE = 40;
+// 配達完了になっていない出荷は、前回の取得から6時間たったら取り直す
+const DHL_REFRESH_AFTER_MS = 6 * 60 * 60 * 1000;
+
+const CARRIER_STATUS_OBJECT = 'carrier-status-cache.json';
+const jstDate = () => new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+const jstHour = () => new Date(Date.now() + 9 * 3600 * 1000).getUTCHours();
+let dhlUsage = { date: jstDate(), calls: 0 };
+let dhlLastAutoRunAt: string | null = null;
+let carrierStatusLoaded = false;
+let carrierStatusSaveTimer: NodeJS.Timeout | null = null;
+
+function dhlUsedToday(): number {
+  if (dhlUsage.date !== jstDate()) dhlUsage = { date: jstDate(), calls: 0 };
+  return dhlUsage.calls;
+}
+function addDhlUsage(n: number) {
+  dhlUsedToday();
+  dhlUsage.calls += n;
+}
+
+// 取得結果は Cloud Storage に残し、再起動しても配送会社に問い合わせ直さない（回数の節約）
+async function loadCarrierStatusCache() {
+  if (carrierStatusLoaded) return;
+  carrierStatusLoaded = true;
+  if (!CACHE_BUCKET) return;
+  try {
+    const [buf] = await new Storage().bucket(CACHE_BUCKET).file(CARRIER_STATUS_OBJECT).download();
+    const json = JSON.parse(buf.toString('utf-8')) || {};
+    (json.statuses || []).forEach((c: CarrierStatus) => carrierCache.set(`${c.carrier}:${c.trackingNo}`, c));
+    if (json.usage?.date === jstDate()) dhlUsage = json.usage;
+    dhlLastAutoRunAt = json.lastAutoRunAt || null;
+    console.log(`[Carriers] Restored ${carrierCache.size} statuses, DHL used today ${dhlUsage.calls}`);
+  } catch (e: any) {
+    if (e?.code !== 404) console.warn('[Carriers] Status cache load failed:', e?.message || e);
+  }
+}
+
+function scheduleCarrierStatusSave() {
+  if (!CACHE_BUCKET || carrierStatusSaveTimer) return;
+  carrierStatusSaveTimer = setTimeout(async () => {
+    carrierStatusSaveTimer = null;
+    // 30日より古い結果は捨てる
+    const cutoff = Date.now() - 30 * 86400000;
+    const statuses = Array.from(carrierCache.values()).filter((c) => new Date(c.fetchedAt).getTime() > cutoff);
+    try {
+      await new Storage()
+        .bucket(CACHE_BUCKET)
+        .file(CARRIER_STATUS_OBJECT)
+        .save(JSON.stringify({ statuses, usage: dhlUsage, lastAutoRunAt: dhlLastAutoRunAt }), {
+          contentType: 'application/json',
+          resumable: false,
+        });
+    } catch (e: any) {
+      console.warn('[Carriers] Status cache save failed:', e?.message || e);
+    }
+  }, 5000);
+}
+
+// DHL に問い合わせ、結果をキャッシュと使用回数に反映する（手動・自動の共通処理）
+async function runDhlLookup(apiKey: string, nos: string[]): Promise<{ got: CarrierStatus[]; error?: string }> {
+  if (nos.length === 0) return { got: [] };
+  let got: CarrierStatus[] = [];
+  let error: string | undefined;
+  try {
+    got = await trackDhl({ apiKey }, nos);
+  } catch (e: any) {
+    error = e?.message || String(e);
+  }
+  addDhlUsage(got.length + (error ? 1 : 0));
+  got.forEach((g) => carrierCache.set(`dhl:${g.trackingNo}`, g));
+  scheduleCarrierStatusSave();
+  return { got, error };
+}
 
 async function loadCarrierCreds() {
   if (carrierCredsLoaded) return;
@@ -2336,7 +2415,7 @@ app.put('/api/carriers/settings', async (req, res) => {
   } catch (e: any) {
     return res.status(500).json({ error: `保存できませんでした: ${e?.message || e}` });
   }
-  carrierCache.clear();
+  // 取得済みの状況は本物なので、キーを変えても消さない
   return res.json({ success: true });
 });
 
@@ -2357,6 +2436,7 @@ app.post('/api/carriers/test', async (req, res) => {
 app.post('/api/carriers/track', async (req, res) => {
   const items: { trackingNo: string; courier?: string }[] = Array.isArray(req.body?.items) ? req.body.items.slice(0, 120) : [];
   const { creds } = await effectiveCarrierCreds();
+  await loadCarrierStatusCache();
   const results: CarrierStatus[] = [];
   const pending: Record<CarrierId, string[]> = { fedex: [], dhl: [] };
   for (const it of items) {
@@ -2371,27 +2451,103 @@ app.post('/api/carriers/track', async (req, res) => {
   const errors: Record<string, string> = {};
   for (const carrier of ['fedex', 'dhl'] as CarrierId[]) {
     const all = Array.from(new Set(pending[carrier]));
-    const nos = carrier === 'dhl' ? all.slice(0, DHL_MAX_PER_REQUEST) : all;
-    if (all.length > nos.length) {
-      errors[carrier] = `DHL は回数制限があるため、今回は${nos.length}件だけ取得しました（残り${all.length - nos.length}件はもう一度押すと取得します）`;
+    const dhlRoom = Math.max(0, DHL_DAILY_BUDGET - dhlUsedToday());
+    const nos = carrier === 'dhl' ? all.slice(0, Math.min(DHL_MAX_PER_REQUEST, dhlRoom)) : all;
+    if (carrier === 'dhl' && all.length > nos.length) {
+      errors[carrier] =
+        dhlRoom === 0
+          ? `DHL は今日の取得回数（${DHL_DAILY_BUDGET}回）を使い切りました。明日また取得します`
+          : `DHL は回数制限があるため、今回は${nos.length}件だけ取得しました（残り${all.length - nos.length}件はもう一度押すと取得します）`;
     }
+    if (nos.length === 0) continue;
     if (nos.length === 0) continue;
     if (!creds[carrier]) {
       errors[carrier] = `${carrier === 'fedex' ? 'FedEx' : 'DHL'} のAPIが未設定です`;
       continue;
     }
+    if (carrier === 'dhl') {
+      const { got, error } = await runDhlLookup(creds.dhl!.apiKey, nos);
+      results.push(...got);
+      if (error) errors.dhl = error;
+      continue;
+    }
     try {
-      const got = carrier === 'fedex' ? await trackFedex(creds.fedex!, nos) : await trackDhl(creds.dhl!, nos);
+      const got = await trackFedex(creds.fedex!, nos);
       got.forEach((g) => {
         carrierCache.set(`${carrier}:${g.trackingNo}`, g);
         results.push(g);
       });
+      scheduleCarrierStatusSave();
     } catch (e: any) {
       errors[carrier] = e?.message || String(e);
     }
   }
   return res.json({ results, errors, configured: { fedex: !!creds.fedex, dhl: !!creds.dhl } });
 });
+
+// サーバーが持っている最新状況を返す（配送会社には問い合わせない。画面を開いたときに使う）
+app.get('/api/carriers/statuses', async (_req, res) => {
+  await loadCarrierStatusCache();
+  const { creds } = await effectiveCarrierCreds();
+  const cutoff = Date.now() - 30 * 86400000;
+  return res.json({
+    statuses: Array.from(carrierCache.values()).filter((c) => new Date(c.fetchedAt).getTime() > cutoff),
+    dhl: { usedToday: dhlUsedToday(), budget: DHL_DAILY_BUDGET, lastAutoRunAt: dhlLastAutoRunAt, autoEnabled: !!creds.dhl },
+  });
+});
+
+// DHL の自動取得：出荷から21日以内でまだ配達完了でない DHL の出荷を、古い順に少しずつ取り直す
+const shipDigits = (v?: string) => String(v || '').replace(/\D/g, '');
+function shipDateOf(s: any): number | null {
+  const m = String(s.warehouseShippedDate || s.shippedDate || '').match(/(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})/);
+  return m ? Date.UTC(+m[1], +m[2] - 1, +m[3]) : null;
+}
+
+async function runDhlAutoRefresh(force = false) {
+  const { creds } = await effectiveCarrierCreds();
+  if (!creds.dhl) return;
+  await loadCarrierStatusCache();
+  const hour = jstHour();
+  if (!force && (hour < 7 || hour > 21)) return;
+  if (!force && dhlLastAutoRunAt && Date.now() - new Date(dhlLastAutoRunAt).getTime() < DHL_AUTO_INTERVAL_MS) return;
+  const room = DHL_DAILY_BUDGET - DHL_MANUAL_RESERVE - dhlUsedToday();
+  if (room <= 0) return;
+
+  const now = Date.now();
+  const candidates = new Map<string, { digits: string; shipped: number; fetched: number }>();
+  for (const s of serverRakurakuStore.shipments || []) {
+    if (!String(s.shipStatus || '').includes('出荷済')) continue;
+    const digits = shipDigits(s.trackingNo);
+    if (digits.length < 8 || detectCarrier(digits, s.courier) !== 'dhl') continue;
+    const shipped = shipDateOf(s);
+    if (!shipped || now - shipped > 21 * 86400000) continue;
+    const cached = carrierCache.get(`dhl:${digits}`);
+    if (cached?.status === 'delivered') continue;
+    const fetched = cached ? new Date(cached.fetchedAt).getTime() : 0;
+    if (fetched && now - fetched < DHL_REFRESH_AFTER_MS) continue;
+    candidates.set(digits, { digits, shipped, fetched });
+  }
+  // まだ一度も取っていないもの → 前回の取得が古いもの。同じなら新しい出荷を先に
+  const list = Array.from(candidates.values())
+    .sort((a, b) => a.fetched - b.fetched || b.shipped - a.shipped)
+    .slice(0, Math.min(DHL_AUTO_PER_RUN, room))
+    .map((c) => c.digits);
+  dhlLastAutoRunAt = new Date().toISOString();
+  if (list.length === 0) {
+    scheduleCarrierStatusSave();
+    return;
+  }
+  const { got, error } = await runDhlLookup(creds.dhl.apiKey, list);
+  console.log(`[Carriers] DHL auto refresh: ${got.length}/${list.length} updated, used today ${dhlUsedToday()}${error ? `, error: ${error}` : ''}`);
+}
+
+setInterval(() => {
+  runDhlAutoRefresh().catch((e) => console.warn('[Carriers] DHL auto refresh failed:', e?.message || e));
+}, 20 * 60 * 1000);
+// 起動して楽楽販売のデータがそろったころに1回目
+setTimeout(() => {
+  runDhlAutoRefresh().catch((e) => console.warn('[Carriers] DHL auto refresh failed:', e?.message || e));
+}, 3 * 60 * 1000);
 
 async function startServer() {
   const distPath = path.resolve(process.cwd(), 'dist');
