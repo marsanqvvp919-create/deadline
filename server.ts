@@ -949,6 +949,8 @@ async function fetchRakurakuCsv(
   const apiUrl = `${cleanBaseUrl}/api/csvexport/version/v1`;
 
   for (let page = 0; page < pagesToFetch; page++) {
+    // 楽楽販売の実行回数制限に当たらないよう、ページごとに間隔をあける
+    if (page > 0) await new Promise((r) => setTimeout(r, 3000));
     const offset = page * 200;
     const reqBody: any = {
       dbSchemaId: dbSchemaId.toString(),
