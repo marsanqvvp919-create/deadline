@@ -17,12 +17,17 @@ import {
   getRakurakuUrl,
   formatValue,
 } from '../utils/customsUtils';
+import { TableEmptyState } from './TableEmptyState';
 
 interface CustomsManagementViewProps {
   shipments: ShipmentItem[];
   orders: Order[];
   clinics?: ClinicItem[];
   onSelectOrder?: (order: Order) => void;
+  isLoading?: boolean;
+  error?: string | null;
+  lastSuccessTime?: string | null;
+  onRetry?: () => void;
 }
 
 export const CustomsManagementView: React.FC<CustomsManagementViewProps> = ({
@@ -30,6 +35,10 @@ export const CustomsManagementView: React.FC<CustomsManagementViewProps> = ({
   orders,
   clinics = [],
   onSelectOrder,
+  isLoading = false,
+  error = null,
+  lastSuccessTime = null,
+  onRetry,
 }) => {
   const [selectedAirport, setSelectedAirport] = useState<string>('all');
   const [selectedStatus, setSelectedStatus] = useState<string>('all');
@@ -362,12 +371,15 @@ export const CustomsManagementView: React.FC<CustomsManagementViewProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
-              {filteredShipments.length === 0 ? (
-                <tr>
-                  <td colSpan={14} className="py-12 text-center text-slate-400 font-bold">
-                    データなし
-                  </td>
-                </tr>
+              {filteredShipments.length === 0 || isLoading || error ? (
+                <TableEmptyState
+                  isLoading={isLoading}
+                  error={error}
+                  lastSuccessTime={lastSuccessTime}
+                  onRetry={onRetry}
+                  colSpan={14}
+                  emptyMessage="該当する案件はありません"
+                />
               ) : (
                 filteredShipments.map((item, idx) => {
                   const clinicName = resolveClinicName(item, orders, clinics);

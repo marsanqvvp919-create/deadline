@@ -11,7 +11,15 @@ import {
 } from '../types';
 import { getLocalClinics } from '../api';
 import { isShippingOrFee } from '../utils';
-import { isEligibleForOverdue } from '../utils/salesCalculations';
+import {
+  isLineDelayed,
+  isLineApproaching,
+  getLineDelayDays,
+  getDelayCounts,
+  getApproachingCounts,
+  formatDelayString,
+} from '../utils/delayCalculation';
+import { TableEmptyState } from './TableEmptyState';
 import {
   AlertTriangle,
   Clock,
@@ -48,6 +56,10 @@ interface OverdueManagementViewProps {
   alerts: AlertItem[];
   onSelectOrder: (order: Order, lineKey?: string) => void;
   onOpenClinicStatus?: (clinicName: string) => void;
+  isLoading?: boolean;
+  error?: string | null;
+  lastSuccessTime?: string | null;
+  onRetry?: () => void;
 }
 
 export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
@@ -55,7 +67,14 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
   alerts,
   onSelectOrder,
   onOpenClinicStatus,
+  isLoading = false,
+  error = null,
+  lastSuccessTime = null,
+  onRetry,
 }) => {
+  // Scope: 'overdue' (納期超過のみ - isLineDelayed統一) | 'approaching' (納期間近（10日以内） - 別指標として分離)
+  const [activeScope, setActiveScope] = useState<'overdue' | 'approaching'>('overdue');
+
   // View mode: 'orders' (伝票・明細別) | 'clinics' (取引先別)
   const [viewMode, setViewMode] = useState<'orders' | 'clinics'>('orders');
 
@@ -141,55 +160,40 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
     } catch {}
   };
 
-  // 1. Calculate all overdue orders from current orders
-  const { overdueOrders, overdueClinics, kpis } = useMemo(() => {
+  // 1. Calculate all overdue orders (isLineDelayed統一) and approaching orders (10日以内分離)
+  const { currentOrders, currentClinics, delayCounts, approachingCounts, kpis } = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
+    const delayCounts = getDelayCounts(orders);
+    const approachingCounts = getApproachingCounts(orders);
+
     const overdueList: OverdueOrderInfo[] = [];
-    const clinicsMap = new Map<string, OverdueClinicInfo>();
+    const approachingList: OverdueOrderInfo[] = [];
+    const overdueClinicsMap = new Map<string, OverdueClinicInfo>();
+    const approachingClinicsMap = new Map<string, OverdueClinicInfo>();
 
     orders.forEach((ord) => {
-      // 納品完了の伝票は除外
       if (ord.deliveredDate || ord.orderState === '納品完了') return;
-      // 納期超過対象外（見積もり or 入金未済かつ後払い以外）は除外
-      if (!isEligibleForOverdue(ord)) return;
 
-      const overdueLines: OrderLine[] = [];
-      let maxDaysOver = -999;
-      let earliestDueDate = '';
-      let hasUnordered = false;
-
-      ord.lines.forEach((l) => {
-        // 送料・代行手数料は商品ではないため除外
-        if (isShippingOrFee(l.productName, l.productId)) return;
-
-        // 出荷完了は除外
-        if (l.stage === '出荷完了') return;
-
-        if (l.latestDate) {
-          const d = new Date(l.latestDate);
-          if (!isNaN(d.getTime())) {
-            const daysOver = Math.floor((today.getTime() - d.getTime()) / (1000 * 60 * 60 * 24));
-            // 納期超過および遅延なしの5日前（daysOver >= -5）までを対象
-            if (daysOver >= -5) {
-              overdueLines.push(l);
-              if (daysOver > maxDaysOver) {
-                maxDaysOver = daysOver;
-                earliestDueDate = l.latestDate;
-              }
-              if (l.stage === '未発注') {
-                hasUnordered = true;
-              }
-            }
-          }
-        }
-      });
-
+      // 1. 納期超過明細（isLineDelayed 単一の真実）
+      const overdueLines = ord.lines.filter((l) => isLineDelayed(l, ord));
       if (overdueLines.length > 0) {
+        let maxDaysOver = 0;
+        let earliestDueDate = overdueLines[0]?.latestDate || '';
+        let hasUnordered = false;
+
+        overdueLines.forEach((l) => {
+          const days = getLineDelayDays(l);
+          if (days > maxDaysOver) {
+            maxDaysOver = days;
+            earliestDueDate = l.latestDate || earliestDueDate;
+          }
+          if (l.stage === '未発注') hasUnordered = true;
+        });
+
         const cause: '未発注' | '入荷遅延' | '出荷手配中' = hasUnordered ? '未発注' : '入荷遅延';
         const totalOverdueQty = overdueLines.reduce((acc, l) => acc + (l.remainingQty || l.quantity || 1), 0);
-
         const followup = followups[ord.orderId] || {
           status: '未対応' as OverdueFollowupStatus,
           note: '',
@@ -209,15 +213,12 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
           totalOverdueQty,
           followup,
         };
-
         overdueList.push(info);
 
-        // Group into clinics
         const cName = ord.customerName || '未設定';
         const masterClinic = clinicMasterMap.get(cName);
-
-        if (!clinicsMap.has(cName)) {
-          clinicsMap.set(cName, {
+        if (!overdueClinicsMap.has(cName)) {
+          overdueClinicsMap.set(cName, {
             clinicName: cName,
             clinicId: masterClinic?.clinicId,
             salesRep: ord.salesRep || masterClinic?.salesRep || '未設定',
@@ -232,52 +233,126 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
             followupNote: clinicNotes[cName] || '',
           });
         }
-
-        const cln = clinicsMap.get(cName)!;
+        const cln = overdueClinicsMap.get(cName)!;
         cln.orders.push(info);
         cln.ordersCount += 1;
         cln.maxDaysOver = Math.max(cln.maxDaysOver, maxDaysOver);
         cln.totalOverdueQty += totalOverdueQty;
       }
-    });
 
-    // Assign severity rank for clinics
-    clinicsMap.forEach((cln) => {
-      if (cln.ordersCount >= 3 || cln.maxDaysOver >= 30) {
-        cln.severityRank = 'S';
-      } else if (cln.ordersCount >= 2 || cln.maxDaysOver >= 14) {
-        cln.severityRank = 'A';
-      } else {
-        cln.severityRank = 'B';
+      // 2. 納期間近明細（10日以内・納期超過とは合算しない）
+      const approachingLines = ord.lines.filter((l) => isLineApproaching(l, ord, undefined, 10));
+      if (approachingLines.length > 0 && overdueLines.length === 0) {
+        let minDaysRemaining = 999;
+        let earliestDueDate = approachingLines[0]?.latestDate || '';
+        let hasUnordered = false;
+
+        approachingLines.forEach((l) => {
+          if (l.latestDate) {
+            const d = new Date(l.latestDate);
+            const daysRem = Math.max(0, Math.ceil((d.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)));
+            if (daysRem < minDaysRemaining) {
+              minDaysRemaining = daysRem;
+              earliestDueDate = l.latestDate;
+            }
+          }
+          if (l.stage === '未発注') hasUnordered = true;
+        });
+
+        const cause: '未発注' | '入荷遅延' | '出荷手配中' = hasUnordered ? '未発注' : '入荷遅延';
+        const totalOverdueQty = approachingLines.reduce((acc, l) => acc + (l.remainingQty || l.quantity || 1), 0);
+        const followup = followups[ord.orderId] || {
+          status: '未対応' as OverdueFollowupStatus,
+          note: '',
+          updatedAt: '',
+        };
+
+        const info: OverdueOrderInfo = {
+          order: ord,
+          orderId: ord.orderId,
+          customerName: ord.customerName || '未設定',
+          salesRep: ord.salesRep || '未設定',
+          orderDate: ord.orderDate || '',
+          maxDaysOver: -minDaysRemaining,
+          earliestDueDate,
+          overdueLines: approachingLines,
+          cause,
+          totalOverdueQty,
+          followup,
+        };
+        approachingList.push(info);
+
+        const cName = ord.customerName || '未設定';
+        const masterClinic = clinicMasterMap.get(cName);
+        if (!approachingClinicsMap.has(cName)) {
+          approachingClinicsMap.set(cName, {
+            clinicName: cName,
+            clinicId: masterClinic?.clinicId,
+            salesRep: ord.salesRep || masterClinic?.salesRep || '未設定',
+            phone: masterClinic?.phone || '',
+            email: masterClinic?.email || '',
+            directorName: masterClinic?.directorName || '',
+            ordersCount: 0,
+            maxDaysOver: -minDaysRemaining,
+            totalOverdueQty: 0,
+            orders: [],
+            severityRank: 'B',
+            followupNote: clinicNotes[cName] || '',
+          });
+        }
+        const cln = approachingClinicsMap.get(cName)!;
+        cln.orders.push(info);
+        cln.ordersCount += 1;
+        cln.totalOverdueQty += totalOverdueQty;
       }
     });
 
-    // Sort overdue orders by maxDaysOver desc
+    const finalizeClinics = (map: Map<string, OverdueClinicInfo>) => {
+      map.forEach((cln) => {
+        if (cln.ordersCount >= 3 || cln.maxDaysOver >= 30) {
+          cln.severityRank = 'S';
+        } else if (cln.ordersCount >= 2 || cln.maxDaysOver >= 14) {
+          cln.severityRank = 'A';
+        } else {
+          cln.severityRank = 'B';
+        }
+      });
+      return Array.from(map.values()).sort((a, b) => {
+        const rankOrder = { S: 3, A: 2, B: 1 };
+        if (rankOrder[b.severityRank] !== rankOrder[a.severityRank]) {
+          return rankOrder[b.severityRank] - rankOrder[a.severityRank];
+        }
+        return b.maxDaysOver - a.maxDaysOver;
+      });
+    };
+
     overdueList.sort((a, b) => b.maxDaysOver - a.maxDaysOver);
+    approachingList.sort((a, b) => a.maxDaysOver - b.maxDaysOver);
 
-    // Sort overdue clinics by rank (S -> A -> B) then maxDaysOver desc
-    const sortedClinics = Array.from(clinicsMap.values()).sort((a, b) => {
-      const rankOrder = { S: 3, A: 2, B: 1 };
-      if (rankOrder[b.severityRank] !== rankOrder[a.severityRank]) {
-        return rankOrder[b.severityRank] - rankOrder[a.severityRank];
-      }
-      return b.maxDaysOver - a.maxDaysOver;
-    });
+    const sortedOverdueClinics = finalizeClinics(overdueClinicsMap);
+    const sortedApproachingClinics = finalizeClinics(approachingClinicsMap);
 
-    // Calculate overall KPIs
-    const totalOrders = overdueList.length;
-    const totalClinics = sortedClinics.length;
-    const worstDaysOver = overdueList.length > 0 ? overdueList[0].maxDaysOver : 0;
-    const unorderedCount = overdueList.filter((o) => o.cause === '未発注').length;
-    const poDelayedCount = overdueList.filter((o) => o.cause === '入荷遅延').length;
-    const completedCount = overdueList.filter((o) => o.followup.status === '対応完了').length;
-    const unhandledCount = overdueList.filter((o) => o.followup.status === '未対応').length;
+    const isOverdueScope = activeScope === 'overdue';
+    const activeOrdersList = isOverdueScope ? overdueList : approachingList;
+    const activeClinicsList = isOverdueScope ? sortedOverdueClinics : sortedApproachingClinics;
+
+    const totalOrders = activeOrdersList.length;
+    const totalLines = activeOrdersList.reduce((acc, o) => acc + o.overdueLines.length, 0);
+    const totalClinics = activeClinicsList.length;
+    const worstDaysOver = activeOrdersList.length > 0 ? activeOrdersList[0].maxDaysOver : 0;
+    const unorderedCount = activeOrdersList.filter((o) => o.cause === '未発注').length;
+    const poDelayedCount = activeOrdersList.filter((o) => o.cause === '入荷遅延').length;
+    const completedCount = activeOrdersList.filter((o) => o.followup.status === '対応完了').length;
+    const unhandledCount = activeOrdersList.filter((o) => o.followup.status === '未対応').length;
 
     return {
-      overdueOrders: overdueList,
-      overdueClinics: sortedClinics,
+      currentOrders: activeOrdersList,
+      currentClinics: activeClinicsList,
+      delayCounts,
+      approachingCounts,
       kpis: {
         totalOrders,
+        totalLines,
         totalClinics,
         worstDaysOver,
         unorderedCount,
@@ -286,11 +361,11 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
         unhandledCount,
       },
     };
-  }, [orders, followups, clinicNotes, clinicMasterMap]);
+  }, [orders, activeScope, followups, clinicNotes, clinicMasterMap]);
 
   // Filtered list of orders
   const filteredOverdueOrders = useMemo(() => {
-    return overdueOrders.filter((item) => {
+    return currentOrders.filter((item) => {
       // 営業担当
       if (selectedRep !== 'all' && item.salesRep !== selectedRep) return false;
 
@@ -322,11 +397,11 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
 
       return true;
     });
-  }, [overdueOrders, selectedRep, selectedDaysFilter, selectedCauseFilter, selectedStatusFilter, searchQuery]);
+  }, [currentOrders, selectedRep, selectedDaysFilter, selectedCauseFilter, selectedStatusFilter, searchQuery]);
 
   // Filtered list of clinics
   const filteredOverdueClinics = useMemo(() => {
-    return overdueClinics.filter((clinic) => {
+    return currentClinics.filter((clinic) => {
       // 営業担当
       if (selectedRep !== 'all' && clinic.salesRep !== selectedRep) return false;
 
@@ -349,16 +424,16 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
 
       return true;
     });
-  }, [overdueClinics, selectedRep, selectedDaysFilter, searchQuery]);
+  }, [currentClinics, selectedRep, selectedDaysFilter, searchQuery]);
 
   // List of sales reps for dropdown
   const repList = useMemo(() => {
     const set = new Set<string>();
-    overdueOrders.forEach((o) => {
+    currentOrders.forEach((o) => {
       if (o.salesRep) set.add(o.salesRep);
     });
     return Array.from(set).sort();
-  }, [overdueOrders]);
+  }, [currentOrders]);
 
   // Toggle clinic accordion
   const toggleClinicExpand = (name: string) => {
@@ -371,7 +446,7 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
   };
 
   const expandAllClinics = () => {
-    setExpandedClinics(new Set(overdueClinics.map((c) => c.clinicName)));
+    setExpandedClinics(new Set(currentClinics.map((c) => c.clinicName)));
   };
 
   const collapseAllClinics = () => {
@@ -552,10 +627,12 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
             <div>
               <div className="flex items-center gap-2.5 flex-wrap">
                 <h1 className="text-xl font-bold text-slate-900 tracking-tight">
-                  最長納期超過・納期間近（10日前）管理
+                  {activeScope === 'overdue' ? '最長納期超過 一覧' : '納期間近（10日以内） 一覧'}
                 </h1>
                 <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-200 font-mono">
-                  {kpis.totalOrders} 件 (超過＋10日前)
+                  {activeScope === 'overdue'
+                    ? formatDelayString(delayCounts)
+                    : formatDelayString(approachingCounts)}
                 </span>
                 <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200">
                   影響取引先: {kpis.totalClinics} 院
@@ -565,9 +642,41 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
                 </span>
               </div>
               <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
-                ご注文管理の最長納品予定日（110016）を経過しても出荷完了・納品されていない伝票および取引先（クリニック）を自動検出し、
-                仕入先への督促、顧客への遅延報告、対応履歴を一元管理します。
+                {activeScope === 'overdue'
+                  ? '納品予定日が今日より前で未出荷の明細（納期超過）を厳密に抽出しています。仕入先への督促、顧客への遅延報告、対応履歴を一元管理します。'
+                  : '納品予定日が本日以降かつ10日以内の明細を抽出しています。納期超過とは合算せず、直近の手配確認に役立てます。'}
               </p>
+
+              {/* ユーザー要件: 納期超過と納期間近（10日以内）を別指標として分けるタブ */}
+              <div className="flex items-center gap-2 mt-3 pt-2 border-t border-slate-100">
+                <span className="text-xs font-bold text-slate-500">指標切替:</span>
+                <div className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-xl">
+                  <button
+                    type="button"
+                    onClick={() => setActiveScope('overdue')}
+                    className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                      activeScope === 'overdue'
+                        ? 'bg-rose-600 text-white shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <AlertTriangle className="w-3.5 h-3.5" />
+                    <span>納期超過（{formatDelayString(delayCounts)}）</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveScope('approaching')}
+                    className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                      activeScope === 'approaching'
+                        ? 'bg-amber-600 text-white shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <Clock className="w-3.5 h-3.5" />
+                    <span>納期間近・10日以内（{formatDelayString(approachingCounts)}）</span>
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -586,10 +695,12 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
         {/* Top KPI Cards Row */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 pt-3 border-t border-slate-100">
           <div className="bg-rose-50/70 border border-rose-200/80 p-3 rounded-xl">
-            <span className="text-[11px] font-semibold text-rose-800 block">納期超過 伝票数</span>
-            <div className="mt-1 flex items-baseline gap-1.5">
-              <span className="text-2xl font-bold text-rose-700 font-mono">{kpis.totalOrders}</span>
-              <span className="text-[10px] text-rose-600 font-medium">件</span>
+            <span className="text-[11px] font-semibold text-rose-800 block">
+              {activeScope === 'overdue' ? '納期超過 伝票・明細数' : '納期間近 伝票・明細数'}
+            </span>
+            <div className="mt-1 flex items-baseline gap-1">
+              <span className="text-xl font-bold text-rose-700 font-mono">{kpis.totalOrders}件</span>
+              <span className="text-xs text-rose-600 font-medium">（{kpis.totalLines}明細）</span>
             </div>
           </div>
 
@@ -806,163 +917,174 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {filteredOverdueOrders.map((item, idx) => {
-                    const isOverdueSevere = item.maxDaysOver >= 14;
+                  {isLoading || error ? (
+                    <TableEmptyState
+                      isLoading={isLoading}
+                      error={error}
+                      lastSuccessTime={lastSuccessTime}
+                      onRetry={onRetry}
+                      colSpan={8}
+                      emptyMessage={activeScope === 'overdue' ? '納期超過している伝票はありません' : '納期間近（10日以内）の伝票はありません'}
+                    />
+                  ) : (
+                    filteredOverdueOrders.map((item, idx) => {
+                      const isOverdueSevere = item.maxDaysOver >= 14;
 
-                    return (
-                      <tr
-                        key={`${item.orderId}_${idx}`}
-                        className={`hover:bg-slate-50/80 transition ${
-                          isOverdueSevere ? 'bg-rose-50/20' : ''
-                        }`}
-                      >
-                        {/* 受注ID */}
-                        <td className="py-3.5 px-4 font-mono font-bold text-slate-900 whitespace-nowrap">
-                          <button
-                            onClick={() => onSelectOrder(item.order)}
-                            className="hover:text-blue-600 hover:underline flex items-center gap-1 cursor-pointer"
-                          >
-                            <span>{item.orderId}</span>
-                            <ExternalLink className="w-3 h-3 text-slate-400" />
-                          </button>
-                          <span className="text-[10px] text-slate-400 font-normal block">
-                            受注日: {item.orderDate || '未記録'}
-                          </span>
-                        </td>
-
-                        {/* 取引先クリニック */}
-                        <td className="py-3.5 px-4">
-                          <button
-                            onClick={() => onOpenClinicStatus?.(item.customerName)}
-                            className="font-bold text-slate-900 hover:text-indigo-600 hover:underline text-left cursor-pointer flex items-center gap-1 group"
-                            title="この取引先の商品ステータス一覧を開く"
-                          >
-                            <span>{item.customerName}</span>
-                            <span className="text-[10px] text-indigo-600 opacity-0 group-hover:opacity-100 transition flex items-center gap-0.5">
-                              <Package className="w-3 h-3" />
-                            </span>
-                          </button>
-                          <span className="text-[10px] text-slate-500 font-normal">
-                            合計 {item.totalOverdueQty} 点が未納品
-                          </span>
-                        </td>
-
-                        {/* 担当営業 */}
-                        <td className="py-3.5 px-4 whitespace-nowrap">
-                          <span className="px-2 py-0.5 rounded-md font-medium text-slate-700 bg-slate-100 border border-slate-200 text-[11px]">
-                            {item.salesRep}
-                          </span>
-                        </td>
-
-                        {/* 最長予定日 / 超過日数 */}
-                        <td className="py-3.5 px-4 whitespace-nowrap">
-                          <div className="space-y-1">
-                            <span className="text-slate-500 font-mono text-[11px] block">
-                              予定: {item.earliestDueDate}
-                            </span>
-                            {getSeverityBadge(item.maxDaysOver)}
-                          </div>
-                        </td>
-
-                        {/* 原因 / ボトルネック */}
-                        <td className="py-3.5 px-4 whitespace-nowrap">
-                          {item.cause === '未発注' ? (
-                            <span className="px-2 py-0.5 rounded-md text-[11px] font-bold bg-rose-100 text-rose-700 border border-rose-200 flex items-center gap-1 w-fit">
-                              <AlertCircle className="w-3 h-3 text-rose-600" />
-                              <span>未発注 (発注漏れ)</span>
-                            </span>
-                          ) : (
-                            <span className="px-2 py-0.5 rounded-md text-[11px] font-bold bg-blue-50 text-blue-700 border border-blue-200 flex items-center gap-1 w-fit">
-                              <Clock className="w-3 h-3 text-blue-600" />
-                              <span>発注済・入荷待ち</span>
-                            </span>
-                          )}
-                        </td>
-
-                        {/* 未納品明細品目 */}
-                        <td className="py-3.5 px-4 max-w-xs">
-                          <div className="space-y-1">
-                            {item.overdueLines.slice(0, 2).map((l, idx) => (
-                              <div key={idx} className="text-[11px] leading-tight text-slate-800 truncate">
-                                <span className="font-semibold">{l.productName}</span>
-                                <span className="text-slate-500 font-mono ml-1.5">
-                                  × {l.remainingQty || l.quantity}点
-                                </span>
-                              </div>
-                            ))}
-                            {item.overdueLines.length > 2 && (
-                              <span className="text-[10px] text-slate-400 font-medium block">
-                                他 {item.overdueLines.length - 2} 品目...
-                              </span>
-                            )}
-                          </div>
-                        </td>
-
-                        {/* 対応ステータス */}
-                        <td className="py-3.5 px-4 whitespace-nowrap">
-                          <div className="space-y-1.5">
-                            <select
-                              value={item.followup.status}
-                              onChange={(e) =>
-                                updateFollowup(item.orderId, e.target.value as OverdueFollowupStatus)
-                              }
-                              className={`px-2 py-1 rounded-lg border text-[11px] font-bold focus:outline-none cursor-pointer ${getStatusColor(
-                                item.followup.status
-                              )}`}
-                            >
-                              <option value="未対応">未対応</option>
-                              <option value="仕入先督促中">仕入先督促中</option>
-                              <option value="顧客連絡済">顧客連絡済</option>
-                              <option value="代替品提案中">代替品提案中</option>
-                              <option value="今週入荷予定">今週入荷予定</option>
-                              <option value="対応完了">対応完了</option>
-                            </select>
-
-                            {item.followup.note && (
-                              <div
-                                onClick={() => handleOpenNoteModal(item)}
-                                className="text-[10px] text-slate-600 bg-slate-50 border border-slate-200 p-1 rounded max-w-[140px] truncate cursor-pointer hover:bg-slate-100"
-                                title={item.followup.note}
-                              >
-                                💬 {item.followup.note}
-                              </div>
-                            )}
-                          </div>
-                        </td>
-
-                        {/* アクションボタン */}
-                        <td className="py-3.5 px-4 text-right whitespace-nowrap">
-                          <div className="flex items-center justify-end gap-1.5">
-                            {/* 仕入先督促文生成 */}
-                            <button
-                              onClick={() => handleOpenVendorTemplate(item)}
-                              title="仕入先への督促文を生成"
-                              className="p-1.5 text-slate-600 hover:text-indigo-600 hover:bg-indigo-50 border border-slate-200 rounded-lg transition cursor-pointer"
-                            >
-                              <Send className="w-3.5 h-3.5" />
-                            </button>
-
-                            {/* メモ編集 */}
-                            <button
-                              onClick={() => handleOpenNoteModal(item)}
-                              title="対応メモ・履歴を記録"
-                              className="p-1.5 text-slate-600 hover:text-blue-600 hover:bg-blue-50 border border-slate-200 rounded-lg transition cursor-pointer"
-                            >
-                              <MessageSquare className="w-3.5 h-3.5" />
-                            </button>
-
-                            {/* 伝票詳細を開く */}
+                      return (
+                        <tr
+                          key={`${item.orderId}_${idx}`}
+                          className={`hover:bg-slate-50/80 transition ${
+                            isOverdueSevere ? 'bg-rose-50/20' : ''
+                          }`}
+                        >
+                          {/* 受注ID */}
+                          <td className="py-3.5 px-4 font-mono font-bold text-slate-900 whitespace-nowrap">
                             <button
                               onClick={() => onSelectOrder(item.order)}
-                              className="px-2 py-1 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-[11px] font-semibold transition cursor-pointer"
+                              className="hover:text-blue-600 hover:underline flex items-center gap-1 cursor-pointer"
                             >
-                              詳細
+                              <span>{item.orderId}</span>
+                              <ExternalLink className="w-3 h-3 text-slate-400" />
                             </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
+                            <span className="text-[10px] text-slate-400 font-normal block">
+                              受注日: {item.orderDate || '未記録'}
+                            </span>
+                          </td>
+
+                          {/* 取引先クリニック */}
+                          <td className="py-3.5 px-4">
+                            <button
+                              onClick={() => onOpenClinicStatus?.(item.customerName)}
+                              className="font-bold text-slate-900 hover:text-indigo-600 hover:underline text-left cursor-pointer flex items-center gap-1 group"
+                              title="この取引先の商品ステータス一覧を開く"
+                            >
+                              <span>{item.customerName}</span>
+                              <span className="text-[10px] text-indigo-600 opacity-0 group-hover:opacity-100 transition flex items-center gap-0.5">
+                                <Package className="w-3 h-3" />
+                              </span>
+                            </button>
+                            <span className="text-[10px] text-slate-500 font-normal">
+                              合計 {item.totalOverdueQty} 点が未納品
+                            </span>
+                          </td>
+
+                          {/* 担当営業 */}
+                          <td className="py-3.5 px-4 whitespace-nowrap">
+                            <span className="px-2 py-0.5 rounded-md font-medium text-slate-700 bg-slate-100 border border-slate-200 text-[11px]">
+                              {item.salesRep}
+                            </span>
+                          </td>
+
+                          {/* 最長予定日 / 超過日数 */}
+                          <td className="py-3.5 px-4 whitespace-nowrap">
+                            <div className="space-y-1">
+                              <span className="text-slate-500 font-mono text-[11px] block">
+                                予定: {item.earliestDueDate}
+                              </span>
+                              {getSeverityBadge(item.maxDaysOver)}
+                            </div>
+                          </td>
+
+                          {/* 原因 / ボトルネック */}
+                          <td className="py-3.5 px-4 whitespace-nowrap">
+                            {item.cause === '未発注' ? (
+                              <span className="px-2 py-0.5 rounded-md text-[11px] font-bold bg-rose-100 text-rose-700 border border-rose-200 flex items-center gap-1 w-fit">
+                                <AlertCircle className="w-3 h-3 text-rose-600" />
+                                <span>未発注 (発注漏れ)</span>
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 rounded-md text-[11px] font-bold bg-blue-50 text-blue-700 border border-blue-200 flex items-center gap-1 w-fit">
+                                <Clock className="w-3 h-3 text-blue-600" />
+                                <span>発注済・入荷待ち</span>
+                              </span>
+                            )}
+                          </td>
+
+                          {/* 未納品明細品目 */}
+                          <td className="py-3.5 px-4 max-w-xs">
+                            <div className="space-y-1">
+                              {item.overdueLines.slice(0, 2).map((l, idx) => (
+                                <div key={idx} className="text-[11px] leading-tight text-slate-800 truncate">
+                                  <span className="font-semibold">{l.productName}</span>
+                                  <span className="text-slate-500 font-mono ml-1.5">
+                                    × {l.remainingQty || l.quantity}点
+                                  </span>
+                                </div>
+                              ))}
+                              {item.overdueLines.length > 2 && (
+                                <span className="text-[10px] text-slate-400 font-medium block">
+                                  他 {item.overdueLines.length - 2} 品目...
+                                </span>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* 対応ステータス */}
+                          <td className="py-3.5 px-4 whitespace-nowrap">
+                            <div className="space-y-1.5">
+                              <select
+                                value={item.followup.status}
+                                onChange={(e) =>
+                                  updateFollowup(item.orderId, e.target.value as OverdueFollowupStatus)
+                                }
+                                className={`px-2 py-1 rounded-lg border text-[11px] font-bold focus:outline-none cursor-pointer ${getStatusColor(
+                                  item.followup.status
+                                )}`}
+                              >
+                                <option value="未対応">未対応</option>
+                                <option value="仕入先督促中">仕入先督促中</option>
+                                <option value="顧客連絡済">顧客連絡済</option>
+                                <option value="代替品提案中">代替品提案中</option>
+                                <option value="今週入荷予定">今週入荷予定</option>
+                                <option value="対応完了">対応完了</option>
+                              </select>
+
+                              {item.followup.note && (
+                                <div
+                                  onClick={() => handleOpenNoteModal(item)}
+                                  className="text-[10px] text-slate-600 bg-slate-50 border border-slate-200 p-1 rounded max-w-[140px] truncate cursor-pointer hover:bg-slate-100"
+                                  title={item.followup.note}
+                                >
+                                  💬 {item.followup.note}
+                                </div>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* アクションボタン */}
+                          <td className="py-3.5 px-4 text-right whitespace-nowrap">
+                            <div className="flex items-center justify-end gap-1.5">
+                              {/* 仕入先督促文生成 */}
+                              <button
+                                onClick={() => handleOpenVendorTemplate(item)}
+                                title="仕入先への督促文を生成"
+                                className="p-1.5 text-slate-600 hover:text-indigo-600 hover:bg-indigo-50 border border-slate-200 rounded-lg transition cursor-pointer"
+                              >
+                                <Send className="w-3.5 h-3.5" />
+                              </button>
+
+                              {/* メモ編集 */}
+                              <button
+                                onClick={() => handleOpenNoteModal(item)}
+                                title="対応メモ・履歴を記録"
+                                className="p-1.5 text-slate-600 hover:text-blue-600 hover:bg-blue-50 border border-slate-200 rounded-lg transition cursor-pointer"
+                              >
+                                <MessageSquare className="w-3.5 h-3.5" />
+                              </button>
+
+                              {/* 伝票詳細を開く */}
+                              <button
+                                onClick={() => onSelectOrder(item.order)}
+                                className="px-2 py-1 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-[11px] font-semibold transition cursor-pointer"
+                              >
+                                詳細
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
                 </tbody>
               </table>
             </div>
@@ -983,11 +1105,31 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
           </div>
 
           {filteredOverdueClinics.length === 0 ? (
-            <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center space-y-3 shadow-xs">
-              <CheckCircle2 className="w-12 h-12 text-emerald-500 mx-auto" />
-              <p className="text-sm font-bold text-slate-800">
-                遅延の発生しているクリニックはありません
-              </p>
+            <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center shadow-xs">
+              {error ? (
+                <div className="flex flex-col items-center gap-3">
+                  <AlertCircle className="w-10 h-10 text-rose-500" />
+                  <p className="text-sm font-bold text-rose-900">データを取得できませんでした</p>
+                  <p className="text-xs text-rose-600">{error}</p>
+                  {onRetry && (
+                    <button
+                      type="button"
+                      onClick={onRetry}
+                      className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition shadow-xs cursor-pointer inline-flex items-center gap-1.5"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      <span>再試行する</span>
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div className="inline-flex items-center gap-2 px-5 py-3 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 font-bold text-xs shadow-xs">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                  <span>
+                    該当する取引先はありません（最終取得 {lastSuccessTime ? new Date(lastSuccessTime).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }) : new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}）
+                  </span>
+                </div>
+              )}
             </div>
           ) : (
             filteredOverdueClinics.map((clinic, cIdx) => {

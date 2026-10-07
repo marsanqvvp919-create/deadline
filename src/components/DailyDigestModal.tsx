@@ -8,6 +8,7 @@ interface DailyDigestModalProps {
   orders: Order[];
   alerts: AlertItem[];
   overdueCount: number;
+  overdueLinesCount?: number;
   paidUnorderedCount: number;
   onNavigate: (tab: ViewTab) => void;
 }
@@ -18,6 +19,7 @@ export const DailyDigestModal: React.FC<DailyDigestModalProps> = ({
   orders,
   alerts,
   overdueCount,
+  overdueLinesCount,
   paidUnorderedCount,
   onNavigate,
 }) => {
@@ -61,7 +63,12 @@ export const DailyDigestModal: React.FC<DailyDigestModalProps> = ({
                   <span className="text-xs font-bold">納期超過案件</span>
                   <AlertTriangle className="w-4 h-4" />
                 </div>
-                <div className="text-2xl font-black font-mono text-rose-900">{overdueCount} <span className="text-xs font-normal">件</span></div>
+                <div className="text-xl font-black font-mono text-rose-900">
+                  {overdueCount} <span className="text-xs font-normal">件</span>
+                  {overdueLinesCount !== undefined && (
+                    <span className="text-xs font-bold text-rose-700 ml-1">（{overdueLinesCount}明細）</span>
+                  )}
+                </div>
                 <div className="text-[11px] text-rose-600 mt-1 flex items-center gap-1 group-hover:underline">
                   <span>詳細を確認する</span>
                   <ArrowRight className="w-3 h-3" />

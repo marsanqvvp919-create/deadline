@@ -187,13 +187,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       ? Math.round((onTimeShippedCount / completedThisMonth.length) * 100)
       : 100;
 
-  // 2. 営業別の集計
+  // 2. 担当営業別の集計
   const salesRepMap = new Map<
     string,
     {
       rep: string;
       incomplete: number;
-      delayed: number;
+      delayedOrders: Set<string>;
+      delayedLines: number;
       leakage: number;
       completedThisMonth: number;
       onTimeThisMonth: number;
@@ -207,7 +208,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       salesRepMap.set(rep, {
         rep,
         incomplete: 0,
-        delayed: 0,
+        delayedOrders: new Set<string>(),
+        delayedLines: 0,
         leakage: 0,
         completedThisMonth: 0,
         onTimeThisMonth: 0,
@@ -215,14 +217,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     }
   });
 
-  // 担当別の納期超過明細数をカウント（仕入先別およびトップカードの数字と完全に一致）
+  // 担当別の納期超過（isLineDelayed統一: ○件○明細）
   incompleteLines.forEach((l) => {
     const rep = l.salesRep || '未設定';
     const entry = salesRepMap.get(rep);
     if (!entry) return;
     const parent = orders.find((o) => o.orderId === l.orderId);
     if (isLineDelayed(l, parent)) {
-      entry.delayed++;
+      entry.delayedLines++;
+      entry.delayedOrders.add(l.orderId);
     }
   });
 
@@ -251,7 +254,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   });
 
   const repSummaryList = Array.from(salesRepMap.values()).sort(
-    (a, b) => b.delayed - a.delayed || b.incomplete - a.incomplete
+    (a, b) => b.delayedLines - a.delayedLines || b.incomplete - a.incomplete
   );
 
   // 3. 仕入先別の集計
@@ -260,7 +263,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     {
       supplier: string;
       incomplete: number;
-      delayed: number;
+      delayedOrders: Set<string>;
+      delayedLines: number;
       totalDelayDays: number;
     }
   >();
@@ -268,21 +272,28 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   incompleteLines.forEach((l) => {
     const sup = l.supplierName || '未指定';
     if (!supplierMap.has(sup)) {
-      supplierMap.set(sup, { supplier: sup, incomplete: 0, delayed: 0, totalDelayDays: 0 });
+      supplierMap.set(sup, {
+        supplier: sup,
+        incomplete: 0,
+        delayedOrders: new Set<string>(),
+        delayedLines: 0,
+        totalDelayDays: 0,
+      });
     }
     const entry = supplierMap.get(sup)!;
     entry.incomplete++;
 
     const parent = orders.find((o) => o.orderId === l.orderId);
     if (isLineDelayed(l, parent)) {
-      entry.delayed++;
+      entry.delayedLines++;
+      entry.delayedOrders.add(l.orderId);
       const days = getLineDelayDays(l);
       entry.totalDelayDays += Math.max(0, days);
     }
   });
 
   const supplierSummaryList = Array.from(supplierMap.values()).sort(
-    (a, b) => b.delayed - a.delayed || b.incomplete - a.incomplete
+    (a, b) => b.delayedLines - a.delayedLines || b.incomplete - a.incomplete
   );
 
   // 4. 週次遅延推移グラフ用のSVG計算（過去12週）
@@ -438,11 +449,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
             <div className="mt-1 flex items-baseline gap-1.5">
               <span className="text-2xl font-extrabold font-mono text-rose-600">
-                {delayedLines.length}
+                {delayedOrders.length}
               </span>
-              <span className="text-xs text-rose-600 font-bold">品目</span>
-              <span className="text-[11px] text-slate-500 font-medium ml-1">
-                ({delayedOrders.length}件)
+              <span className="text-xs text-rose-600 font-bold">件</span>
+              <span className="text-sm font-bold text-rose-700 font-mono ml-1">
+                （{delayedLines.length}明細）
               </span>
             </div>
             <span className="text-[11px] text-slate-400 mt-1 block leading-tight">
@@ -770,10 +781,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       <td className="py-3 px-3 text-right font-mono">
                         <span
                           className={`font-bold ${
-                            item.delayed > 0 ? 'text-rose-600' : 'text-slate-400'
+                            item.delayedLines > 0 ? 'text-rose-600' : 'text-slate-400'
                           }`}
                         >
-                          {item.delayed} 件
+                          {item.delayedOrders.size > 0
+                            ? `${item.delayedOrders.size}件（${item.delayedLines}明細）`
+                            : '—'}
                         </span>
                       </td>
                       <td className="py-3 px-3 text-right font-mono">
@@ -814,6 +827,20 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   );
                 })}
               </tbody>
+              <tfoot className="bg-slate-100 font-bold text-slate-800 border-t-2 border-slate-300">
+                <tr>
+                  <td className="py-2.5 px-4 font-bold">合計</td>
+                  <td className="py-2.5 px-3 text-right font-mono">{incompleteLines.length} 件</td>
+                  <td className="py-2.5 px-3 text-right font-mono text-rose-700">
+                    {delayedOrders.length}件（{delayedLines.length}明細）
+                  </td>
+                  <td className="py-2.5 px-3 text-right font-mono text-orange-700">{alerts.filter(a => a.type === '漏れ').length} 件</td>
+                  <td className="py-2.5 px-4 text-right font-mono">
+                    {onTimeRate !== null ? `${onTimeRate}%` : 'データなし'}
+                  </td>
+                  <td className="py-2.5 px-3"></td>
+                </tr>
+              </tfoot>
             </table>
           </div>
         </div>
@@ -961,7 +988,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <tbody className="divide-y divide-slate-100">
               {supplierSummaryList.map((item) => {
                 const avgDays =
-                  item.delayed > 0 ? (item.totalDelayDays / item.delayed).toFixed(1) : '0';
+                  item.delayedLines > 0 ? (item.totalDelayDays / item.delayedLines).toFixed(1) : '0';
                 return (
                   <tr key={item.supplier} className="hover:bg-slate-50/70 transition-colors">
                     <td className="py-3 px-4 font-bold text-slate-800">
@@ -973,19 +1000,21 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     <td className="py-3 px-3 text-right font-mono">
                       <span
                         className={`font-bold ${
-                          item.delayed > 0 ? 'text-rose-600' : 'text-slate-400'
+                          item.delayedLines > 0 ? 'text-rose-600' : 'text-slate-400'
                         }`}
                       >
-                        {item.delayed} 件
+                        {item.delayedOrders.size > 0
+                          ? `${item.delayedOrders.size}件（${item.delayedLines}明細）`
+                          : '—'}
                       </span>
                     </td>
                     <td className="py-3 px-4 text-right font-mono font-medium text-slate-700">
-                      {item.delayed > 0 ? `${avgDays} 日` : '-'}
+                      {item.delayedLines > 0 ? `${avgDays} 日` : '-'}
                     </td>
                     <td className="py-3 px-4 text-[11px] text-slate-500">
-                      {item.delayed >= 3 ? (
+                      {item.delayedLines >= 3 ? (
                         <span className="text-rose-600 font-semibold">遅延頻発・要注意</span>
-                      ) : item.delayed > 0 ? (
+                      ) : item.delayedLines > 0 ? (
                         <span className="text-amber-600">一部納品遅れあり</span>
                       ) : (
                         <span className="text-emerald-700">順調・納期遵守中</span>
@@ -995,6 +1024,21 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 );
               })}
             </tbody>
+            <tfoot className="bg-slate-100 font-bold text-slate-800 border-t-2 border-slate-300">
+              <tr>
+                <td className="py-2.5 px-4 font-bold">合計</td>
+                <td className="py-2.5 px-3 text-right font-mono">{incompleteLines.length} 件</td>
+                <td className="py-2.5 px-3 text-right font-mono text-rose-700">
+                  {delayedOrders.length}件（{delayedLines.length}明細）
+                </td>
+                <td className="py-2.5 px-4 text-right font-mono">
+                  {delayedLines.length > 0
+                    ? `${(supplierSummaryList.reduce((acc, s) => acc + s.totalDelayDays, 0) / delayedLines.length).toFixed(1)} 日`
+                    : '-'}
+                </td>
+                <td className="py-2.5 px-4 text-[11px] text-slate-500"></td>
+              </tr>
+            </tfoot>
           </table>
         </div>
       </div>

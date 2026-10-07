@@ -1000,70 +1000,399 @@ async function fetchRakurakuCsv(
   return { csv: combinedCsv };
 }
 
-// 楽楽販売 API 直接連携 プロキシエンドポイント
+// ----------------------------------------------------------------------
+// サーバー側 楽楽販売 集約キャッシュストア & レート制限対策
+// ----------------------------------------------------------------------
+interface RakurakuServerStore {
+  orders: any | null;
+  shipments: any[] | null;
+  suppliers: any[] | null;
+  products: any[] | null;
+  clinics: any[] | null;
+  lastSuccessTime: string | null;
+  lastAttemptTime: string | null;
+  lastMastersTime: number | null;
+  lastManualSyncTime: number;
+  isFetching: boolean;
+  rateLimitBackoffMs: number;
+  rateLimitUntil: number | null;
+  refreshIntervalMinutes: number;
+  lastError: {
+    type: 'rate_limit' | 'ip_blocked' | 'auth_error' | 'network_error';
+    message: string;
+    errorCode?: string | number;
+    timestamp: string;
+  } | null;
+}
+
+const serverRakurakuStore: RakurakuServerStore = {
+  orders: null,
+  shipments: null,
+  suppliers: null,
+  products: null,
+  clinics: null,
+  lastSuccessTime: null,
+  lastAttemptTime: null,
+  lastMastersTime: null,
+  lastManualSyncTime: 0,
+  isFetching: false,
+  rateLimitBackoffMs: 5 * 60 * 1000, // 初回 5分
+  rateLimitUntil: null,
+  refreshIntervalMinutes: 15, // 15分おき自動同期
+  lastError: null,
+};
+
+function parseRakurakuError(err: any): { type: 'rate_limit' | 'ip_blocked' | 'auth_error' | 'network_error'; message: string; errorCode: string } {
+  const code = String(err?.json?.errors?.code || err?.errorCode || err?.status || '');
+  const rawMsg = String(err?.json?.errors?.msg || err?.message || err?.text || '');
+
+  if (rawMsg.includes('制限を超えました') || rawMsg.includes('上限') || rawMsg.includes('回数') || err?.status === 429) {
+    return {
+      type: 'rate_limit',
+      message: 'APIの実行回数が制限を超えました。サーバー保存データを表示中',
+      errorCode: code || 'LIMIT_EXCEEDED',
+    };
+  }
+  if (code === '7' || rawMsg.includes('アクセスが拒否') || rawMsg.includes('IP') || err?.status === 403) {
+    return {
+      type: 'ip_blocked',
+      message: 'IPアクセス制限により通信が拒否されました（エラーコード7: アクセスが拒否されました）',
+      errorCode: '7',
+    };
+  }
+  if (code === '1' || code === '2' || rawMsg.includes('認証') || rawMsg.includes('トークン') || rawMsg.includes('token') || err?.status === 401) {
+    return {
+      type: 'auth_error',
+      message: 'API認証エラーが発生しました。トークンや設定を確認してください',
+      errorCode: code || 'AUTH_ERR',
+    };
+  }
+  return {
+    type: 'network_error',
+    message: rawMsg || '楽楽販売APIとの通信エラーが発生しました',
+    errorCode: code || 'COMM_ERR',
+  };
+}
+
+// サーバー側 一括データ取得同期関数
+async function syncAllRakurakuData(isManual = false): Promise<boolean> {
+  if (serverRakurakuStore.isFetching) return false;
+
+  // バックオフ中ならスキップ
+  if (!isManual && serverRakurakuStore.rateLimitUntil && Date.now() < serverRakurakuStore.rateLimitUntil) {
+    const retryTime = new Date(serverRakurakuStore.rateLimitUntil).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+    console.log(`[Rakuraku Sync] Skipped due to rate-limit backoff until ${retryTime}`);
+    return false;
+  }
+
+  serverRakurakuStore.isFetching = true;
+  serverRakurakuStore.lastAttemptTime = new Date().toISOString();
+
+  const token = process.env.VITE_DATA_KEY || 'lzWjxU5iMLMUSN57asqR6ov2w9eXrJ9Roeqq8KSY9zk93lrYHa54d4zaUr0zKO0a';
+  const baseUrl = (process.env.VITE_RAKURAKU_BASE_URL || 'https://hnsibot.rakurakuhanbai.jp/ykbxg2a/').replace(/\/+$/, '');
+
+  try {
+    console.log(`[Rakuraku Sync Start] isManual=${isManual}, baseUrl=${baseUrl}`);
+
+    // 1. 出荷管理 (101270)
+    try {
+      const resShip = await fetchRakurakuCsv(baseUrl, token, '101270', '103958', '101059', 10);
+      const parsedShipments = transformCsvToShipments(resShip.csv);
+      if (parsedShipments && parsedShipments.length > 0) {
+        serverRakurakuStore.shipments = parsedShipments;
+        console.log(`[Rakuraku Sync] Shipments loaded: ${parsedShipments.length} rows`);
+      }
+    } catch (e: any) {
+      console.warn('[Rakuraku Sync] Shipments fetch warning:', e?.message || e);
+      throw e;
+    }
+
+    // データベースアクセス間隔を空ける (2秒ウェイト)
+    await new Promise((r) => setTimeout(r, 2000));
+
+    // 2. ご注文管理 (101248)
+    try {
+      const resOrders = await fetchRakurakuCsv(baseUrl, token, '101248', undefined, undefined, 10);
+      const parsedOrders = transformCsvToDeliveryData(resOrders.csv);
+      if (parsedOrders) {
+        serverRakurakuStore.orders = parsedOrders;
+        console.log(`[Rakuraku Sync] Orders loaded: ${parsedOrders.orders?.length || 0} orders`);
+      }
+    } catch (e: any) {
+      console.warn('[Rakuraku Sync] Orders fetch warning:', e?.message || e);
+      throw e;
+    }
+
+    // マスタ系（商品・クリニック・仕入先）は1日1回（24時間）または手動時のみ取得
+    const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+    const needMasters =
+      isManual ||
+      !serverRakurakuStore.lastMastersTime ||
+      Date.now() - serverRakurakuStore.lastMastersTime > ONE_DAY_MS;
+
+    if (needMasters) {
+      console.log('[Rakuraku Sync] Fetching masters (products, clinics, suppliers)...');
+      // 仕入先マスタ (101253)
+      await new Promise((r) => setTimeout(r, 2000));
+      try {
+        const resSup = await fetchRakurakuCsv(baseUrl, token, '101253', '103962', '101061', 5);
+        const parsedSuppliers = transformCsvToSuppliers(resSup.csv);
+        if (parsedSuppliers && parsedSuppliers.length > 0) {
+          serverRakurakuStore.suppliers = parsedSuppliers;
+        }
+      } catch (e) {
+        console.warn('[Rakuraku Sync] Suppliers master warning:', e);
+      }
+
+      // 商品マスタ (101252)
+      await new Promise((r) => setTimeout(r, 2000));
+      try {
+        const resProd = await fetchRakurakuCsv(baseUrl, token, '101252', 5);
+        const parsedProducts = transformCsvToProducts(resProd.csv);
+        if (parsedProducts && parsedProducts.length > 0) {
+          serverRakurakuStore.products = parsedProducts;
+        }
+      } catch (e) {
+        console.warn('[Rakuraku Sync] Products master warning:', e);
+      }
+
+      // 顧客マスタ (101250)
+      await new Promise((r) => setTimeout(r, 2000));
+      try {
+        const resClinics = await fetchRakurakuCsv(baseUrl, token, '101250', 5);
+        const parsedClinics = transformCsvToClinics(resClinics.csv);
+        if (parsedClinics && parsedClinics.length > 0) {
+          serverRakurakuStore.clinics = parsedClinics;
+        }
+      } catch (e) {
+        console.warn('[Rakuraku Sync] Clinics master warning:', e);
+      }
+
+      serverRakurakuStore.lastMastersTime = Date.now();
+    }
+
+    // 成功処理
+    serverRakurakuStore.lastSuccessTime = new Date().toISOString();
+    serverRakurakuStore.lastError = null;
+    serverRakurakuStore.rateLimitUntil = null;
+    serverRakurakuStore.rateLimitBackoffMs = 5 * 60 * 1000; // バックオフを初期値にリセット
+    console.log(`[Rakuraku Sync Complete] Success at ${serverRakurakuStore.lastSuccessTime}`);
+    return true;
+  } catch (err: any) {
+    const errorInfo = parseRakurakuError(err);
+    if (errorInfo.type === 'rate_limit') {
+      serverRakurakuStore.rateLimitUntil = Date.now() + serverRakurakuStore.rateLimitBackoffMs;
+      const retryTime = new Date(serverRakurakuStore.rateLimitUntil).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+      errorInfo.message = `APIの実行回数が制限を超えました。サーバー保存データを表示中（次回再試行予定: ${retryTime}）`;
+      console.warn(`[Rakuraku Rate Limit] Backoff ${serverRakurakuStore.rateLimitBackoffMs / 60000}m until ${retryTime}`);
+      // 指数バックオフ（最大60分）
+      serverRakurakuStore.rateLimitBackoffMs = Math.min(serverRakurakuStore.rateLimitBackoffMs * 2, 60 * 60 * 1000);
+    }
+    serverRakurakuStore.lastError = {
+      type: errorInfo.type,
+      message: errorInfo.message,
+      errorCode: errorInfo.errorCode,
+      timestamp: new Date().toISOString(),
+    };
+    console.error(`[Rakuraku Sync Failed] ${errorInfo.type}: ${errorInfo.message}`);
+    return false;
+  } finally {
+    serverRakurakuStore.isFetching = false;
+  }
+}
+
+// サーバー起動時にバックグラウンドで初回データ取得を実行（数秒遅延して安定起動後に実行）
+setTimeout(() => {
+  syncAllRakurakuData(false).catch((err) => console.error('[Initial Sync Err]', err));
+}, 3000);
+
+// 自動更新ループ（15分おき、設定可能）
+setInterval(() => {
+  const intervalMs = serverRakurakuStore.refreshIntervalMinutes * 60 * 1000;
+  const lastAttempt = serverRakurakuStore.lastAttemptTime ? new Date(serverRakurakuStore.lastAttemptTime).getTime() : 0;
+  if (Date.now() - lastAttempt >= intervalMs) {
+    syncAllRakurakuData(false).catch((err) => console.error('[Interval Sync Err]', err));
+  }
+}, 60 * 1000); // 1分ごとにチェック
+
+// 楽楽販売 全統合データ取得API（クライアントのブラウザからはここを呼ぶことでRakuraku API回数を消費しない）
+app.get('/api/rakuraku/all-data', async (_req, res) => {
+  const currentIp = await getOutboundIp();
+
+  // まだ1回も取得しておらずフェッチ中でなければ、同期を試行
+  if (!serverRakurakuStore.orders && !serverRakurakuStore.isFetching && !serverRakurakuStore.rateLimitUntil) {
+    syncAllRakurakuData(false).catch(() => {});
+  }
+
+  res.json({
+    success: true,
+    orders: serverRakurakuStore.orders,
+    shipments: serverRakurakuStore.shipments,
+    suppliers: serverRakurakuStore.suppliers,
+    products: serverRakurakuStore.products,
+    clinics: serverRakurakuStore.clinics,
+    lastSuccessTime: serverRakurakuStore.lastSuccessTime,
+    lastAttemptTime: serverRakurakuStore.lastAttemptTime,
+    isFetching: serverRakurakuStore.isFetching,
+    rateLimitUntil: serverRakurakuStore.rateLimitUntil,
+    rateLimitRemainingSec: serverRakurakuStore.rateLimitUntil ? Math.max(0, Math.ceil((serverRakurakuStore.rateLimitUntil - Date.now()) / 1000)) : 0,
+    refreshIntervalMinutes: serverRakurakuStore.refreshIntervalMinutes,
+    lastError: serverRakurakuStore.lastError,
+    serverIp: currentIp,
+  });
+});
+
+// 手動「再読み込み」API（前回の取得から1分以内は押せない制限）
+app.post('/api/rakuraku/sync-now', async (req, res) => {
+  const currentIp = await getOutboundIp();
+  const now = Date.now();
+  const COOLDOWN_MS = 60 * 1000; // 1分
+
+  if (now - serverRakurakuStore.lastManualSyncTime < COOLDOWN_MS) {
+    const remainingSec = Math.ceil((COOLDOWN_MS - (now - serverRakurakuStore.lastManualSyncTime)) / 1000);
+    return res.status(429).json({
+      success: false,
+      error: `前回の取得から1分以内のため再取得できません。しばらくお待ちください（残り${remainingSec}秒）。`,
+      cooldownRemainingSec: remainingSec,
+      lastSuccessTime: serverRakurakuStore.lastSuccessTime,
+      serverIp: currentIp,
+    });
+  }
+
+  // バックオフ中かチェック
+  if (serverRakurakuStore.rateLimitUntil && now < serverRakurakuStore.rateLimitUntil) {
+    const retryTime = new Date(serverRakurakuStore.rateLimitUntil).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+    return res.status(429).json({
+      success: false,
+      error: `APIの実行回数が制限を超えました。サーバー保存データを表示中（次回再試行予定: ${retryTime}）`,
+      rateLimitUntil: serverRakurakuStore.rateLimitUntil,
+      rateLimitRemainingSec: Math.ceil((serverRakurakuStore.rateLimitUntil - now) / 1000),
+      lastSuccessTime: serverRakurakuStore.lastSuccessTime,
+      serverIp: currentIp,
+    });
+  }
+
+  serverRakurakuStore.lastManualSyncTime = now;
+  const isMasterRequested = Boolean(req.body.includeMasters);
+  const syncSuccess = await syncAllRakurakuData(isMasterRequested);
+
+  return res.json({
+    success: syncSuccess,
+    orders: serverRakurakuStore.orders,
+    shipments: serverRakurakuStore.shipments,
+    suppliers: serverRakurakuStore.suppliers,
+    products: serverRakurakuStore.products,
+    clinics: serverRakurakuStore.clinics,
+    lastSuccessTime: serverRakurakuStore.lastSuccessTime,
+    lastError: serverRakurakuStore.lastError,
+    serverIp: currentIp,
+  });
+});
+
+// 自動更新間隔設定API
+app.post('/api/rakuraku/interval', (req, res) => {
+  const minutes = parseInt(req.body.minutes, 10);
+  if (!isNaN(minutes) && minutes >= 5 && minutes <= 180) {
+    serverRakurakuStore.refreshIntervalMinutes = minutes;
+    console.log(`[Rakuraku Sync] Refresh interval changed to ${minutes} minutes`);
+    return res.json({ success: true, refreshIntervalMinutes: minutes });
+  }
+  res.status(400).json({ success: false, error: '5分から180分の間で指定してください' });
+});
+
+// 楽楽販売 API 直接連携 プロキシエンドポイント（互換性保持：キャッシュがあれば即返却）
 app.post('/api/rakuraku/fetch', async (req, res) => {
   const currentIp = await getOutboundIp();
+  const dbSchemaId = (req.body.dbSchemaId || '101248').toString();
+
+  // キャッシュから即時返却（Rakuraku APIへの重複アクセスを完全回避）
+  if (dbSchemaId === '101270' && serverRakurakuStore.shipments && serverRakurakuStore.shipments.length > 0) {
+    return res.json({
+      success: true,
+      dataType: 'shipments',
+      schemaId: '101270',
+      data: serverRakurakuStore.shipments,
+      count: serverRakurakuStore.shipments.length,
+      serverIp: currentIp,
+      cached: true,
+    });
+  }
+  if (dbSchemaId === '101253' && serverRakurakuStore.suppliers && serverRakurakuStore.suppliers.length > 0) {
+    return res.json({
+      success: true,
+      dataType: 'suppliers',
+      schemaId: '101253',
+      data: serverRakurakuStore.suppliers,
+      count: serverRakurakuStore.suppliers.length,
+      serverIp: currentIp,
+      cached: true,
+    });
+  }
+  if (dbSchemaId === '101248' && serverRakurakuStore.orders) {
+    return res.json({
+      success: true,
+      dataType: 'orders',
+      schemaId: '101248',
+      data: serverRakurakuStore.orders,
+      count: serverRakurakuStore.orders.orders?.length || 0,
+      serverIp: currentIp,
+      cached: true,
+    });
+  }
+
+  // キャッシュがない場合のみ同期実行
   try {
     const token = req.body.token || process.env.VITE_DATA_KEY || 'lzWjxU5iMLMUSN57asqR6ov2w9eXrJ9Roeqq8KSY9zk93lrYHa54d4zaUr0zKO0a';
     const baseUrl = req.body.baseUrl || process.env.VITE_RAKURAKU_BASE_URL || 'https://hnsibot.rakurakuhanbai.jp/ykbxg2a/';
-    const dbSchemaId = req.body.dbSchemaId || '101248';
     const searchId = req.body.searchId || (dbSchemaId === '101270' ? '103958' : dbSchemaId === '101253' ? '103962' : undefined);
     const listId = req.body.listId || (dbSchemaId === '101270' ? '101059' : dbSchemaId === '101253' ? '101061' : undefined);
-
     const cleanBaseUrl = baseUrl.replace(/\/+$/, '');
-    console.log(`[Rakuraku Proxy] Outbound IP: ${currentIp}, Fetching from ${cleanBaseUrl} with dbSchemaId: ${dbSchemaId}, searchId: ${searchId}, listId: ${listId}`);
 
-    const pagesToFetch = 10;
-    const result = await fetchRakurakuCsv(cleanBaseUrl, token, dbSchemaId, searchId, listId, pagesToFetch);
-    const responseText = result.csv;
-    const responseJson = result.rawResponse;
-
-    // もしJSONレスポンスでCSVデータやレコードが返る場合
+    const result = await fetchRakurakuCsv(cleanBaseUrl, token, dbSchemaId, searchId, listId, 10);
     let parsedData = null;
     let dataType = 'orders';
 
-    const schemaStr = dbSchemaId.toString();
-    if (!responseJson && responseText.includes(',')) {
-      if (schemaStr === '101252') {
-        parsedData = transformCsvToProducts(responseText);
-        dataType = 'products';
-      } else if (schemaStr === '101250') {
-        parsedData = transformCsvToClinics(responseText);
-        dataType = 'clinics';
-      } else if (schemaStr === '101270') {
-        parsedData = transformCsvToShipments(responseText);
-        dataType = 'shipments';
-      } else if (schemaStr === '101253') {
-        parsedData = transformCsvToSuppliers(responseText);
-        dataType = 'suppliers';
-      } else {
-        parsedData = transformCsvToDeliveryData(responseText);
-        dataType = 'orders';
-      }
-    } else if (responseJson && responseJson.data) {
-      parsedData = responseJson.data;
+    if (dbSchemaId === '101252') {
+      parsedData = transformCsvToProducts(result.csv);
+      dataType = 'products';
+      serverRakurakuStore.products = parsedData;
+    } else if (dbSchemaId === '101250') {
+      parsedData = transformCsvToClinics(result.csv);
+      dataType = 'clinics';
+      serverRakurakuStore.clinics = parsedData;
+    } else if (dbSchemaId === '101270') {
+      parsedData = transformCsvToShipments(result.csv);
+      dataType = 'shipments';
+      serverRakurakuStore.shipments = parsedData;
+    } else if (dbSchemaId === '101253') {
+      parsedData = transformCsvToSuppliers(result.csv);
+      dataType = 'suppliers';
+      serverRakurakuStore.suppliers = parsedData;
+    } else {
+      parsedData = transformCsvToDeliveryData(result.csv);
+      dataType = 'orders';
+      serverRakurakuStore.orders = parsedData;
     }
+
+    serverRakurakuStore.lastSuccessTime = new Date().toISOString();
 
     return res.json({
       success: true,
       dataType,
-      schemaId: schemaStr,
+      schemaId: dbSchemaId,
       data: parsedData,
       count: Array.isArray(parsedData) ? parsedData.length : parsedData?.orders?.length || 0,
       serverIp: currentIp,
-      rawCsv: !responseJson ? responseText : undefined,
     });
   } catch (err: any) {
-    const errCode = err.json?.errors?.code || '7';
-    const errMsg = err.json?.errors?.msg || err.message || '内部サーバーエラー';
-    console.log(`[Rakuraku Proxy Notice] IP制限またはAPI応答: code=${errCode}, msg=${errMsg}`);
+    const errorInfo = parseRakurakuError(err);
     return res.status(200).json({
       success: false,
-      status: err.status || 403,
-      errorCode: errCode,
-      error: errMsg,
+      status: err.status || 400,
+      errorCode: errorInfo.errorCode,
+      error: errorInfo.message,
+      errorType: errorInfo.type,
       serverIp: currentIp,
-      details: err.json?.errors || err.text,
     });
   }
 });
@@ -1127,9 +1456,14 @@ app.post('/api/rakuraku/master/clinics', async (req, res) => {
 });
 
 // 現在のサーバー発信元IP確認API
+app.get('/api/server-ip', async (_req, res) => {
+  const ip = await getOutboundIp();
+  return res.json({ ip, serverIp: ip });
+});
+
 app.get('/api/rakuraku/ip', async (_req, res) => {
   const ip = await getOutboundIp();
-  return res.json({ ip });
+  return res.json({ ip, serverIp: ip });
 });
 
 // 楽楽販売 接続診断API

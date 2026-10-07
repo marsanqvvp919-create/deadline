@@ -14,12 +14,17 @@ import {
   getRakurakuUrl,
   formatValue,
 } from '../utils/customsUtils';
+import { TableEmptyState } from './TableEmptyState';
 
 interface KantoCustomsNgViewProps {
   shipments: ShipmentItem[];
   orders: Order[];
   clinics?: ClinicItem[];
   onSelectOrder?: (order: Order) => void;
+  isLoading?: boolean;
+  error?: string | null;
+  lastSuccessTime?: string | null;
+  onRetry?: () => void;
 }
 
 export const KantoCustomsNgView: React.FC<KantoCustomsNgViewProps> = ({
@@ -27,6 +32,10 @@ export const KantoCustomsNgView: React.FC<KantoCustomsNgViewProps> = ({
   orders,
   clinics = [],
   onSelectOrder,
+  isLoading = false,
+  error = null,
+  lastSuccessTime = null,
+  onRetry,
 }) => {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const rakurakuUrl = getRakurakuUrl();
@@ -265,12 +274,15 @@ export const KantoCustomsNgView: React.FC<KantoCustomsNgViewProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
-              {kantoNgShipments.length === 0 ? (
-                <tr>
-                  <td colSpan={14} className="py-12 text-center text-slate-400 font-bold">
-                    データなし
-                  </td>
-                </tr>
+              {kantoNgShipments.length === 0 || isLoading || error ? (
+                <TableEmptyState
+                  isLoading={isLoading}
+                  error={error}
+                  lastSuccessTime={lastSuccessTime}
+                  onRetry={onRetry}
+                  colSpan={14}
+                  emptyMessage="該当する通関NG案件はありません"
+                />
               ) : (
                 kantoNgShipments.map((item, idx) => {
                   const clinicName = resolveClinicName(item, orders, clinics);

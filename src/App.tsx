@@ -42,7 +42,7 @@ import { ClinicProductStatusDrawer } from './components/ClinicProductStatusDrawe
 import { getLocalClinics, getLocalShipments } from './api';
 import { getSalesRepsList } from './utils/salesRepMapping';
 import { isShippingOrFee } from './utils';
-import { isOrderDelayed } from './utils/delayCalculation';
+import { isOrderDelayed, getDelayCounts } from './utils/delayCalculation';
 import {
   LayoutDashboard,
   ShoppingCart,
@@ -113,11 +113,59 @@ export default function App() {
   const [isStale, setIsStale] = useState<boolean>(false);
   const [isFallback, setIsFallback] = useState<boolean>(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
-  const [isErrorDismissed, setIsErrorDismissed] = useState<boolean>(false);
+  const [lastErrorType, setLastErrorType] = useState<'rate_limit' | 'ip_blocked' | 'auth_error' | 'network_error' | null>(null);
   const [serverIp, setServerIp] = useState<string>('34.34.226.81');
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [isDailyDigestOpen, setIsDailyDigestOpen] = useState<boolean>(false);
+
+  // 最終取得成功時刻（要件3）
+  const [lastSuccessTime, setLastSuccessTime] = useState<string | null>(() => {
+    return localStorage.getItem('nouki_last_success_time') || null;
+  });
+
+  // エラー帯の非表示管理: 閉じたあとは5分たつか状態が変わったときだけ再表示（要件5）
+  const [dismissedErrorRecord, setDismissedErrorRecord] = useState<{ error: string; time: number } | null>(() => {
+    try {
+      const raw = sessionStorage.getItem('nouki_dismissed_error');
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  const handleDismissError = useCallback(() => {
+    if (fetchError) {
+      const rec = { error: fetchError, time: Date.now() };
+      setDismissedErrorRecord(rec);
+      try {
+        sessionStorage.setItem('nouki_dismissed_error', JSON.stringify(rec));
+      } catch {}
+    }
+  }, [fetchError]);
+
+  const isErrorVisible = useMemo(() => {
+    if (!fetchError) return false;
+    if (!dismissedErrorRecord) return true;
+    if (dismissedErrorRecord.error !== fetchError) return true; // エラー状態が変わった
+    const elapsed = Date.now() - dismissedErrorRecord.time;
+    if (elapsed >= 5 * 60 * 1000) return true; // 5分経過
+    return false;
+  }, [fetchError, dismissedErrorRecord]);
+
+  // 手動再読み込みクールダウン（前回の取得から1分以内は押せない制限: 要件2）
+  const [lastManualFetchTime, setLastManualFetchTime] = useState<number>(0);
+  const [cooldownRemainingSec, setCooldownRemainingSec] = useState<number>(0);
+
+  useEffect(() => {
+    if (cooldownRemainingSec <= 0) return;
+    const timer = setInterval(() => {
+      const rem = Math.max(0, 60 - Math.floor((Date.now() - lastManualFetchTime) / 1000));
+      setCooldownRemainingSec(rem);
+      if (rem <= 0) clearInterval(timer);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [cooldownRemainingSec, lastManualFetchTime]);
 
   useEffect(() => {
     const seen = sessionStorage.getItem('nouki_seen_digest_v2');
@@ -184,8 +232,13 @@ export default function App() {
   // 3. データ取得ハンドラ
   const loadData = useCallback(async (isManual = false) => {
     if (isManual) {
+      const elapsed = Math.floor((Date.now() - lastManualFetchTime) / 1000);
+      if (lastManualFetchTime > 0 && elapsed < 60) {
+        return; // 1分以内の再読み込みを防止（要件2）
+      }
+      setLastManualFetchTime(Date.now());
+      setCooldownRemainingSec(60);
       setIsRefreshing(true);
-      setIsErrorDismissed(false);
     }
     try {
       const res = await fetchData();
@@ -204,6 +257,15 @@ export default function App() {
       setIsStale(res.isStale);
       setIsFallback(res.isFallback);
       setFetchError(res.error);
+      setLastErrorType(res.lastErrorType || null);
+      if (res.lastSuccessTime) {
+        setLastSuccessTime(res.lastSuccessTime);
+        localStorage.setItem('nouki_last_success_time', res.lastSuccessTime);
+      } else if (!res.error) {
+        const nowIso = new Date().toISOString();
+        setLastSuccessTime(nowIso);
+        localStorage.setItem('nouki_last_success_time', nowIso);
+      }
       if (res.serverIp) {
         setServerIp(res.serverIp);
       }
@@ -214,7 +276,9 @@ export default function App() {
         setTimeout(() => setIsRefreshing(false), 300);
       }
     }
-  }, []);
+  }, [lastManualFetchTime]);
+
+  const isSampleMode = getConfiguredUrls().mode === 'sample';
 
   const handleSwitchToSample = useCallback(() => {
     const cur = getConfiguredUrls();
@@ -226,7 +290,19 @@ export default function App() {
       cur.rakurakuToken,
       cur.rakurakuSchemaId
     );
-    setIsErrorDismissed(false);
+    loadData(true);
+  }, [loadData]);
+
+  const handleSwitchToReal = useCallback(() => {
+    const cur = getConfiguredUrls();
+    saveConnectionConfig(
+      'rakuraku',
+      cur.dataUrl,
+      cur.dataKey,
+      cur.rakurakuBaseUrl,
+      cur.rakurakuToken,
+      cur.rakurakuSchemaId
+    );
     loadData(true);
   }, [loadData]);
 
@@ -242,11 +318,11 @@ export default function App() {
     loadData(false);
   }, [loadData]);
 
-  // 5分ごとの自動再取得（フェーズ2要件）
+  // 自動更新は15分おき（要件2）
   useEffect(() => {
     const interval = setInterval(() => {
       loadData(false);
-    }, 5 * 60 * 1000);
+    }, 15 * 60 * 1000);
     return () => clearInterval(interval);
   }, [loadData]);
 
@@ -318,11 +394,13 @@ export default function App() {
   const totalAlertsCount = filteredAlerts.length;
   const highSeverityCount = filteredAlerts.filter((a) => a.severity === '高').length;
 
-  // 最長納期超過 伝票数の計算（統一判定関数を使用し、トップカード・営業別・仕入先別の数字を完全一致させる）
-  const overdueOrdersCount = useMemo(() => {
-    if (!deliveryData) return 0;
-    return filteredOrders.filter((o) => isOrderDelayed(o)).length;
+  // 最長納期超過 伝票・明細数の計算（isLineDelayed統一: ○件○明細）
+  const overdueCounts = useMemo(() => {
+    if (!deliveryData) return { ordersCount: 0, linesCount: 0 };
+    return getDelayCounts(filteredOrders);
   }, [deliveryData, filteredOrders]);
+  const overdueOrdersCount = overdueCounts.ordersCount;
+  const overdueLinesCount = overdueCounts.linesCount;
 
   // 出荷管理（101270）データのバッジ集計
   const coolMissingCount = useMemo(
@@ -509,7 +587,7 @@ export default function App() {
       id: 'overdue' as ViewTab,
       label: '納期超過一覧',
       icon: AlertTriangle,
-      badge: overdueOrdersCount > 0 ? `${overdueOrdersCount}` : null,
+      badge: overdueCounts.ordersCount > 0 ? `${overdueCounts.ordersCount}件（${overdueCounts.linesCount}明細）` : null,
       badgeColor: 'bg-rose-600 text-white font-bold',
     },
 
@@ -768,14 +846,16 @@ export default function App() {
           generatedAt={deliveryData.generatedAt || ''}
           isStale={isStale}
           isFallback={isFallback}
-          error={isErrorDismissed ? null : fetchError}
+          error={isErrorVisible ? fetchError : null}
+          errorType={lastErrorType}
           serverIp={serverIp}
           isRefreshing={isRefreshing}
+          cooldownRemainingSec={cooldownRemainingSec}
           onRefresh={() => loadData(true)}
           onOpenSettings={() => setIsSettingsOpen(true)}
           onOpenDailyDigest={() => setIsDailyDigestOpen(true)}
           onNavigateToAlerts={() => setActiveTab('alerts')}
-          onDismissError={() => setIsErrorDismissed(true)}
+          onDismissError={handleDismissError}
           onSwitchToSample={handleSwitchToSample}
         />
 

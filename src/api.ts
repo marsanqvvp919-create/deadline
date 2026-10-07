@@ -68,7 +68,12 @@ export function getLocalSuppliers(): SupplierItem[] {
       if (Array.isArray(parsed) && parsed.length > 0) return parsed;
     }
   } catch {}
-  return INITIAL_SUPPLIERS;
+  // サンプルモード選択時のみ仮データを使用（要件3）
+  const config = getConfiguredUrls();
+  if (config.mode === 'sample') {
+    return INITIAL_SUPPLIERS;
+  }
+  return [];
 }
 
 export function saveLocalSuppliers(suppliers: SupplierItem[]) {
@@ -198,8 +203,14 @@ export interface FetchResult {
   data: DeliveryData;
   shipments?: ShipmentItem[];
   suppliers?: SupplierItem[];
+  products?: ProductItem[];
+  clinics?: ClinicItem[];
+  lastSuccessTime?: string | null;
+  lastErrorType?: 'rate_limit' | 'ip_blocked' | 'auth_error' | 'network_error' | null;
+  rateLimitRemainingSec?: number;
   isStale: boolean;
   isFallback: boolean;
+  isDemoMode?: boolean;
   error: string | null;
   errorCode?: string | number;
   serverIp?: string;
@@ -560,113 +571,170 @@ export function normalizeDeliveryData(data: DeliveryData): DeliveryData {
   return data;
 }
 
+export async function syncNow(includeMasters = false): Promise<FetchResult> {
+  const res = await fetch('/api/rakuraku/sync-now', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ includeMasters }),
+  });
+  const json = await res.json();
+  if (res.status === 429) {
+    throw {
+      message: json.error || '前回の取得から1分以内のため再取得できません',
+      cooldownRemainingSec: json.cooldownRemainingSec || 60,
+      isRateLimit: true,
+      lastSuccessTime: json.lastSuccessTime,
+    };
+  }
+  return fetchData();
+}
+
+export async function setServerRefreshInterval(minutes: number): Promise<boolean> {
+  try {
+    const res = await fetch('/api/rakuraku/interval', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ minutes }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 export async function fetchData(): Promise<FetchResult> {
   const config = getConfiguredUrls();
   const now = new Date();
 
-  // 1. 楽楽販売 API直接連携モード（パターンC）
+  // 1. 楽楽販売 サーバー集約キャッシュ経由モード
   if (config.mode === 'rakuraku' || true) {
     let fetchedShipments: ShipmentItem[] = getLocalShipments();
     let fetchedSuppliers: SupplierItem[] = getLocalSuppliers();
 
     try {
-      // 1. 出荷管理 (dbSchemaId: 101270 / searchId: 103958 / listId: 101059)
-      try {
-        const resShip = await fetch('/api/rakuraku/fetch', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            baseUrl: config.rakurakuBaseUrl,
-            token: config.rakurakuToken,
-            dbSchemaId: '101270',
-            searchId: '103958',
-            listId: '101059',
-          }),
-        });
-        const shipJson = await resShip.json();
-        if (resShip.ok && shipJson.success && Array.isArray(shipJson.data) && shipJson.data.length > 0) {
-          fetchedShipments = shipJson.data;
-          saveLocalShipments(shipJson.data);
-        }
-      } catch (e) {
-        console.warn('出荷管理 (101270) 取得警告:', e);
-      }
-
-      // 2. 仕入先マスタ (dbSchemaId: 101253 / searchId: 103962 / listId: 101061)
-      try {
-        const resSup = await fetch('/api/rakuraku/fetch', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            baseUrl: config.rakurakuBaseUrl,
-            token: config.rakurakuToken,
-            dbSchemaId: '101253',
-            searchId: '103962',
-            listId: '101061',
-          }),
-        });
-        const supJson = await resSup.json();
-        if (resSup.ok && supJson.success && Array.isArray(supJson.data) && supJson.data.length > 0) {
-          fetchedSuppliers = supJson.data;
-          saveLocalSuppliers(supJson.data);
-        }
-      } catch (e) {
-        console.warn('仕入先マスタ (101253) 取得警告:', e);
-      }
-
-      // 3. ご注文管理 (dbSchemaId: 101248)
-      const res = await fetch('/api/rakuraku/fetch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          baseUrl: config.rakurakuBaseUrl,
-          token: config.rakurakuToken,
-          dbSchemaId: config.rakurakuSchemaId || '101248',
-        }),
-      });
-
+      const res = await fetch('/api/rakuraku/all-data');
       const json = await res.json();
 
-      if (!res.ok || !json.success) {
-        const detectedIp = json.serverIp || config.serverIp || currentServerIp;
-        let msg = json.error || '楽楽販売APIへの通信に失敗しました';
-        if (json.errorCode === '7' || json.status === 403 || String(json.error).includes('アクセスが拒否')) {
-          msg = `IPアクセス制限により拒否されました（エラーコード7）。楽楽販売側で [${detectedIp}] をAPI許可IPに追加してください。`;
-        }
-        throw { message: msg, errorCode: json.errorCode, serverIp: detectedIp };
+      const lastSuccessTime = json.lastSuccessTime || null;
+      const rateLimitRemainingSec = json.rateLimitRemainingSec || 0;
+      const lastError = json.lastError || null;
+      const detectedIp = json.serverIp || config.serverIp || currentServerIp;
+
+      // 出荷管理 (101270) 保存
+      if (Array.isArray(json.shipments) && json.shipments.length > 0) {
+        fetchedShipments = json.shipments;
+        saveLocalShipments(json.shipments);
       }
 
-      if (json.data && Array.isArray(json.data.orders) && json.data.orders.length > 0) {
+      // 仕入先マスタ (101253) 保存
+      if (Array.isArray(json.suppliers) && json.suppliers.length > 0) {
+        fetchedSuppliers = json.suppliers;
+        saveLocalSuppliers(json.suppliers);
+      }
+
+      // 顧客マスタ (101250) 保存
+      if (Array.isArray(json.clinics) && json.clinics.length > 0) {
+        saveLocalClinics(json.clinics, 'rakuraku_api');
+      }
+
+      // 商品マスタ (101252) 保存
+      if (Array.isArray(json.products) && json.products.length > 0) {
+        saveLocalProducts(json.products, 'rakuraku_api');
+      }
+
+      // ご注文管理 (101248) データ
+      if (json.orders && Array.isArray(json.orders.orders) && json.orders.orders.length > 0) {
         const cached = getCachedDeliveryData();
-        const normalized = normalizeDeliveryData(json.data as DeliveryData);
+        const normalized = normalizeDeliveryData(json.orders as DeliveryData);
         const diffResult = mergeWithDiffCache(cached, normalized);
 
         return {
           data: diffResult.mergedData,
           shipments: fetchedShipments,
           suppliers: fetchedSuppliers,
+          lastSuccessTime,
+          lastErrorType: lastError?.type || null,
+          rateLimitRemainingSec,
           isStale: checkIsStale(diffResult.mergedData.generatedAt),
           isFallback: false,
-          error: null,
+          error: lastError ? lastError.message : null,
+          errorCode: lastError?.errorCode,
+          serverIp: detectedIp,
           fetchedAt: now,
         };
-      } else {
-        throw { message: '楽楽販売から有効な伝票データを取得できませんでした (0件または空データ)' };
       }
-    } catch (err: any) {
-      const errorMessage = err?.message || 'データの取得に失敗しました';
+
+      // サーバーキャッシュにordersがない場合、クライアントキャッシュの利用を試行
+      const clientCached = getCachedDeliveryData();
+      if (clientCached && clientCached.orders && clientCached.orders.length > 0) {
+        return {
+          data: clientCached,
+          shipments: fetchedShipments,
+          suppliers: fetchedSuppliers,
+          lastSuccessTime,
+          lastErrorType: lastError?.type || null,
+          rateLimitRemainingSec,
+          isStale: true,
+          isFallback: false,
+          error: lastError ? lastError.message : (json.isFetching ? 'データを初期取得中です...' : 'サーバー保存データを表示中'),
+          errorCode: lastError?.errorCode,
+          serverIp: detectedIp,
+          fetchedAt: now,
+        };
+      }
+
+      // エラーまたは空データ
+      const errorMsg = lastError ? lastError.message : (json.isFetching ? '初期データを取得中です...' : '楽楽販売からデータを取得できませんでした');
       const emptyData = normalizeDeliveryData({
         generatedAt: new Date().toISOString(),
         orders: [],
         alerts: [],
         weeklyDelayHistory: [],
       });
+
+      return {
+        data: emptyData,
+        shipments: fetchedShipments,
+        suppliers: fetchedSuppliers,
+        lastSuccessTime,
+        lastErrorType: lastError?.type || null,
+        rateLimitRemainingSec,
+        isStale: false,
+        isFallback: false,
+        error: errorMsg,
+        errorCode: lastError?.errorCode,
+        serverIp: detectedIp,
+        fetchedAt: now,
+      };
+    } catch (err: any) {
+      const errorMessage = err?.message || 'サーバーとの通信に失敗しました';
+      const clientCached = getCachedDeliveryData();
+      if (clientCached && clientCached.orders && clientCached.orders.length > 0) {
+        return {
+          data: clientCached,
+          shipments: fetchedShipments,
+          suppliers: fetchedSuppliers,
+          isStale: true,
+          isFallback: false,
+          error: errorMessage,
+          serverIp: config.serverIp || currentServerIp,
+          fetchedAt: now,
+        };
+      }
+
+      const emptyData = normalizeDeliveryData({
+        generatedAt: new Date().toISOString(),
+        orders: [],
+        alerts: [],
+        weeklyDelayHistory: [],
+      });
+
       return {
         data: emptyData,
         shipments: fetchedShipments,
         suppliers: fetchedSuppliers,
         isStale: false,
-        isFallback: true,
+        isFallback: false,
         error: errorMessage,
         errorCode: err?.errorCode,
         serverIp: err?.serverIp || config.serverIp,
@@ -861,26 +929,33 @@ export function getLocalClinics(): ClinicItem[] {
     }
   } catch {}
 
+  const config = getConfiguredUrls();
   if (clinics.length === 0) {
-    clinics = INITIAL_CLINICS;
+    if (config.mode === 'sample') {
+      clinics = INITIAL_CLINICS;
+    } else {
+      return [];
+    }
   }
 
-  const seedMap = new Map(INITIAL_CLINICS.map(ic => [ic.clinicName.trim(), ic]));
-  clinics = clinics.map(c => {
-    const seed = seedMap.get((c.clinicName || '').trim());
-    if (seed && (!c.address || c.address === '-' || c.address.trim() === '')) {
-      return {
-        ...c,
-        address: seed.address,
-        prefecture: seed.prefecture || c.prefecture,
-        postalCode: seed.postalCode || c.postalCode,
-        phone: c.phone || seed.phone,
-        email: c.email || seed.email,
-        directorName: c.directorName || seed.directorName,
-      };
-    }
-    return c;
-  });
+  if (config.mode === 'sample') {
+    const seedMap = new Map(INITIAL_CLINICS.map(ic => [ic.clinicName.trim(), ic]));
+    clinics = clinics.map(c => {
+      const seed = seedMap.get((c.clinicName || '').trim());
+      if (seed && (!c.address || c.address === '-' || c.address.trim() === '')) {
+        return {
+          ...c,
+          address: seed.address,
+          prefecture: seed.prefecture || c.prefecture,
+          postalCode: seed.postalCode || c.postalCode,
+          phone: c.phone || seed.phone,
+          email: c.email || seed.email,
+          directorName: c.directorName || seed.directorName,
+        };
+      }
+      return c;
+    });
+  }
 
   // 「消去済み」「削除済み」を除外
   clinics = clinics.filter((c) => {

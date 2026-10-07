@@ -14,12 +14,17 @@ import {
   getRakurakuUrl,
   formatValue,
 } from '../utils/customsUtils';
+import { TableEmptyState } from './TableEmptyState';
 
 interface CoolMissingViewProps {
   shipments: ShipmentItem[];
   orders: Order[];
   clinics?: ClinicItem[];
   onSelectOrder?: (order: Order) => void;
+  isLoading?: boolean;
+  error?: string | null;
+  lastSuccessTime?: string | null;
+  onRetry?: () => void;
 }
 
 export const CoolMissingView: React.FC<CoolMissingViewProps> = ({
@@ -27,6 +32,10 @@ export const CoolMissingView: React.FC<CoolMissingViewProps> = ({
   orders,
   clinics = [],
   onSelectOrder,
+  isLoading = false,
+  error = null,
+  lastSuccessTime = null,
+  onRetry,
 }) => {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const rakurakuUrl = getRakurakuUrl();
@@ -286,12 +295,15 @@ export const CoolMissingView: React.FC<CoolMissingViewProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
-              {coolMissingShipments.length === 0 ? (
-                <tr>
-                  <td colSpan={14} className="py-12 text-center text-slate-400 font-bold">
-                    データなし
-                  </td>
-                </tr>
+              {coolMissingShipments.length === 0 || isLoading || error ? (
+                <TableEmptyState
+                  isLoading={isLoading}
+                  error={error}
+                  lastSuccessTime={lastSuccessTime}
+                  onRetry={onRetry}
+                  colSpan={14}
+                  emptyMessage="該当するクール手配漏れ案件はありません"
+                />
               ) : (
                 coolMissingShipments.map((item, idx) => {
                   const clinicName = resolveClinicName(item, orders, clinics);
