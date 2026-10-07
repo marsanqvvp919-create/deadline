@@ -964,11 +964,9 @@ async function fetchRakurakuCsv(
     let responseJson: any = null;
     try { responseJson = JSON.parse(responseText); } catch {}
 
+    // 途中のページで失敗した場合も例外にする（一部だけ取れたCSVを成功として返さない）
     if (!response.ok || (responseJson && responseJson.status === 'error')) {
-      if (page === 0) {
-        throw { status: response.status || 400, json: responseJson, text: responseText };
-      }
-      break;
+      throw { status: response.status || 400, json: responseJson, text: responseText, page };
     }
 
     if (!responseJson && responseText.includes(',')) {
@@ -989,7 +987,11 @@ async function fetchRakurakuCsv(
       // もし取得行数が200行未満（ヘッダー除く）ならこれが最後のページ
       const dataRowsCount = page === 0 ? lines.length - 1 : lines.length;
       if (dataRowsCount < 200) {
-        break;
+        return { csv: combinedCsv };
+      }
+      if (page === pagesToFetch - 1) {
+        // ページ上限に達してもまだ続きがある＝全件を取り切れていない
+        throw { message: `取得ページ上限(${pagesToFetch}ページ)に達しました（dbSchemaId: ${dbSchemaId}）`, page };
       }
     } else {
       if (page === 0) return { csv: '', rawResponse: responseJson };
@@ -1096,7 +1098,7 @@ async function syncAllRakurakuData(isManual = false): Promise<boolean> {
 
     // 1. 出荷管理 (101270)
     try {
-      const resShip = await fetchRakurakuCsv(baseUrl, token, '101270', '103958', '101059', 10);
+      const resShip = await fetchRakurakuCsv(baseUrl, token, '101270', '103958', '101059', 50);
       const parsedShipments = transformCsvToShipments(resShip.csv);
       if (parsedShipments && parsedShipments.length > 0) {
         serverRakurakuStore.shipments = parsedShipments;
@@ -1112,7 +1114,7 @@ async function syncAllRakurakuData(isManual = false): Promise<boolean> {
 
     // 2. ご注文管理 (101248)
     try {
-      const resOrders = await fetchRakurakuCsv(baseUrl, token, '101248', undefined, undefined, 10);
+      const resOrders = await fetchRakurakuCsv(baseUrl, token, '101248', undefined, undefined, 50);
       const parsedOrders = transformCsvToDeliveryData(resOrders.csv);
       if (parsedOrders) {
         serverRakurakuStore.orders = parsedOrders;
@@ -1132,6 +1134,7 @@ async function syncAllRakurakuData(isManual = false): Promise<boolean> {
 
     if (needMasters) {
       console.log('[Rakuraku Sync] Fetching masters (products, clinics, suppliers)...');
+      let mastersOk = true;
       // 仕入先マスタ (101253)
       await new Promise((r) => setTimeout(r, 2000));
       try {
@@ -1142,6 +1145,7 @@ async function syncAllRakurakuData(isManual = false): Promise<boolean> {
         }
       } catch (e) {
         console.warn('[Rakuraku Sync] Suppliers master warning:', e);
+        mastersOk = false;
       }
 
       // 商品マスタ (101252)
@@ -1154,6 +1158,7 @@ async function syncAllRakurakuData(isManual = false): Promise<boolean> {
         }
       } catch (e) {
         console.warn('[Rakuraku Sync] Products master warning:', e);
+        mastersOk = false;
       }
 
       // 顧客マスタ (101250)
@@ -1166,9 +1171,13 @@ async function syncAllRakurakuData(isManual = false): Promise<boolean> {
         }
       } catch (e) {
         console.warn('[Rakuraku Sync] Clinics master warning:', e);
+        mastersOk = false;
       }
 
-      serverRakurakuStore.lastMastersTime = Date.now();
+      // 3つとも取得できたときだけ「本日取得済み」にする（失敗したら次の同期で再試行）
+      if (mastersOk) {
+        serverRakurakuStore.lastMastersTime = Date.now();
+      }
     }
 
     // 成功処理
