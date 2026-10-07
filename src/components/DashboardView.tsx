@@ -72,6 +72,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const thisYearMonth = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
   // 楽楽販売の日付は 2026/10/05 形式なので、比較の前に 2026-10-05 にそろえる
   const isoDate = (d?: string | null) => (d || '').replace(/\//g, '-').slice(0, 10);
+  // 遵守率の出荷日：倉庫出荷日があればそれ、なければ出荷日
+  const effectiveShipDate = (l: { warehouseShippedDate?: string | null; shippedDate: string | null }) =>
+    l.warehouseShippedDate || l.shippedDate;
 
   // 売上・請求残・見積メトリクス（見積期日1週間超過は除外）
   const salesMetrics = useMemo(() => {
@@ -179,13 +182,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   // 今月の納期遵守率
   // （今月出荷完了した明細のうち shippedDate <= latestDate の割合）
   const completedThisMonth = allLines.filter((l) => {
-    if (l.stage !== '出荷完了' || !l.shippedDate) return false;
-    return isoDate(l.shippedDate).startsWith(thisYearMonth);
+    if (l.stage !== '出荷完了' || !effectiveShipDate(l)) return false;
+    return isoDate(effectiveShipDate(l)).startsWith(thisYearMonth);
   });
 
   const onTimeShippedCount = completedThisMonth.filter((l) => {
-    if (!l.latestDate || !l.shippedDate) return false;
-    return isoDate(l.shippedDate) <= isoDate(l.latestDate);
+    if (!l.latestDate || !effectiveShipDate(l)) return false;
+    return isoDate(effectiveShipDate(l)) <= isoDate(l.latestDate);
   }).length;
 
   // 今月の出荷が無ければ「データなし」（カードと表の合計で同じ値を使う）
@@ -243,9 +246,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
     if (l.stage !== '出荷完了') {
       entry.incomplete++;
-    } else if (l.shippedDate && isoDate(l.shippedDate).startsWith(thisYearMonth)) {
+    } else if (effectiveShipDate(l) && isoDate(effectiveShipDate(l)).startsWith(thisYearMonth)) {
       entry.completedThisMonth++;
-      if (l.latestDate && isoDate(l.shippedDate) <= isoDate(l.latestDate)) {
+      if (l.latestDate && isoDate(effectiveShipDate(l)) <= isoDate(l.latestDate)) {
         entry.onTimeThisMonth++;
       }
     }

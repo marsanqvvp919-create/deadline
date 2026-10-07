@@ -31,8 +31,12 @@ function isBeforeToday(dateStr: string | null | undefined, referenceDate?: Date)
   return startOfDay(target) < startOfDay(referenceDate || new Date());
 }
 
-/** 明細の出荷日（楽楽販売の値をそのまま使う。古いキャッシュでは補正後の値で代用） */
-function lineShippedDate(line: OrderLine): string | null {
+/**
+ * 明細の出荷日。出荷管理の「倉庫出荷日」があればそれを、なければ楽楽販売の「出荷日」を使う
+ * （古いキャッシュで rawShippedDate が無いときは補正後の値で代用）
+ */
+export function lineShippedDate(line: OrderLine): string | null {
+  if (line.warehouseShippedDate) return line.warehouseShippedDate;
   return line.rawShippedDate !== undefined ? line.rawShippedDate : line.shippedDate;
 }
 
@@ -59,7 +63,9 @@ export function isLineDelayed(line: OrderLine, order?: Order, referenceDate?: Da
 export function isOrderDelayed(order: Order, referenceDate?: Date): boolean {
   if (isOverdueExcludedStatus(order.status)) return false;
   if (order.overdueBasis && order.overdueBasis.length > 0) {
-    return order.overdueBasis.some((b) => !b.shippedDate && isBeforeToday(b.latestDate, referenceDate));
+    return order.overdueBasis.some(
+      (b) => !(b.warehouseShippedDate || b.shippedDate) && isBeforeToday(b.latestDate, referenceDate)
+    );
   }
   return order.lines.some((l) => isLineDelayed(l, order, referenceDate));
 }

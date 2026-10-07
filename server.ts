@@ -281,6 +281,11 @@ const SHIPMENT_FIELD_MAP: Record<string, string[]> = {
   shippedDate: ['110194', '110017', '出荷日', '発送日', 'shippedDate'],
   // 出荷管理の「ステータス」(110188)。部分一致だと輸入確認ステータス等に当たるので完全一致のみ
   shipStatus: ['110188', 'ステータス', '出荷状態', 'shipStatus'],
+  // 倉庫から出た日（出荷日は楽楽販売の入力日が入ることがあるため別項目で持つ）
+  warehouseShippedDate: ['倉庫出荷日', 'warehouseShippedDate'],
+  // 明細の受注ID・商品ID（ご注文管理の明細と結びつけるため）
+  lineOrderId: ['受注ID（明細）'],
+  lineProductId: ['商品ID'],
 };
 
 const SHIPMENT_EXACT_ONLY_KEYS = new Set(['shipStatus']);
@@ -345,6 +350,11 @@ function transformCsvToShipments(csvText: string): any[] {
     const shippedDate = getVal(row, 'shippedDate') || '—';
     const shipStatus = getVal(row, 'shipStatus') || '';
     const courier = getVal(row, 'courier') || '';
+    const warehouseShippedDate = getVal(row, 'warehouseShippedDate') || '';
+    const lineRef = {
+      orderId: getVal(row, 'lineOrderId') || orderId,
+      productId: getVal(row, 'lineProductId'),
+    };
 
     // クール手配漏れの条件: クール申請・委任状・伝票のどれかが「未」
     const isCoolMissing =
@@ -377,6 +387,8 @@ function transformCsvToShipments(csvText: string): any[] {
       shippedDate,
       shipStatus,
       courier,
+      warehouseShippedDate,
+      lineRef,
       isKantoNg,
       isCoolMissing,
       updatedAt: new Date().toISOString().replace('T', ' ').slice(0, 16),
@@ -392,12 +404,14 @@ function mergeShipmentRowsById(records: any[]): any[] {
   const byId = new Map<string, any>();
   for (const r of records) {
     const existing = byId.get(r.shipmentId);
+    const { lineRef, ...rest } = r;
     if (!existing) {
-      byId.set(r.shipmentId, { ...r, lineCount: 1 });
+      byId.set(r.shipmentId, { ...rest, lineCount: 1, lineRefs: lineRef?.productId ? [lineRef] : [] });
       continue;
     }
     existing.lineCount += 1;
-    for (const [k, v] of Object.entries(r)) {
+    if (lineRef?.productId) existing.lineRefs.push(lineRef);
+    for (const [k, v] of Object.entries(rest)) {
       if ((existing[k] === undefined || existing[k] === '' || existing[k] === '—') && v !== '' && v !== '—') {
         existing[k] = v;
       }
@@ -710,6 +724,7 @@ function parseOrdersFromCsv(csvText: string): any[] | null {
     const rowProductName = getVal(row, 'productName');
     if (!SETTLEMENT_LINE_KEYWORDS.some((kw) => rowProductName.includes(kw))) {
       order.overdueBasis.push({
+        productId: getVal(row, 'productId') || '',
         latestDate: getVal(row, 'latestDate') || null,
         shippedDate: getVal(row, 'shippedDate') || null,
       });
@@ -1009,16 +1024,28 @@ async function fetchRakurakuCsv(
     if (searchId) reqBody.searchId = searchId.toString();
     if (actualListId) reqBody.listId = actualListId.toString();
 
-    const response = await fetch(apiUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json; charset=utf-8',
-        'X-HD-apitoken': token.trim(),
-      },
-      body: JSON.stringify(reqBody),
-    });
-
-    const responseText = await response.text();
+    // 通信が一時的に切れたとき（fetch failed など）は、同じページを最大2回まで取り直す
+    let response: Response | null = null;
+    let responseText = '';
+    for (let attempt = 0; ; attempt++) {
+      try {
+        response = await fetch(apiUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json; charset=utf-8',
+            'X-HD-apitoken': token.trim(),
+          },
+          body: JSON.stringify(reqBody),
+          signal: AbortSignal.timeout(60000),
+        });
+        responseText = await response.text();
+        break;
+      } catch (netErr: any) {
+        if (attempt >= 2) throw netErr;
+        console.warn(`[Rakuraku Fetch] network error on ${dbSchemaId} page ${page}, retrying:`, netErr?.message || netErr);
+        await new Promise((r) => setTimeout(r, 5000 * (attempt + 1)));
+      }
+    }
     let responseJson: any = null;
     try { responseJson = JSON.parse(responseText); } catch {}
 
@@ -1118,11 +1145,37 @@ function countOverdueOrders(orders: any[]): number {
   return orders.filter((o) => {
     if (excluded.includes((o.status || '').trim())) return false;
     return (o.overdueBasis || []).some((b: any) => {
-      if (b.shippedDate || !b.latestDate) return false;
+      if (b.warehouseShippedDate || b.shippedDate || !b.latestDate) return false;
       const d = String(b.latestDate).replace(/\//g, '-').slice(0, 10);
       return /^\d{4}-\d{2}-\d{2}$/.test(d) && d < jstToday;
     });
   }).length;
+}
+
+// 出荷管理の「倉庫出荷日」を、受注ID＋商品IDでご注文管理の明細に付ける。
+// 納期超過・遵守率は「倉庫出荷日」があればそれを、なければ楽楽販売の「出荷日」を使う。
+function applyWarehouseShipDates() {
+  const orders = serverRakurakuStore.orders?.orders;
+  const shipments = serverRakurakuStore.shipments;
+  if (!orders || !shipments) return;
+  const byLine = new Map<string, string>();
+  shipments.forEach((sh: any) => {
+    const date = sh.warehouseShippedDate;
+    if (!date || date === '—') return;
+    (sh.lineRefs || []).forEach((ref: any) => {
+      const key = `${ref.orderId}|${ref.productId}`;
+      const prev = byLine.get(key);
+      if (!prev || date.replace(/\//g, '-') < prev.replace(/\//g, '-')) byLine.set(key, date);
+    });
+  });
+  orders.forEach((o: any) => {
+    o.lines.forEach((l: any) => {
+      l.warehouseShippedDate = byLine.get(`${o.orderId}|${l.productId}`) || null;
+    });
+    (o.overdueBasis || []).forEach((b: any) => {
+      b.warehouseShippedDate = b.productId ? byLine.get(`${o.orderId}|${b.productId}`) || null : null;
+    });
+  });
 }
 
 function recordDelayHistory() {
@@ -1420,6 +1473,7 @@ async function syncAllRakurakuData(isManual = false): Promise<boolean> {
       throw e;
     }
     if (!useIncremental) serverRakurakuStore.lastFullSyncTime = Date.now();
+    applyWarehouseShipDates();
 
     // 成功処理
     serverRakurakuStore.lastSuccessTime = new Date().toISOString();
