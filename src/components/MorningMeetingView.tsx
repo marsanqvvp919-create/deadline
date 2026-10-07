@@ -123,7 +123,9 @@ export const MorningMeetingView: React.FC<{
   const rowFromOrder = (o: Order, opts: { approaching?: boolean } = {}): Row => {
     const lines = o.lines.filter((l) => !isShippingOrFee(l.productName, l.productId));
     const target = lines.filter((l) => (opts.approaching ? isLineApproaching(l, o) : isLineDelayed(l, o)));
-    const relevant = target.length > 0 ? target : lines.filter((l) => l.stage !== '出荷完了');
+    const unshipped = lines.filter((l) => l.stage !== '出荷完了');
+    // 全部出荷済みの伝票（配送で止まっているもの）は、伝票の全明細の仕入先を出す
+    const relevant = target.length > 0 ? target : unshipped.length > 0 ? unshipped : lines;
     const dates = relevant.map((l) => l.latestDate).filter(Boolean).map((d) => String(d).replace(/\//g, '-')).sort();
     const info = shipInfo(o.orderId);
     return {

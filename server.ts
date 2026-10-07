@@ -2690,7 +2690,8 @@ function buildCarrierWritebackRows(): string[][] {
     if (boxes.length > 1) {
       statusText = allDelivered ? `${carrierName}：配達完了（${boxes.length}箱）` : deliveredN > 0 ? `${carrierName}：一部配達（${deliveredN}/${boxes.length}箱）` : `${carrierName}：${CARRIER_LABEL_JA[latest.status]}（${boxes.length}箱）`;
     } else {
-      statusText = `${carrierName}：${CARRIER_LABEL_JA[latest.status]}${latest.statusText ? `（${latest.statusText}）` : ''}`;
+      const label = CARRIER_LABEL_JA[latest.status];
+      statusText = `${carrierName}：${label}${latest.statusText && latest.statusText !== label ? `（${latest.statusText}）` : ''}`;
     }
     const deliveredDate = allDelivered
       ? jstDateTime(statuses.map((c) => c.deliveredAt || c.lastEventAt || '').sort().pop()).slice(0, 10)
