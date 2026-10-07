@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { detectCarrier, courierMismatch } from '../utils/tracking';
+import { classifyNumber, carrierName, hintedCarrier } from '../utils/trackingNumbers';
 import { parseYmd } from '../utils';
 import { useUrlState } from '../utils/listState';
 import { Order, ShipmentItem } from '../types';
@@ -48,7 +48,7 @@ function stageOf(s: TrackingShipment, c?: CarrierStatus): Stage {
 }
 
 // 「今の状況」：楽楽販売の段階と配送会社の最新状況を合わせて、出荷ごとに1つに決める（一目でわかる表示用）
-type NowStatus = 'attention' | 'waiting' | 'pickup' | 'abroad' | 'customs' | 'domestic' | 'partial' | 'delivered' | 'no_info' | 'not_linked';
+type NowStatus = 'attention' | 'waiting' | 'pickup' | 'abroad' | 'customs' | 'domestic' | 'partial' | 'delivered' | 'no_info' | 'bad_number' | 'not_linked';
 
 const NOW_STATUS: Record<NowStatus, { label: string; hint: string; color: string; soft: string; border: string; Icon: React.FC<{ className?: string }> }> = {
   attention: { label: '要確認', hint: '配送会社が通関・配達の例外を返している', color: 'bg-rose-600 text-white', soft: 'bg-rose-50 text-rose-800 border-rose-200', border: 'border-l-rose-500', Icon: AlertTriangle },
@@ -60,19 +60,34 @@ const NOW_STATUS: Record<NowStatus, { label: string; hint: string; color: string
   partial: { label: '一部配達', hint: '複数口の出荷で、一部の箱だけ配達完了（残りの箱の追跡番号は楽楽販売の対応メモ）', color: 'bg-lime-600 text-white', soft: 'bg-lime-50 text-lime-800 border-lime-200', border: 'border-l-lime-500', Icon: PackageCheck },
   delivered: { label: '配達完了', hint: '配送会社または楽楽販売で配達完了', color: 'bg-emerald-600 text-white', soft: 'bg-emerald-50 text-emerald-800 border-emerald-200', border: 'border-l-emerald-500', Icon: CheckCircle2 },
   no_info: { label: '未取得', hint: 'APIでつないでいる配送会社の出荷で、まだ状況を取得していない（DHL は2時間ごとに自動で取得）', color: 'bg-slate-200 text-slate-700', soft: 'bg-slate-50 text-slate-600 border-slate-200', border: 'border-l-slate-300', Icon: HelpCircle },
-  not_linked: { label: '追跡未連携', hint: 'ヤマト・佐川などAPIでつないでいない配送会社の出荷、または追跡番号の形から配送会社がわからない出荷', color: 'bg-slate-100 text-slate-600', soft: 'bg-slate-50 text-slate-500 border-slate-200', border: 'border-l-slate-200', Icon: Link2Off },
+  bad_number: { label: '番号の誤り?', hint: 'DHL・FedEx のどちらにも該当がない追跡番号（入力ミスの可能性）', color: 'bg-fuchsia-600 text-white', soft: 'bg-fuchsia-50 text-fuchsia-800 border-fuchsia-200', border: 'border-l-fuchsia-500', Icon: AlertTriangle },
+  not_linked: { label: 'API対象外', hint: 'ヤマト・佐川などの国内配送、国際郵便、追跡番号がない出荷など、DHL・FedEx のAPIで追えない出荷', color: 'bg-slate-100 text-slate-600', soft: 'bg-slate-50 text-slate-500 border-slate-200', border: 'border-l-slate-200', Icon: Link2Off },
 };
-const NOW_ORDER: NowStatus[] = ['attention', 'waiting', 'pickup', 'abroad', 'customs', 'domestic', 'partial', 'delivered', 'no_info', 'not_linked'];
+const NOW_ORDER: NowStatus[] = ['attention', 'waiting', 'pickup', 'abroad', 'customs', 'domestic', 'partial', 'delivered', 'no_info', 'bad_number', 'not_linked'];
 
-function nowStatusOf(stage: Stage, c?: CarrierStatus, linked = true, partial = false): NowStatus {
+// 段階は配送会社APIの結果を優先する（配達完了 → 配達完了、配達中・国内配送店に到着 → 国内配送中、通関 → 日本で通関中）
+function nowStatusOf(stage: Stage, c: CarrierStatus | undefined, lookup: LookupKind, partial = false): NowStatus {
   if (c?.status === 'exception') return 'attention';
   if (partial) return 'partial';
   if (stage === 'delivered') return 'delivered';
   if (stage === 'waiting') return 'waiting';
-  if (stage === 'domestic') return 'domestic';
+  if (stage === 'domestic' || c?.domestic) return 'domestic';
   if (c?.status === 'pre_transit') return 'pickup';
   if (c?.status === 'in_transit') return c.arrivedJapan ? 'customs' : 'abroad';
-  return linked ? 'no_info' : 'not_linked';
+  if (lookup === 'not_found') return 'bad_number';
+  if (lookup === 'pending') return 'no_info';
+  return 'not_linked';
+}
+
+// 出荷の追跡番号の照会結果：found（どれかの箱が取れた）・pending（まだ照会していない）・not_found（両社とも該当なし）・none（照会しない）
+type LookupKind = 'found' | 'pending' | 'not_found' | 'none';
+function lookupKindOf(boxes: string[], statuses: Record<string, CarrierStatus>): LookupKind {
+  if (boxes.length === 0) return 'none';
+  const ls = boxes.map((d) => statuses[d]?.lookup || (statuses[d] ? 'found' : classifyNumber(d).primary ? 'pending' : 'invalid'));
+  if (ls.includes('found')) return 'found';
+  if (ls.includes('pending')) return 'pending';
+  if (ls.includes('not_found') || ls.includes('invalid')) return 'not_found';
+  return 'none';
 }
 
 // 「3時間前」「2日前」
@@ -113,16 +128,19 @@ function toDate(v?: string): Date | null {
   return parseYmd(String(v));
 }
 
-// 配送会社は番号の形を優先して判定する（楽楽販売の配送業者に入力違いがあるため）
-function carrierOf(courier: string | undefined, trackingNo: string) {
-  const digits = (trackingNo || '').replace(/\D/g, '');
-  const info = detectCarrier(trackingNo, courier);
-  const known = info.carrierCode === 'fedex' || info.carrierCode === 'dhl';
-  return {
-    label: known ? info.carrier : courier || '配送業者未設定',
-    url: known && digits.length >= 8 ? info.trackingUrl : null,
-    mismatch: courierMismatch(trackingNo, courier),
-  };
+// 運送会社は追跡番号の形（と照会の結果）で決める。楽楽販売の「配送業者」と違えば「配送業者の登録違い」
+function carrierOf(s: TrackingShipment, c: CarrierStatus | undefined, boxes: string[]) {
+  const first = boxes[0];
+  const code = c?.carrier || (first ? classifyNumber(first).primary : null);
+  const label = carrierName(code) || s.courier || '配送業者未設定';
+  const hint = hintedCarrier(s.courier);
+  const url =
+    first && code === 'fedex'
+      ? `https://www.fedex.com/fedextrack/?trknbr=${first}`
+      : first && code === 'dhl'
+        ? `https://www.dhl.com/jp-ja/home/tracking.html?tracking-id=${first}`
+        : null;
+  return { label, url, mismatch: !!(hint && code && c && hint !== code) };
 }
 
 // 追跡の対象：出荷待ちと、出荷日から21日以内でまだ配達完了していない出荷、直近7日に配達完了した出荷
@@ -144,13 +162,11 @@ export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: Shipmen
   const [carrierMessage, setCarrierMessage] = useState<string | null>(null);
   const [dhlInfo, setDhlInfo] = useState<CarrierStatusSnapshot['dhl'] | null>(null);
   const [fedexInfo, setFedexInfo] = useState<CarrierStatusSnapshot['fedex'] | null>(null);
-  const [fedexLinked, setFedexLinked] = useState(false);
-  useEffect(() => {
-    fetch('/api/carriers/settings')
-      .then((r) => r.json())
-      .then((j) => setFedexLinked(!!j?.fedex?.configured))
-      .catch(() => {});
-  }, []);
+  // 最初は要対応（例外・3日以上動きなし・直近3日に配達完了）だけを出す。ほかは絞り込みとページ分けで見る
+  const [view, setView] = useUrlState<'focus' | 'all'>('view', 'focus');
+  const [repFilter, setRepFilter] = useUrlState<string>('rep2', 'all');
+  const [issueFilter, setIssueFilter] = useUrlState<'' | 'mismatch' | 'bad' | 'scope'>('issue', '');
+  const [page, setPage] = useState(0);
   const { rakurakuBaseUrl } = getConfiguredUrls();
 
   // 画面を開いたら、サーバーが自動取得した最新状況を読み込む（配送会社には問い合わせない）
@@ -194,6 +210,7 @@ export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: Shipmen
     orders.forEach((o) => m.set(o.orderId, o.customerName));
     return m;
   }, [orders]);
+  const repByOrder = useMemo(() => new Map(orders.map((o) => [o.orderId, o.salesRep])), [orders]);
 
   const items = useMemo(() => {
     const today = new Date();
@@ -205,9 +222,11 @@ export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: Shipmen
         const box = summarizeBoxes(s, carrierStatus);
         const c = box.rep;
         const stage = stageOf(s, c);
-        // いまAPIでつないでいるのは DHL だけ（FedEx は鍵を入れたら同じように取得する）
-        const linked = carrierOf(s.courier, s.trackingNo).label === 'DHL' || (carrierOf(s.courier, s.trackingNo).label === 'FedEx' && fedexLinked);
-        return { s, c, box, stage, now: nowStatusOf(stage, c, linked, box.partial), shipped: toDate(s.warehouseShippedDate) || toDate(s.shippedDate) };
+        const boxes = boxesOf(s);
+        const lookup = lookupKindOf(boxes, carrierStatus);
+        const carrier = carrierOf(s, c, boxes);
+        const rep = repByOrder.get(s.orderId) || '';
+        return { s, c, box, boxes, lookup, carrier, rep, stage, now: nowStatusOf(stage, c, lookup, box.partial), shipped: toDate(s.warehouseShippedDate) || toDate(s.shippedDate) };
       })
       .filter(({ s, c, stage, shipped }) => {
         if (stage === 'waiting') return true;
@@ -231,7 +250,7 @@ export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: Shipmen
           Number(b.now === 'attention') - Number(a.now === 'attention') ||
           (b.shipped?.getTime() || 0) - (a.shipped?.getTime() || 0)
       );
-  }, [shipments, customerByOrder, clinicById, carrierStatus, fedexLinked]);
+  }, [shipments, customerByOrder, clinicById, carrierStatus, repByOrder]);
 
 
   const warehouses = useMemo(
@@ -245,15 +264,55 @@ export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: Shipmen
     return c;
   }, [items]);
 
-  const visible = items
-    .filter((i) => {
-      if (stageFilter !== 'all' && i.now !== stageFilter) return false;
-      if (warehouseFilter !== 'all' && i.s.warehouse !== warehouseFilter) return false;
-      const q = query.trim().toLowerCase();
-      if (!q) return true;
-      return [i.customerName, i.s.shipmentId, i.s.orderId, i.s.trackingNo].some((v) => (v || '').toLowerCase().includes(q));
-    })
-    .sort(SORTERS[sortKey] || SORTERS.status);
+  const reps = useMemo(() => Array.from(new Set(items.map((i) => i.rep).filter(Boolean))).sort(), [items]);
+
+  // 要対応：キャリア例外・最終スキャンから3日以上動きなし・直近3日に配達完了
+  const focusOf = (i: (typeof items)[number]) => {
+    if (i.now === 'attention') return true;
+    const c = i.c;
+    if (c && c.status !== 'delivered' && c.lastEventAt && Date.now() - new Date(c.lastEventAt).getTime() >= 3 * 86400000) return true;
+    if (i.now === 'delivered') {
+      const d = toDate(i.s.deliveredDate) || toDate(c?.deliveredAt || c?.lastEventAt);
+      return !!d && Date.now() - d.getTime() <= 3 * 86400000;
+    }
+    return false;
+  };
+  const focusCount = useMemo(() => items.filter(focusOf).length, [items]);
+  const issueCounts = useMemo(
+    () => ({
+      mismatch: items.filter((i) => i.carrier.mismatch).length,
+      bad: items.filter((i) => i.now === 'bad_number').length,
+      scope: items.filter((i) => i.now === 'not_linked').length,
+    }),
+    [items]
+  );
+
+  // 絞り込み（状況・問題・出荷元・担当・検索）を選んだら「すべて」から探す
+  const narrowed = stageFilter !== 'all' || issueFilter !== '' || warehouseFilter !== 'all' || repFilter !== 'all' || !!query.trim();
+  const visible = useMemo(
+    () =>
+      items
+        .filter((i) => {
+          if (view === 'focus' && !narrowed && !focusOf(i)) return false;
+          if (stageFilter !== 'all' && i.now !== stageFilter) return false;
+          if (issueFilter === 'mismatch' && !i.carrier.mismatch) return false;
+          if (issueFilter === 'bad' && i.now !== 'bad_number') return false;
+          if (issueFilter === 'scope' && i.now !== 'not_linked') return false;
+          if (warehouseFilter !== 'all' && i.s.warehouse !== warehouseFilter) return false;
+          if (repFilter !== 'all' && i.rep !== repFilter) return false;
+          const q = query.trim().toLowerCase();
+          if (!q) return true;
+          return [i.customerName, i.s.shipmentId, i.s.orderId, i.s.trackingNo].some((v) => (v || '').toLowerCase().includes(q));
+        })
+        .sort(SORTERS[sortKey] || SORTERS.status),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [items, view, narrowed, stageFilter, issueFilter, warehouseFilter, repFilter, query, sortKey]
+  );
+  const PAGE_SIZE = 50;
+  const pageCount = Math.max(1, Math.ceil(visible.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount - 1);
+  useEffect(() => setPage(0), [view, stageFilter, issueFilter, warehouseFilter, repFilter, query, sortKey]);
+  const pageItems = visible.slice(currentPage * PAGE_SIZE, currentPage * PAGE_SIZE + PAGE_SIZE);
 
   // カードの更新ボタン：その出荷の箱だけを配送会社に問い合わせる
   const refreshOne = async (s: TrackingShipment) => {
@@ -284,10 +343,10 @@ export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: Shipmen
     setCarrierLoading(true);
     setCarrierMessage(null);
     try {
-      const items = visible
-        .slice(0, 120)
-        .filter((v) => digitsOf(v.s.trackingNo).length >= 8)
-        .map((v) => ({ trackingNo: v.s.trackingNo, courier: v.s.courier }));
+      // 今のページの出荷の箱（複数口も含む）を問い合わせる
+      const items = pageItems
+        .flatMap((v) => v.boxes.map((n) => ({ trackingNo: n, courier: v.s.courier })))
+        .slice(0, 120);
       const json = await fetchCarrierStatuses(items);
       const map: Record<string, CarrierStatus> = { ...carrierStatus };
       json.results.forEach((r) => (map[r.trackingNo] = r));
@@ -319,7 +378,44 @@ export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: Shipmen
             楽楽販売の出荷管理から、出荷ごとに今どの段階かを表示します。対象は出荷待ちと、出荷から{ACTIVE_DAYS}日以内でまだ配達完了していない出荷、直近{RECENT_DELIVERED_DAYS}日に配達完了した出荷です。
           </p>
         </div>
-        {/* 今の状況ごとの件数（押すと絞り込み） */}
+        {/* 最初は要対応だけ。「すべて」で全件を絞り込み・ページ分けで見る */}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="inline-flex rounded-xl border border-slate-200 p-0.5 bg-slate-50">
+            {([
+              ['focus', `要対応 ${focusCount}件`, '配送会社の例外・最終スキャンから3日以上動きなし・直近3日に配達完了'],
+              ['all', `すべて ${items.length}件`, '段階・出荷元・担当で絞り込み、50件ずつ表示'],
+            ] as const).map(([k, label, hint]) => (
+              <button
+                key={k}
+                type="button"
+                title={hint}
+                onClick={() => setView(k)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold ${view === k ? 'bg-slate-900 text-white' : 'text-slate-600'}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {([
+            ['mismatch', '配送業者の登録違い', issueCounts.mismatch, '追跡番号の形と楽楽販売の「配送業者」が違う（照会は番号の形で行っています）'],
+            ['bad', '追跡番号の誤りの可能性', issueCounts.bad, 'DHL・FedEx のどちらにも該当がない'],
+            ['scope', 'API対象外', issueCounts.scope, '国内配送（12桁で7・8始まりでない番号）・国際郵便・番号なしなど'],
+          ] as const).map(([k, label, n, hint]) => (
+            <button
+              key={k}
+              type="button"
+              title={hint}
+              onClick={() => setIssueFilter(issueFilter === k ? '' : k)}
+              className={`px-2.5 py-1 rounded-lg text-xs font-bold border ${
+                issueFilter === k ? 'bg-amber-600 text-white border-amber-600' : 'bg-amber-50 text-amber-800 border-amber-200'
+              } ${n === 0 ? 'opacity-50' : ''}`}
+            >
+              {label} {n}件
+            </button>
+          ))}
+        </div>
+
+        {/* 今の状況ごとの件数（全件で数える。押すと絞り込み） */}
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
           {NOW_ORDER.map((k) => {
             const st = NOW_STATUS[k];
@@ -355,6 +451,18 @@ export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: Shipmen
               </option>
             ))}
           </select>
+          <select
+            value={repFilter}
+            onChange={(e) => setRepFilter(e.target.value)}
+            className="px-3 py-2 text-xs border border-slate-300 rounded-xl bg-white"
+          >
+            <option value="all">すべての担当</option>
+            {reps.map((r) => (
+              <option key={r} value={r}>
+                {r}
+              </option>
+            ))}
+          </select>
           <div className="relative flex-1 min-w-[200px] max-w-sm">
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input autoComplete="off"
@@ -383,7 +491,7 @@ export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: Shipmen
             disabled={carrierLoading}
             className="ml-auto px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-700 flex items-center gap-1.5 disabled:opacity-50"
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${carrierLoading ? 'animate-spin' : ''}`} /> 配送会社から最新状況を取得
+            <RefreshCw className={`w-3.5 h-3.5 ${carrierLoading ? 'animate-spin' : ''}`} /> このページの最新状況を取得
           </button>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -409,9 +517,8 @@ export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: Shipmen
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {visible.slice(0, 300).map(({ s, c, box, now, customerName }) => {
+          {pageItems.map(({ s, c, box, boxes, carrier, now, customerName }) => {
             const st = NOW_STATUS[now];
-            const carrier = carrierOf(s.courier, s.trackingNo);
             const trackUrl = carrier.url;
             const coolPending = s.isCoolMissing;
             const eta = c && c.status !== 'delivered' ? ymd(c.estimatedDelivery) : '';
@@ -449,13 +556,17 @@ export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: Shipmen
                       </div>
                     </div>
                   ) : (
-                    (now === 'no_info' || now === 'not_linked') && (
+                    (now === 'no_info' || now === 'not_linked' || now === 'bad_number') && (
                       <div className="text-[11px] text-slate-500 bg-slate-50 rounded-lg px-2.5 py-1.5">
                         {now === 'no_info'
                           ? carrier.label === 'DHL'
                             ? 'DHL の状況はまだ取得していません（2時間ごとの自動取得を待つか、上のボタンで取得）'
                             : `${carrier.label} の状況はまだ取得していません（上のボタンで取得）`
-                          : `${carrier.label} はまだAPIでつないでいません。下の「配送状況」から確認できます`}
+                          : now === 'bad_number'
+                            ? '追跡番号の誤りの可能性：DHL・FedEx のどちらにも該当がありません。楽楽販売の出荷番号を確認してください'
+                            : boxes.length === 0
+                              ? '追跡番号がありません（または国際郵便など、DHL・FedEx 以外の番号）'
+                              : 'API対象外：国内配送（佐川・ヤマトなど）の番号の可能性があります'}
                       </div>
                     )
                   )}
@@ -473,8 +584,8 @@ export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: Shipmen
                     <span className="col-span-2 font-mono">
                       追跡 {carrier.label} {blank(s.trackingNo) ? '—' : s.trackingNo}
                       {carrier.mismatch && (
-                        <span className="text-amber-700 font-bold font-sans" title="番号の形と、楽楽販売の配送業者が合いません">
-                          （楽楽販売では{s.courier}）
+                        <span className="text-amber-700 font-bold font-sans" title="追跡番号は別の運送会社のものです。楽楽販売の値は書き換えていません">
+                          （配送業者の登録違い：楽楽販売は{s.courier}）
                         </span>
                       )}
                     </span>
@@ -490,7 +601,7 @@ export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: Shipmen
                 {!blank(s.handlingMemo) && <div className="text-[11px] text-slate-600 bg-slate-50 rounded-lg px-2 py-1">{s.handlingMemo}</div>}
 
                 <div className="mt-auto flex items-center justify-end gap-2 pt-1">
-                  {boxesOf(s).length > 0 && (
+                  {boxes.length > 0 && (
                     <button
                       type="button"
                       onClick={() => refreshOne(s)}
@@ -530,8 +641,28 @@ export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: Shipmen
           })}
         </div>
       )}
-      {visible.length > 300 && (
-        <p className="text-xs text-slate-500 text-center">表示は新しい順に300件までです。出荷元や検索で絞り込んでください。</p>
+      {pageCount > 1 && (
+        <div className="flex items-center justify-center gap-2 text-xs">
+          <button
+            type="button"
+            disabled={currentPage === 0}
+            onClick={() => setPage(currentPage - 1)}
+            className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white font-bold disabled:opacity-40"
+          >
+            前へ
+          </button>
+          <span className="text-slate-600">
+            {currentPage + 1} / {pageCount} ページ（{visible.length}件）
+          </span>
+          <button
+            type="button"
+            disabled={currentPage >= pageCount - 1}
+            onClick={() => setPage(currentPage + 1)}
+            className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white font-bold disabled:opacity-40"
+          >
+            次へ
+          </button>
+        </div>
       )}
     </div>
   );

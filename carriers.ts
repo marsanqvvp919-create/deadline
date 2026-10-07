@@ -24,7 +24,14 @@ export interface CarrierStatus {
   error?: string;
   arrivedJapan?: boolean; // 日本の拠点でのスキャンがある
   customsCleared?: boolean; // 通関が終わった（配送会社の記録から判断）
+  customsClearedAt?: string; // 通関が終わった日時（ISO）
+  domestic?: boolean; // 配達中・国内の配達店に到着
+  notFound?: boolean; // 運送会社に番号が見つからない
+  lookup?: 'found' | 'not_found' | 'out_of_scope'; // 画面に返すときの照会結果
 }
+
+// 配達中・国内配送店に到着を表す文言
+const DOMESTIC_PATTERN = /配達中|配達のため|配達車|out for delivery|on fedex vehicle for delivery|with delivery courier|at local fedex facility|配達店|配送センターに到着|delivery facility/i;
 
 export const NORMALIZED_LABEL: Record<NormalizedStatus, string> = {
   delivered: '配達完了',
@@ -102,13 +109,17 @@ function normalizeFedex(trackingNo: string, r: any): CarrierStatus {
     String(loc?.countryCode || '').toUpperCase() === 'JP' ||
     events.some((e) => String(e?.scanLocation?.countryCode || '').toUpperCase() === 'JP');
   // 通関完了：イベントコード CC（Cleared customs）か、通関完了の文言。配達完了も通関済みとみなす
-  const customsCleared =
-    code === 'DL' ||
-    events.some(
-      (e) =>
-        String(e?.eventType || '').toUpperCase() === 'CC' ||
-        CLEARED_PATTERN.test(`${e?.eventDescription || ''} ${e?.derivedStatus || ''}`)
-    );
+  const clearedEvent = events.find(
+    (e) =>
+      String(e?.eventType || '').toUpperCase() === 'CC' ||
+      CLEARED_PATTERN.test(`${e?.eventDescription || ''} ${e?.derivedStatus || ''}`)
+  );
+  const customsCleared = code === 'DL' || !!clearedEvent;
+  const domestic =
+    code === 'OD' ||
+    (arrivedJapan && customsCleared) ||
+    (arrivedJapan && DOMESTIC_PATTERN.test(`${latest.description || ''} ${latest.statusByLocale || ''} ${scan?.eventDescription || ''}`));
+  const notFound = !!r?.error && /notfound|not found|見つけることができません/i.test(`${r.error.code || ''} ${r.error.message || ''}`);
   return {
     carrier: 'fedex',
     trackingNo,
@@ -122,6 +133,9 @@ function normalizeFedex(trackingNo: string, r: any): CarrierStatus {
     error: r?.error?.message,
     arrivedJapan,
     customsCleared,
+    customsClearedAt: clearedEvent?.date,
+    domestic,
+    notFound,
   };
 }
 
@@ -159,8 +173,10 @@ function normalizeDhl(trackingNo: string, s: any): CarrierStatus {
   const events: any[] = Array.isArray(s?.events) ? s.events : [];
   const placeOf = (e: any) => String(e?.location?.address?.addressLocality || '');
   const arrivedJapan = [st, ...events].some((e) => /JAPAN/i.test(placeOf(e)));
-  const customsCleared =
-    code === 'delivered' || [st, ...events].some((e) => CLEARED_PATTERN.test(`${e?.description || ''} ${e?.status || ''}`));
+  const clearedEvent = events.find((e) => CLEARED_PATTERN.test(`${e?.description || ''} ${e?.status || ''}`));
+  const customsCleared = code === 'delivered' || !!clearedEvent;
+  const domestic =
+    (arrivedJapan && customsCleared) || (arrivedJapan && DOMESTIC_PATTERN.test(`${st.description || ''} ${st.status || ''}`));
   const map: Record<string, NormalizedStatus> = {
     delivered: 'delivered',
     transit: 'in_transit',
@@ -179,6 +195,8 @@ function normalizeDhl(trackingNo: string, s: any): CarrierStatus {
     fetchedAt: new Date().toISOString(),
     arrivedJapan,
     customsCleared,
+    customsClearedAt: clearedEvent?.timestamp,
+    domestic,
   };
 }
 
@@ -203,7 +221,15 @@ export async function trackDhl(cred: NonNullable<CarrierCredentials['dhl']>, tra
       break;
     }
     if (res.status === 404) {
-      results.push({ carrier: 'dhl', trackingNo: n, status: 'unknown', statusText: '見つかりません', fetchedAt: new Date().toISOString() });
+      results.push({
+        carrier: 'dhl',
+        trackingNo: n,
+        status: 'unknown',
+        statusText: '見つかりません',
+        error: 'DHL に該当なし',
+        notFound: true,
+        fetchedAt: new Date().toISOString(),
+      });
     } else if (!res.ok) {
       throw new Error(`DHL 追跡エラー: ${json?.detail || json?.title || res.status}`);
     } else {

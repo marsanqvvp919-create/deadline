@@ -9,7 +9,8 @@ import { Storage } from '@google-cloud/storage';
 import { GoogleAuth } from 'google-auth-library';
 import { parseSheetRows, findUnmatched, isTargetRow, trackingDigits } from './unmatchedShipments';
 import { buildImportPreview } from './sheetImport';
-import { CarrierCredentials, CarrierId, CarrierStatus, detectCarrier, trackFedex, trackDhl, testCarrier } from './carriers';
+import { CarrierCredentials, CarrierId, CarrierStatus, trackFedex, trackDhl, testCarrier } from './carriers';
+import { parseTrackingNumbers, classifyNumber, hintedCarrier } from './src/utils/trackingNumbers';
 
 dotenv.config();
 
@@ -303,6 +304,11 @@ const SHIPMENT_FIELD_MAP: Record<string, string[]> = {
   nextDeadline: ['次の期限'],
   vendorShipDate: ['ベンダー出荷日'],
   handlingMemo: ['対応メモ'],
+  // 配送会社の状況の書き戻し先（インポート 100756）。一覧にあれば読んで確認に使う
+  carrierLatestStatus: ['キャリア最新ステータス'],
+  lastScanAt: ['最終スキャン日時'],
+  lastScanPlace: ['最終スキャン場所'],
+  carrierException: ['キャリア例外'],
   // 明細の受注ID・商品ID（ご注文管理の明細と結びつけるため）
   lineOrderId: ['受注ID（明細）'],
   lineProductId: ['商品ID'],
@@ -380,6 +386,10 @@ function transformCsvToShipments(csvText: string): any[] {
     const nextDeadline = getVal(row, 'nextDeadline') || '';
     const vendorShipDate = getVal(row, 'vendorShipDate') || '';
     const handlingMemo = getVal(row, 'handlingMemo') || '';
+    const carrierLatestStatus = getVal(row, 'carrierLatestStatus') || '';
+    const lastScanAt = getVal(row, 'lastScanAt') || '';
+    const lastScanPlace = getVal(row, 'lastScanPlace') || '';
+    const carrierException = getVal(row, 'carrierException') || '';
     // 複数口の出荷：対応メモに並べた残りの箱の追跡番号（10桁以上の数字。4桁区切りも読む）
     const extraTrackingNos = extractTrackingNumbers(handlingMemo).filter((n) => n !== trackingNo.replace(/\D/g, ''));
     const lineRef = {
@@ -429,6 +439,10 @@ function transformCsvToShipments(csvText: string): any[] {
       nextDeadline,
       vendorShipDate,
       handlingMemo,
+      carrierLatestStatus,
+      lastScanAt,
+      lastScanPlace,
+      carrierException,
       extraTrackingNos,
       lineRef,
       isKantoNg,
@@ -2445,8 +2459,8 @@ app.put('/api/carriers/settings', async (req, res) => {
     return res.status(500).json({ error: `保存できませんでした: ${e?.message || e}` });
   }
   // 取得済みの状況は本物なので、キーを変えても消さない。新しいキーで FedEx の自動取得をすぐ試す
-  fedexLastAutoRunAt = null;
-  setTimeout(() => runFedexAutoRefresh().catch(() => {}), 2000);
+  carrierLastAutoRunAt = null;
+  setTimeout(() => runCarrierAutoRefresh().catch(() => {}), 2000);
   return res.json({ success: true });
 });
 
@@ -2463,101 +2477,175 @@ app.post('/api/carriers/test', async (req, res) => {
   return res.json(carrierLastTest[carrier]);
 });
 
-// 追跡番号の一覧を受け取り、配送会社ごとにまとめて問い合わせる（30分は同じ結果を使う）
+// ----------------------------------------------------------------------
+// 追跡番号の解決：番号の形で照会先を決め、該当なしならもう一方の運送会社にも照会する
+// （楽楽販売の「配送業者」は照会先の判定に使わない。食い違いは画面に「配送業者の登録違い」と出す）
+// ----------------------------------------------------------------------
+type LookupState = 'found' | 'pending' | 'not_found' | 'out_of_scope' | 'invalid';
+interface Resolved {
+  digits: string;
+  state: LookupState;
+  carrier?: CarrierId;
+  status?: CarrierStatus;
+  next?: CarrierId;
+}
+
+// 「不明」（見つからない・エラー）は見つかったとみなさない
+const isFoundStatus = (c?: CarrierStatus) => !!c && !c.notFound && c.status !== 'unknown';
+const cacheGet = (carrier: CarrierId, d: string) => carrierCache.get(`${carrier}:${d}`);
+const ageMs = (c?: CarrierStatus) => (c ? Date.now() - new Date(c.fetchedAt).getTime() : Infinity);
+
+function resolveDigits(d: string): Resolved {
+  const cls = classifyNumber(d);
+  if (cls.invalid || !cls.primary) return { digits: d, state: 'invalid' };
+  const p = cacheGet(cls.primary, d);
+  if (!p) return { digits: d, state: 'pending', next: cls.primary };
+  if (isFoundStatus(p)) return { digits: d, state: 'found', carrier: cls.primary, status: p };
+  if (cls.domesticCandidate) return { digits: d, state: 'out_of_scope', carrier: cls.primary, status: p };
+  if (cls.fallback) {
+    const f = cacheGet(cls.fallback, d);
+    if (!f) return { digits: d, state: 'pending', next: cls.fallback };
+    if (isFoundStatus(f)) return { digits: d, state: 'found', carrier: cls.fallback, status: f };
+  }
+  return { digits: d, state: 'not_found', carrier: cls.primary, status: p };
+}
+
+/** 出荷の箱：出荷番号の欄の番号＋対応メモの番号（20桁が FedEx で見つからなければ 10桁＋10桁に分ける） */
+function boxesOfShipment(s: any): string[] {
+  const base = [...parseTrackingNumbers(s.trackingNo), ...((s.extraTrackingNos as string[]) || [])];
+  const out: string[] = [];
+  for (const d of base) {
+    if (d.length === 20 && cacheGet('fedex', d)?.notFound) {
+      [d.slice(0, 10), d.slice(10)].forEach((x) => !out.includes(x) && out.push(x));
+      continue;
+    }
+    if (!out.includes(d)) out.push(d);
+  }
+  return out;
+}
+
+const shipDateOf = (s: any): number | null => {
+  const m = String(s.warehouseShippedDate || s.shippedDate || '').match(/(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})/);
+  return m ? Date.UTC(+m[1], +m[2] - 1, +m[3]) : null;
+};
+
+async function lookupCarrier(carrier: CarrierId, nos: string[], creds: CarrierCredentials): Promise<{ got: CarrierStatus[]; error?: string }> {
+  if (nos.length === 0) return { got: [] };
+  if (carrier === 'dhl') {
+    if (!creds.dhl) return { got: [], error: 'DHL のAPIが未設定です' };
+    return runDhlLookup(creds.dhl.apiKey, nos);
+  }
+  if (!creds.fedex) return { got: [], error: 'FedEx のAPIが未設定です' };
+  try {
+    const got = await trackFedex(creds.fedex, nos);
+    got.forEach((g) => carrierCache.set(`fedex:${g.trackingNo}`, g));
+    scheduleCarrierStatusSave();
+    return { got };
+  } catch (e: any) {
+    return { got: [], error: e?.message || String(e) };
+  }
+}
+
+// 指定した番号を解決するまで照会する（最大3回：主の運送会社 → 該当なしならもう一方）
+async function resolveAndLookup(
+  digitsList: string[],
+  creds: CarrierCredentials,
+  opts: { force?: boolean; refreshStale?: (r: Resolved) => boolean; dhlLimit: number }
+): Promise<Record<string, string>> {
+  const errors: Record<string, string> = {};
+  const attempted = new Set<string>();
+  let dhlUsedHere = 0;
+  for (let round = 0; round < 3; round++) {
+    const want: Record<CarrierId, string[]> = { fedex: [], dhl: [] };
+    for (const d of digitsList) {
+      const r = resolveDigits(d);
+      let target: CarrierId | undefined;
+      if (r.state === 'pending') target = r.next;
+      else if (round === 0 && r.carrier && (r.state === 'found' || r.state === 'not_found' || r.state === 'out_of_scope')) {
+        // カードの更新ボタン：前回から1分以上たっていれば取り直す
+        if (opts.force && ageMs(r.status) > 60 * 1000) target = r.state === 'found' ? r.carrier : classifyNumber(d).primary || undefined;
+        else if (opts.refreshStale?.(r)) target = r.state === 'found' ? r.carrier : classifyNumber(d).primary || undefined;
+      }
+      if (!target || attempted.has(`${target}:${d}`)) continue;
+      attempted.add(`${target}:${d}`);
+      want[target].push(d);
+    }
+    if (want.fedex.length === 0 && want.dhl.length === 0) break;
+    // DHL は1日の回数が少ないので、まだ一度も取っていない番号 → 古い順に、上限まで
+    const room = Math.max(0, Math.min(opts.dhlLimit - dhlUsedHere, DHL_DAILY_BUDGET - dhlUsedToday()));
+    const dhlList = want.dhl.sort((a, b) => ageMs(cacheGet('dhl', b)) - ageMs(cacheGet('dhl', a))).slice(0, room);
+    if (want.dhl.length > dhlList.length) {
+      errors.dhl =
+        room === 0
+          ? `DHL は今日の取得回数（${DHL_DAILY_BUDGET}回）または今回の上限に達したため、残り${want.dhl.length}件は次回取得します`
+          : `DHL は回数制限があるため${dhlList.length}件だけ取得しました（残り${want.dhl.length - dhlList.length}件は次回）`;
+    }
+    dhlUsedHere += dhlList.length;
+    const [f, h] = await Promise.all([lookupCarrier('fedex', want.fedex, creds), lookupCarrier('dhl', dhlList, creds)]);
+    if (f.error) errors.fedex = f.error;
+    if (h.error) errors.dhl = h.error;
+  }
+  return errors;
+}
+
+/** 画面に返す1番号ぶんの状況（見つからない・対象外も、理由がわかる形で返す） */
+function resolvedStatusForClient(d: string): CarrierStatus | null {
+  const r = resolveDigits(d);
+  if (r.state === 'found') return { ...r.status!, trackingNo: d, lookup: 'found' } as any;
+  if (r.state === 'not_found' || r.state === 'out_of_scope') {
+    return {
+      carrier: r.carrier!,
+      trackingNo: d,
+      status: 'unknown',
+      statusText: r.state === 'out_of_scope' ? 'API対象外（国内配送の可能性）' : '追跡番号の誤りの可能性（DHL・FedEx とも該当なし）',
+      error: r.status?.error || '該当なし',
+      fetchedAt: r.status?.fetchedAt || new Date().toISOString(),
+      lookup: r.state,
+    } as any;
+  }
+  return null;
+}
+
+// 追跡番号の一覧を受け取り、解決して返す（画面の「最新状況を取得」とカードの更新ボタン）
 app.post('/api/carriers/track', async (req, res) => {
   const items: { trackingNo: string; courier?: string }[] = Array.isArray(req.body?.items) ? req.body.items.slice(0, 120) : [];
   const force = req.body?.force === true && items.length <= 5;
   const { creds } = await effectiveCarrierCreds();
   await loadCarrierStatusCache();
-  const results: CarrierStatus[] = [];
-  const pending: Record<CarrierId, string[]> = { fedex: [], dhl: [] };
-  for (const it of items) {
-    const digits = String(it.trackingNo || '').replace(/\D/g, '');
-    if (digits.length < 8) continue;
-    const carrier = detectCarrier(digits, it.courier);
-    if (!carrier) continue;
-    const cached = carrierCache.get(`${carrier}:${digits}`);
-    // カードごとの更新ボタン（force、5件まで）は前回の結果を使わずに問い合わせる。ただし1分以内の連打は前回の結果を返す
-    const fresh = cached && Date.now() - new Date(cached.fetchedAt).getTime() < (force ? 60 * 1000 : carrierCacheMs(cached));
-    if (fresh) results.push(cached);
-    else pending[carrier].push(digits);
-  }
-  const errors: Record<string, string> = {};
-  for (const carrier of ['fedex', 'dhl'] as CarrierId[]) {
-    const all = Array.from(new Set(pending[carrier]));
-    const dhlRoom = Math.max(0, DHL_DAILY_BUDGET - dhlUsedToday());
-    const nos = carrier === 'dhl' ? all.slice(0, Math.min(DHL_MAX_PER_REQUEST, dhlRoom)) : all;
-    if (carrier === 'dhl' && all.length > nos.length) {
-      errors[carrier] =
-        dhlRoom === 0
-          ? `DHL は今日の取得回数（${DHL_DAILY_BUDGET}回）を使い切りました。明日また取得します`
-          : `DHL は回数制限があるため、今回は${nos.length}件だけ取得しました（残り${all.length - nos.length}件はもう一度押すと取得します）`;
-    }
-    if (nos.length === 0) continue;
-    if (nos.length === 0) continue;
-    if (!creds[carrier]) {
-      errors[carrier] = `${carrier === 'fedex' ? 'FedEx' : 'DHL'} のAPIが未設定です`;
-      continue;
-    }
-    if (carrier === 'dhl') {
-      const { got, error } = await runDhlLookup(creds.dhl!.apiKey, nos);
-      results.push(...got);
-      if (error) errors.dhl = error;
-      continue;
-    }
-    try {
-      const got = await trackFedex(creds.fedex!, nos);
-      got.forEach((g) => {
-        carrierCache.set(`${carrier}:${g.trackingNo}`, g);
-        results.push(g);
-      });
-      scheduleCarrierStatusSave();
-    } catch (e: any) {
-      errors[carrier] = e?.message || String(e);
-    }
-  }
+  const digits = Array.from(new Set(items.flatMap((it) => parseTrackingNumbers(it.trackingNo))));
+  const errors = await resolveAndLookup(digits, creds, {
+    force,
+    refreshStale: (r) => r.state === 'found' && r.status!.status !== 'delivered' && ageMs(r.status) > carrierCacheMs(r.status!),
+    dhlLimit: DHL_MAX_PER_REQUEST,
+  });
+  if (!creds.fedex) errors.fedex = errors.fedex || 'FedEx のAPIが未設定です';
+  const results = digits.map(resolvedStatusForClient).filter(Boolean);
+  scheduleCarrierStatusSave();
   return res.json({ results, errors, configured: { fedex: !!creds.fedex, dhl: !!creds.dhl } });
 });
 
-// サーバーが持っている最新状況を返す（配送会社には問い合わせない。画面を開いたときに使う）
+// サーバーが持っている最新状況（配送会社には問い合わせない。画面を開いたときに使う）
 app.get('/api/carriers/statuses', async (_req, res) => {
   await loadCarrierStatusCache();
   const { creds } = await effectiveCarrierCreds();
-  const cutoff = Date.now() - 30 * 86400000;
+  const cutoff = Date.now() - 60 * 86400000;
+  const digits = new Set<string>();
+  for (const s of serverRakurakuStore.shipments || []) {
+    const shipped = shipDateOf(s);
+    if (shipped && shipped < cutoff) continue;
+    boxesOfShipment(s).forEach((d) => digits.add(d));
+  }
   return res.json({
-    statuses: Array.from(carrierCache.values()).filter((c) => new Date(c.fetchedAt).getTime() > cutoff),
-    dhl: { usedToday: dhlUsedToday(), budget: DHL_DAILY_BUDGET, lastAutoRunAt: dhlLastAutoRunAt, autoEnabled: !!creds.dhl },
-    fedex: { lastAutoRunAt: fedexLastAutoRunAt, autoEnabled: !!creds.fedex, lastError: fedexLastError },
+    statuses: Array.from(digits).map(resolvedStatusForClient).filter(Boolean),
+    dhl: { usedToday: dhlUsedToday(), budget: DHL_DAILY_BUDGET, lastAutoRunAt: carrierLastAutoRunAt, autoEnabled: !!creds.dhl },
+    fedex: { lastAutoRunAt: carrierLastAutoRunAt, autoEnabled: !!creds.fedex, lastError: carrierLastErrors.fedex || null },
   });
 });
-
-// DHL の自動取得：出荷から21日以内でまだ配達完了でない DHL の出荷を、古い順に少しずつ取り直す
-const shipDigits = (v?: string) => String(v || '').replace(/\D/g, '');
-function shipDateOf(s: any): number | null {
-  const m = String(s.warehouseShippedDate || s.shippedDate || '').match(/(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})/);
-  return m ? Date.UTC(+m[1], +m[2] - 1, +m[3]) : null;
-}
-
-// 出荷ごとの箱（代表の出荷番号＋対応メモに並べた残りの箱の追跡番号）
-function shipmentBoxes(): { s: any; digits: string }[] {
-  const out: { s: any; digits: string }[] = [];
-  for (const s of serverRakurakuStore.shipments || []) {
-    const main = shipDigits(s.trackingNo);
-    const all = Array.from(new Set([main, ...((s.extraTrackingNos as string[]) || [])])).filter((d) => d.length >= 8);
-    all.forEach((digits) => out.push({ s, digits }));
-  }
-  return out;
-}
 
 // ----------------------------------------------------------------------
 // 追跡のカバー率：直近30日のシートの出荷（まだ配達完了でないもの）のうち、
 // 楽楽販売に追跡番号があり配送会社APIで状況が取れている件数と、楽楽販売に追跡番号がない（未照合）件数
 // ----------------------------------------------------------------------
-function carrierStatusOfDigits(d: string): CarrierStatus | undefined {
-  const c = carrierCache.get(`dhl:${d}`) || carrierCache.get(`fedex:${d}`);
-  return c && !(c.status === 'unknown' && c.error) ? c : undefined;
-}
-
 app.get('/api/tracking/coverage', async (_req, res) => {
   const shipments = serverRakurakuStore.shipments;
   if (!shipments || shipments.length === 0) return res.json({ success: false, pending: true });
@@ -2566,38 +2654,29 @@ app.get('/api/tracking/coverage', async (_req, res) => {
     const sheet = await readShipmentStatusSheet(false);
     const rows = parseSheetRows(sheet.values).filter((r) => isTargetRow(r, new Date()) && !r.notShipped);
     const known = new Set<string>();
-    for (const { digits } of shipmentBoxes()) known.add(digits);
+    shipments.forEach((s: any) => boxesOfShipment(s).forEach((d) => known.add(d)));
     let delivered = 0;
     let tracked = 0;
     let notFetched = 0;
     let untracked = 0;
     let noNumber = 0;
     for (const r of rows) {
-      const digits = trackingDigits(r.trackingNo);
+      const digits = parseTrackingNumbers(r.trackingNo);
       if (digits.length === 0) {
         noNumber++;
         continue;
       }
-      const status = digits.map(carrierStatusOfDigits).find(Boolean);
-      if (status?.status === 'delivered') {
+      const found = digits.map(resolveDigits).filter((x) => x.state === 'found');
+      if (found.length > 0 && found.every((x) => x.status!.status === 'delivered')) {
         delivered++;
         continue;
       }
       const inRakuraku = digits.some((d) => known.has(d));
       if (!inRakuraku) untracked++;
-      else if (status) tracked++;
+      else if (found.length > 0) tracked++;
       else notFetched++;
     }
-    return res.json({
-      success: true,
-      sheetReadAt: sheet.readAt,
-      denominator: tracked + notFetched + untracked,
-      tracked,
-      notFetched,
-      untracked,
-      delivered,
-      noNumber,
-    });
+    return res.json({ success: true, sheetReadAt: sheet.readAt, denominator: tracked + notFetched + untracked, tracked, notFetched, untracked, delivered, noNumber });
   } catch (e: any) {
     return res.json({ success: false, error: e?.message || String(e) });
   }
@@ -2654,15 +2733,18 @@ app.post('/api/meeting/counts', async (req, res) => {
   return res.json({ today, previous: previousMeetingCounts(today) });
 });
 
+
 // ----------------------------------------------------------------------
-// 配送会社の状況を楽楽販売の出荷管理へ書き戻す（配達完了日・キャリア最新ステータス・最終スキャン日時・
-// 最終スキャン場所・キャリア例外）。楽楽販売側でこの列のインポート設定を作り、その ID を
-// 環境変数 CARRIER_WRITEBACK_IMPORT_ID に入れたときだけ書き込む（未設定なら試算だけ）。
+// 配送会社の状況を楽楽販売の出荷管理へ書き戻す（CSVインポート 100756）。
+// 列：出荷ID, 現在地, 配達完了日, 通関完了日, キャリア最新ステータス, 最終スキャン日時, 最終スキャン場所, キャリア例外
+// 現在地は後戻りさせない。楽楽販売に入っている現在地・配達完了日・通関完了日は、変えないときもその値を送る（空欄で消さない）。
 // ----------------------------------------------------------------------
-const CARRIER_WRITEBACK_IMPORT_ID = process.env.CARRIER_WRITEBACK_IMPORT_ID || '';
-const CARRIER_WRITEBACK_COLUMNS = ['出荷ID', '配達完了日', 'キャリア最新ステータス', '最終スキャン日時', '最終スキャン場所', 'キャリア例外'];
+const CARRIER_WRITEBACK_IMPORT_ID = process.env.CARRIER_WRITEBACK_IMPORT_ID || '100756';
+const CARRIER_WRITEBACK_COLUMNS = ['出荷ID', '現在地', '配達完了日', '通関完了日', 'キャリア最新ステータス', '最終スキャン日時', '最終スキャン場所', 'キャリア例外'];
+const LOCATION_ORDER = ['発注済', 'ベンダー出荷済', 'SG入庫済', '日本向け出荷済', '通関中', '配達完了'];
 let carrierWritten: Record<string, string> = {}; // 出荷ID → 前回書き込んだ内容（同じなら送らない）
-let carrierWritebackLog: { at: string; rows: number; succeedCount?: number; failureCount?: number; status?: string; error?: string }[] = [];
+let carrierWritebackLog: { at: string; rows: number; succeedCount?: number; failureCount?: number; status?: string; error?: string; sample?: string[] }[] = [];
+let carrierWritebackRunning = false;
 
 const jstDateTime = (iso?: string) => {
   if (!iso) return '';
@@ -2671,66 +2753,106 @@ const jstDateTime = (iso?: string) => {
   const d = new Date(t + 9 * 3600 * 1000).toISOString();
   return `${d.slice(0, 10).replace(/-/g, '/')} ${d.slice(11, 16)}`;
 };
-const CARRIER_LABEL_JA: Record<string, string> = {
-  delivered: '配達完了',
-  in_transit: '輸送中',
-  exception: '要確認',
-  pre_transit: '集荷前',
-  unknown: '不明',
-};
+const CARRIER_LABEL_JA: Record<string, string> = { delivered: '配達完了', in_transit: '輸送中', exception: '要確認', pre_transit: '集荷前', unknown: '不明' };
+const blankValue = (v?: string) => !v || v === '—';
+const locationIndex = (v?: string) => LOCATION_ORDER.indexOf(String(v || '').trim());
 
-function buildCarrierWritebackRows(): string[][] {
+function buildCarrierWritebackRows(includeUnchanged = false): string[][] {
   const rows: string[][] = [];
   for (const s of serverRakurakuStore.shipments || []) {
-    const boxes = Array.from(new Set([shipDigits(s.trackingNo), ...((s.extraTrackingNos as string[]) || [])])).filter((d) => d.length >= 8);
-    const statuses = boxes.map(carrierStatusOfDigits).filter((c): c is CarrierStatus => !!c);
-    if (statuses.length === 0) continue;
-    const deliveredN = statuses.filter((c) => c.status === 'delivered').length;
+    const boxes = boxesOfShipment(s);
+    const found = boxes.map(resolveDigits).filter((r) => r.state === 'found').map((r) => r.status!);
+    if (found.length === 0) continue;
+    const deliveredN = found.filter((c) => c.status === 'delivered').length;
     const allDelivered = deliveredN === boxes.length;
-    const latest = statuses.slice().sort((a, b) => String(b.lastEventAt || '').localeCompare(String(a.lastEventAt || '')))[0];
-    const carrierName = latest.carrier === 'dhl' ? 'DHL' : 'FedEx';
+    const latest = found.slice().sort((a, b) => String(b.lastEventAt || '').localeCompare(String(a.lastEventAt || '')))[0];
+    const carrier = latest.carrier === 'dhl' ? 'DHL' : 'FedEx';
+
+    // 現在地：全箱配達完了 → 配達完了、日本で通関の記録・日本到着 → 通関中、輸送中 → 日本向け出荷済（後戻りはしない）
+    let next = '';
+    if (allDelivered) next = '配達完了';
+    else if (found.some((c) => c.arrivedJapan || c.customsCleared || /通関/.test(c.statusText || ''))) next = '通関中';
+    else if (found.some((c) => c.status === 'in_transit' || c.status === 'exception')) next = '日本向け出荷済';
+    const current = blankValue(s.currentLocation) ? '' : String(s.currentLocation).trim();
+    const location = next && locationIndex(next) > locationIndex(current) ? next : current;
+
+    const deliveredDate = !blankValue(s.deliveredDate)
+      ? s.deliveredDate
+      : allDelivered
+        ? jstDateTime(found.map((c) => c.deliveredAt || c.lastEventAt || '').sort().pop()).slice(0, 10)
+        : '';
+    const clearedAt = found.map((c) => c.customsClearedAt || '').filter(Boolean).sort().pop();
+    const customsDate = !blankValue(s.customsClearedDate) ? s.customsClearedDate : clearedAt ? jstDateTime(clearedAt).slice(0, 10) : '';
+
     let statusText: string;
     if (boxes.length > 1) {
-      statusText = allDelivered ? `${carrierName}：配達完了（${boxes.length}箱）` : deliveredN > 0 ? `${carrierName}：一部配達（${deliveredN}/${boxes.length}箱）` : `${carrierName}：${CARRIER_LABEL_JA[latest.status]}（${boxes.length}箱）`;
+      statusText = allDelivered
+        ? `${carrier}：配達完了（${boxes.length}箱）`
+        : deliveredN > 0
+          ? `${carrier}：一部配達（${deliveredN}/${boxes.length}箱）`
+          : `${carrier}：${CARRIER_LABEL_JA[latest.status]}（${boxes.length}箱）`;
     } else {
       const label = CARRIER_LABEL_JA[latest.status];
-      statusText = `${carrierName}：${label}${latest.statusText && latest.statusText !== label ? `（${latest.statusText}）` : ''}`;
+      statusText = `${carrier}：${label}${latest.statusText && latest.statusText !== label ? `（${latest.statusText}）` : ''}`;
     }
-    const deliveredDate = allDelivered
-      ? jstDateTime(statuses.map((c) => c.deliveredAt || c.lastEventAt || '').sort().pop()).slice(0, 10)
-      : '';
-    const exception = statuses.filter((c) => c.status === 'exception').map((c) => c.statusText).join(' / ');
+    const exception = Array.from(new Set(found.filter((c) => c.status === 'exception').map((c) => c.statusText))).join(' / ');
     const row = [
       s.shipmentId,
-      // 楽楽販売で既に配達完了日が入っていれば上書きしない
-      s.deliveredDate && s.deliveredDate !== '—' ? '' : deliveredDate,
+      location,
+      deliveredDate,
+      customsDate,
       statusText.slice(0, 200),
       jstDateTime(latest.lastEventAt),
       String(latest.lastLocation || '').slice(0, 100),
       exception.slice(0, 200),
     ];
     const key = row.slice(1).join('|');
-    if (carrierWritten[s.shipmentId] === key) continue;
+    if (!includeUnchanged && carrierWritten[s.shipmentId] === key) continue;
     rows.push(row);
   }
   return rows;
 }
 
-async function runCarrierWriteback(): Promise<{ rows: number; result?: any; error?: string }> {
-  const rows = buildCarrierWritebackRows();
-  if (!CARRIER_WRITEBACK_IMPORT_ID || rows.length === 0) return { rows: rows.length };
+const SERVER_STARTED_AT = Date.now();
+async function runCarrierWriteback(): Promise<{ rows: number; succeedCount?: number; failureCount?: number; error?: string }> {
+  if (!CARRIER_WRITEBACK_IMPORT_ID || carrierWritebackRunning) return { rows: 0 };
+  // 起動直後（10分）は書き込まない（反映のたびに内容を確認できるように）
+  if (Date.now() - SERVER_STARTED_AT < 10 * 60 * 1000) return { rows: 0 };
+  if (!serverRakurakuStore.shipments || serverRakurakuStore.shipments.length === 0) return { rows: 0 };
+  carrierWritebackRunning = true;
   try {
-    const result = await importCsvToRakuraku(toCsv(CARRIER_WRITEBACK_COLUMNS, rows), CARRIER_WRITEBACK_IMPORT_ID, 'carrier_status_import.csv');
-    if (result.failureCount === 0) rows.forEach((r) => (carrierWritten[r[0]] = r.slice(1).join('|')));
-    carrierWritebackLog.unshift({ at: new Date().toISOString(), rows: rows.length, ...result });
-    carrierWritebackLog = carrierWritebackLog.slice(0, 20);
+    const rows = buildCarrierWritebackRows();
+    if (rows.length === 0) return { rows: 0 };
+    let succeed = 0;
+    let failure = 0;
+    let error: string | undefined;
+    // 1回の取り込みは500行まで
+    for (let i = 0; i < rows.length; i += 500) {
+      const chunk = rows.slice(i, i + 500);
+      try {
+        const result = await importCsvToRakuraku(toCsv(CARRIER_WRITEBACK_COLUMNS, chunk), CARRIER_WRITEBACK_IMPORT_ID, 'carrier_status_import.csv');
+        succeed += result.succeedCount || 0;
+        failure += result.failureCount || 0;
+        if (result.failureCount === 0) chunk.forEach((r) => (carrierWritten[r[0]] = r.slice(1).join('|')));
+      } catch (e: any) {
+        error = e?.message || String(e);
+        break;
+      }
+    }
+    carrierWritebackLog.unshift({
+      at: new Date().toISOString(),
+      rows: rows.length,
+      succeedCount: succeed,
+      failureCount: failure,
+      error,
+      sample: rows.slice(0, 3).map((r) => r.join(' | ')),
+    });
+    carrierWritebackLog = carrierWritebackLog.slice(0, 30);
     scheduleCarrierStatusSave();
-    return { rows: rows.length, result };
-  } catch (e: any) {
-    const error = e?.message || String(e);
-    carrierWritebackLog.unshift({ at: new Date().toISOString(), rows: rows.length, error });
-    carrierWritebackLog = carrierWritebackLog.slice(0, 20);
-    return { rows: rows.length, error };
+    console.log(`[Carriers] Write-back: ${rows.length} rows, ok ${succeed}, failed ${failure}${error ? `, error: ${error}` : ''}`);
+    return { rows: rows.length, succeedCount: succeed, failureCount: failure, error };
+  } finally {
+    carrierWritebackRunning = false;
   }
 }
 
@@ -2744,100 +2866,107 @@ app.get('/api/carriers/writeback', async (_req, res) => {
     pendingRows: rows.length,
     sample: rows.slice(0, 10),
     log: carrierWritebackLog,
+    writtenCount: Object.keys(carrierWritten).length,
   });
 });
 
-async function runDhlAutoRefresh(force = false) {
-  const { creds } = await effectiveCarrierCreds();
-  if (!creds.dhl) return;
+// 照会の結果の内訳（報告用）：出荷から21日以内の出荷済みの出荷
+app.get('/api/carriers/report', async (_req, res) => {
   await loadCarrierStatusCache();
-  // 楽楽販売の出荷データがまだ読み込まれていなければ、今回は見送る（空のまま「実行済み」にしない）
+  const now = Date.now();
+  const out = { shipments: 0, tracked: 0, noNumber: 0, mismatch: 0, notFound: 0, outOfScope: 0, invalid: 0, pending: 0 };
+  const exceptions: Record<string, number> = {};
+  for (const s of serverRakurakuStore.shipments || []) {
+    if (!String(s.shipStatus || '').includes('出荷済')) continue;
+    const shipped = shipDateOf(s);
+    if (!shipped || now - shipped > 21 * 86400000) continue;
+    out.shipments++;
+    const boxes = boxesOfShipment(s);
+    if (boxes.length === 0) {
+      out.noNumber++;
+      continue;
+    }
+    const rs = boxes.map(resolveDigits);
+    const found = rs.filter((r) => r.state === 'found');
+    if (found.length > 0) {
+      out.tracked++;
+      const hint = hintedCarrier(s.courier);
+      if (hint && found.some((r) => r.carrier !== hint)) out.mismatch++;
+      found.forEach((r) => {
+        if (r.status!.status === 'exception') exceptions[r.status!.statusText || '不明'] = (exceptions[r.status!.statusText || '不明'] || 0) + 1;
+      });
+    } else if (rs.some((r) => r.state === 'pending')) out.pending++;
+    else if (rs.some((r) => r.state === 'not_found')) out.notFound++;
+    else if (rs.some((r) => r.state === 'out_of_scope')) out.outOfScope++;
+    else out.invalid++;
+  }
+  return res.json({ ...out, exceptions, dhlUsedToday: dhlUsedToday(), lastAutoRunAt: carrierLastAutoRunAt, writeback: carrierWritebackLog.slice(0, 5) });
+});
+
+// ----------------------------------------------------------------------
+// 自動取得：日本時間 7〜21時、2時間ごと。出荷から21日以内の出荷済みの箱を解決し、
+// 配達完了でないものは DHL 6時間・FedEx 2時間たったら取り直す。新しい出荷（7日以内）で該当なしの番号は12時間後に取り直す。
+// 取得のあと、楽楽販売へ書き戻す。
+// ----------------------------------------------------------------------
+let carrierLastAutoRunAt: string | null = null;
+let carrierLastErrors: Record<string, string> = {};
+let carrierAutoRunning = false;
+
+async function runCarrierAutoRefresh(force = false) {
+  if (carrierAutoRunning) return;
+  const { creds } = await effectiveCarrierCreds();
+  if (!creds.dhl && !creds.fedex) return;
   if (!serverRakurakuStore.shipments || serverRakurakuStore.shipments.length === 0) return;
+  await loadCarrierStatusCache();
   const hour = jstHour();
   if (!force && (hour < 7 || hour > 21)) return;
-  const hasAnyDhl = Array.from(carrierCache.keys()).some((k) => k.startsWith('dhl:'));
-  if (!force && hasAnyDhl && dhlLastAutoRunAt && Date.now() - new Date(dhlLastAutoRunAt).getTime() < DHL_AUTO_INTERVAL_MS) return;
-  const room = DHL_DAILY_BUDGET - DHL_MANUAL_RESERVE - dhlUsedToday();
-  if (room <= 0) return;
-
-  const now = Date.now();
-  const candidates = new Map<string, { digits: string; shipped: number; fetched: number }>();
-  for (const { s, digits } of shipmentBoxes()) {
-    if (!String(s.shipStatus || '').includes('出荷済')) continue;
-    if (digits.length < 8 || detectCarrier(digits, s.courier) !== 'dhl') continue;
-    const shipped = shipDateOf(s);
-    if (!shipped || now - shipped > 21 * 86400000) continue;
-    const cached = carrierCache.get(`dhl:${digits}`);
-    if (cached?.status === 'delivered') continue;
-    const fetched = cached ? new Date(cached.fetchedAt).getTime() : 0;
-    if (fetched && now - fetched < DHL_REFRESH_AFTER_MS) continue;
-    candidates.set(digits, { digits, shipped, fetched });
-  }
-  // まだ一度も取っていないもの → 前回の取得が古いもの。同じなら新しい出荷を先に
-  const list = Array.from(candidates.values())
-    .sort((a, b) => a.fetched - b.fetched || b.shipped - a.shipped)
-    .slice(0, Math.min(DHL_AUTO_PER_RUN, room))
-    .map((c) => c.digits);
-  dhlLastAutoRunAt = new Date().toISOString();
-  if (list.length === 0) {
-    scheduleCarrierStatusSave();
-    return;
-  }
-  const { got, error } = await runDhlLookup(creds.dhl.apiKey, list);
-  console.log(`[Carriers] DHL auto refresh: ${got.length}/${list.length} updated, used today ${dhlUsedToday()}${error ? `, error: ${error}` : ''}`);
-  await runCarrierWriteback();
-}
-
-// FedEx の自動取得：回数の上限が大きいので、出荷から21日以内で配達完了でないものを2時間ごとにまとめて取り直す
-const FEDEX_AUTO_INTERVAL_MS = 2 * 60 * 60 * 1000;
-const FEDEX_AUTO_PER_RUN = 300;
-let fedexLastAutoRunAt: string | null = null;
-let fedexLastError: string | null = null;
-
-async function runFedexAutoRefresh() {
-  const { creds } = await effectiveCarrierCreds();
-  if (!creds.fedex) return;
-  if (!serverRakurakuStore.shipments || serverRakurakuStore.shipments.length === 0) return;
-  await loadCarrierStatusCache();
-  const hour = jstHour();
-  if (hour < 7 || hour > 21) return;
-  if (fedexLastAutoRunAt && Date.now() - new Date(fedexLastAutoRunAt).getTime() < FEDEX_AUTO_INTERVAL_MS) return;
-  const now = Date.now();
-  const list = new Set<string>();
-  for (const { s, digits } of shipmentBoxes()) {
-    if (!String(s.shipStatus || '').includes('出荷済')) continue;
-    if (digits.length < 8 || detectCarrier(digits, s.courier) !== 'fedex') continue;
-    const shipped = shipDateOf(s);
-    if (!shipped || now - shipped > 21 * 86400000) continue;
-    const cached = carrierCache.get(`fedex:${digits}`);
-    if (cached?.status === 'delivered') continue;
-    if (cached && now - new Date(cached.fetchedAt).getTime() < FEDEX_AUTO_INTERVAL_MS) continue;
-    list.add(digits);
-  }
-  fedexLastAutoRunAt = new Date().toISOString();
-  const nos = Array.from(list).slice(0, FEDEX_AUTO_PER_RUN);
-  if (nos.length === 0) return;
+  if (!force && carrierLastAutoRunAt && Date.now() - new Date(carrierLastAutoRunAt).getTime() < DHL_AUTO_INTERVAL_MS) return;
+  carrierAutoRunning = true;
   try {
-    const got = await trackFedex(creds.fedex, nos);
-    got.forEach((g) => carrierCache.set(`fedex:${g.trackingNo}`, g));
-    fedexLastError = null;
+    const now = Date.now();
+    const recent = new Set<string>();
+    const digits: string[] = [];
+    for (const s of serverRakurakuStore.shipments) {
+      if (!String(s.shipStatus || '').includes('出荷済')) continue;
+      const shipped = shipDateOf(s);
+      if (!shipped || now - shipped > 21 * 86400000) continue;
+      boxesOfShipment(s).forEach((d) => {
+        if (!digits.includes(d)) digits.push(d);
+        if (now - shipped <= 7 * 86400000) recent.add(d);
+      });
+    }
+    carrierLastAutoRunAt = new Date().toISOString();
+    carrierLastErrors = await resolveAndLookup(digits, creds, {
+      refreshStale: (r) => {
+        if (r.state === 'found') {
+          // 以前の形式で保存した FedEx の結果（通関完了日時などがない）は一度だけ取り直す
+          if (r.carrier === 'fedex' && r.status!.domestic === undefined) return true;
+          if (r.status!.status === 'delivered') return false;
+          return ageMs(r.status) > (r.carrier === 'dhl' ? DHL_REFRESH_AFTER_MS : 2 * 60 * 60 * 1000);
+        }
+        // 作ったばかりの送り状は、まだ運送会社に登録されていないことがある
+        return recent.has(r.digits) && ageMs(r.status) > 12 * 60 * 60 * 1000;
+      },
+      dhlLimit: Math.max(0, DHL_DAILY_BUDGET - DHL_MANUAL_RESERVE - dhlUsedToday()),
+    });
     scheduleCarrierStatusSave();
-    console.log(`[Carriers] FedEx auto refresh: ${got.length}/${nos.length} updated`);
+    console.log(`[Carriers] Auto refresh done: ${digits.length} numbers, DHL used today ${dhlUsedToday()}`, carrierLastErrors);
     await runCarrierWriteback();
-  } catch (e: any) {
-    fedexLastError = e?.message || String(e);
-    console.warn('[Carriers] FedEx auto refresh failed:', fedexLastError);
+  } finally {
+    carrierAutoRunning = false;
   }
 }
 
 setInterval(() => {
-  runDhlAutoRefresh().catch((e) => console.warn('[Carriers] DHL auto refresh failed:', e?.message || e));
-  runFedexAutoRefresh().catch((e) => console.warn('[Carriers] FedEx auto refresh failed:', e?.message || e));
+  runCarrierAutoRefresh()
+    .catch((e) => console.warn('[Carriers] Auto refresh failed:', e?.message || e))
+    // 手動の取得（カードの更新ボタンなど）で変わった分も、20分ごとに書き戻す
+    .then(() => runCarrierWriteback())
+    .catch((e) => console.warn('[Carriers] Write-back failed:', e?.message || e));
 }, 20 * 60 * 1000);
 // 起動して楽楽販売のデータがそろったころに1回目
 setTimeout(() => {
-  runDhlAutoRefresh().catch((e) => console.warn('[Carriers] DHL auto refresh failed:', e?.message || e));
-  runFedexAutoRefresh().catch((e) => console.warn('[Carriers] FedEx auto refresh failed:', e?.message || e));
+  runCarrierAutoRefresh().catch((e) => console.warn('[Carriers] Auto refresh failed:', e?.message || e));
 }, 3 * 60 * 1000);
 
 async function startServer() {

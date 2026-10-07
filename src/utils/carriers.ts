@@ -15,6 +15,10 @@ export interface CarrierStatus {
   error?: string;
   arrivedJapan?: boolean;
   customsCleared?: boolean;
+  customsClearedAt?: string;
+  domestic?: boolean;
+  notFound?: boolean;
+  lookup?: 'found' | 'not_found' | 'out_of_scope';
 }
 
 export const CARRIER_STATUS_LABEL: Record<NormalizedStatus, string> = {

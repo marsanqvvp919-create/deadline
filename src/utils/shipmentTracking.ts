@@ -1,16 +1,18 @@
 import { ShipmentItem } from '../types';
-import { CarrierStatus, CARRIER_STATUS_LABEL, digitsOf } from './carriers';
+import { CarrierStatus, CARRIER_STATUS_LABEL } from './carriers';
+import { parseTrackingNumbers } from './trackingNumbers';
 
 // 出荷ごとの箱（代表の出荷番号＋対応メモに並べた残りの箱の追跡番号）と、その配送状況をまとめる。
 // 複数口（湘南美容の一括配送など）は、全部の箱が配達完了になったときだけ「配達完了」にする。
 
 export function boxesOf(s: Pick<ShipmentItem, 'trackingNo' | 'extraTrackingNos'>): string[] {
-  return Array.from(new Set([digitsOf(s.trackingNo), ...(s.extraTrackingNos || [])])).filter((d) => d.length >= 8);
+  // 出荷番号の欄の番号（複数・4桁区切り・下4桁の省略にも対応）＋対応メモの番号
+  return Array.from(new Set([...parseTrackingNumbers(s.trackingNo), ...(s.extraTrackingNos || [])]));
 }
 
 /** 「見つからない」だった番号は状況なしとして扱う */
 export function usableStatus(c?: CarrierStatus): CarrierStatus | undefined {
-  return c && !(c.status === 'unknown' && c.error) ? c : undefined;
+  return c && c.status !== 'unknown' && !c.notFound ? c : undefined;
 }
 
 export interface BoxSummary {
