@@ -436,8 +436,8 @@ export default function App() {
     if (!deliveryData) return 0;
     let count = 0;
     filteredOrders.forEach((o) => {
-      const payStatus = o.paymentStatus || '入金済';
-      if (payStatus !== '入金済') return;
+      // 入金ステータスが楽楽販売で「入金済」の伝票だけ（不明は数えない）
+      if (o.paymentStatus !== '入金済') return;
       o.lines.forEach((l) => {
         if (isShippingOrFee(l.productName, l.productId)) return;
         if (l.stage === '未発注') count++;

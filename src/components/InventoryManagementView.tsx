@@ -38,7 +38,14 @@ export const InventoryManagementView: React.FC<InventoryManagementViewProps> = (
     try {
       const raw = localStorage.getItem(STORAGE_WAREHOUSE_STOCK_KEY);
       if (raw) {
-        return JSON.parse(raw);
+        // シンガポール倉庫の数値は取り込み元が無く、以前は商品IDから作った架空の値が保存されていたため0に戻す
+        return (JSON.parse(raw) as WarehouseStockRecord[]).map((r) => ({
+          ...r,
+          singaporeStock: 0,
+          singaporeSafetyStock: 0,
+          inTransitSingapore: 0,
+          reservedSingapore: 0,
+        }));
       }
     } catch {}
 
@@ -47,22 +54,18 @@ export const InventoryManagementView: React.FC<InventoryManagementViewProps> = (
       ord.lines.forEach((l) => {
         if (isShippingOrFee(l.productName, l.productId)) return;
         if (!map.has(l.productId)) {
-          let hash = 0;
-          for (let i = 0; i < l.productId.length; i++) hash = (hash * 31 + l.productId.charCodeAt(i)) & 0xffffffff;
-          const sStock = Math.abs(hash >> 2) % 120 + 20;
-
-          // Korea stock starts at 0 (CLEARED), waiting for CSV import
+          // 在庫はCSV取り込み（韓国倉庫）で入る実数だけを使う。取り込み前はすべて0
           map.set(l.productId, {
             productId: l.productId,
             productName: l.productName,
-            koreaStock: 0, // Cleared state by default
-            singaporeStock: sStock,
+            koreaStock: 0,
+            singaporeStock: 0,
             koreaSafetyStock: 0,
-            singaporeSafetyStock: 20,
+            singaporeSafetyStock: 0,
             inTransitKorea: 0,
-            inTransitSingapore: 25,
+            inTransitSingapore: 0,
             reservedKorea: 0,
-            reservedSingapore: Math.floor(sStock * 0.25),
+            reservedSingapore: 0,
             preferredWarehouse: 'korea',
           });
         }

@@ -421,27 +421,13 @@ export function normalizeDeliveryData(data: DeliveryData): DeliveryData {
       Object.assign(order, orderOverrides[order.orderId]);
     }
 
-    // 入金ステータスの補完
+    // 入金ステータス・入金日は楽楽販売の値だけを使う（ステータス文言に入金済/入金待ちがあるときだけ補う）
     if (!order.paymentStatus) {
       if (order.status.includes('入金済') || order.status.includes('決済完了')) {
         order.paymentStatus = '入金済';
       } else if (order.status.includes('入金待ち') || order.status.includes('未入金')) {
         order.paymentStatus = '入金待ち';
-      } else {
-        let hash = 0;
-        for (let i = 0; i < order.orderId.length; i++) hash = (hash * 31 + order.orderId.charCodeAt(i)) & 0xffffffff;
-        const mod = Math.abs(hash) % 100;
-        if (mod < 75) {
-          order.paymentStatus = '入金済';
-        } else if (mod < 90) {
-          order.paymentStatus = '入金待ち';
-        } else {
-          order.paymentStatus = '売掛・締日決済';
-        }
       }
-    }
-    if (!order.paymentDate && order.paymentStatus === '入金済' && order.orderDate) {
-      order.paymentDate = order.orderDate;
     }
     if (!order.paymentMethod) {
       order.paymentMethod = order.paymentStatus === '売掛・締日決済' ? '月末締め翌月末払い' : '銀行振込 (事前入金)';

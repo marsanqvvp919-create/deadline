@@ -207,7 +207,7 @@ export function getBillingReceivableInfo(
     unpaidBalance,
     paymentStatus,
     paymentDueDate,
-    paymentMethod: order.paymentMethod || '銀行振込',
+    paymentMethod: order.paymentMethod || '未設定',
     isPaid,
     isOverdue,
     daysOverdue,
@@ -453,7 +453,7 @@ export function calculateComprehensiveSalesMetrics(
         receivableBalance: 0,
         isOverdueReceivable: false,
         maxDaysOverdue: 0,
-        paymentMethod: ord.paymentMethod || '銀行振込',
+        paymentMethod: ord.paymentMethod || '未設定',
         latestOrderDate: ord.orderDate || '',
       });
     }

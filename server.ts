@@ -36,7 +36,7 @@ const FIELD_MAP: Record<string, string[]> = {
   deliveredDate: ['110081', '納品完了日', 'deliveredDate'],
   requestedDate: ['109983', '希望納期', 'requestedDate'],
   totalAmount: ['109985', '販売金額合計', 'totalAmount'],
-  paymentStatus: ['109986', '入金ステータス', '入金状況', '入金状態', '入金確認', '入金区分', '入金', 'paymentStatus'],
+  paymentStatus: ['109986', '入金ステータス', '入金状況', '入金状態', '入金確認', '入金区分', 'paymentStatus'],
   paymentDate: ['109987', '入金日', '入金完了日', '入金確認日', 'paymentDate'],
   paymentDueDate: ['109989', '入金予定日', '支払期日', '入金期日', '支払予定日', '振込期日', 'paymentDueDate'],
   paymentMethod: ['109988', '支払方法', '決済方法', 'paymentMethod'],
@@ -610,11 +610,11 @@ function transformCsvToDeliveryData(csvText: string): any {
       const rawPaymentStatus = getVal(row, 'paymentStatus');
       const rawPaymentDate = getVal(row, 'paymentDate');
       const rawPaymentMethod = getVal(row, 'paymentMethod');
-      const rawStatus = getVal(row, 'status') || '受注確定';
+      const rawStatus = getVal(row, 'status');
       const orderDate = getVal(row, 'orderDate') || '';
 
-      // 支払・入金ステータスの判定
-      let paymentStatus: '入金済' | '未入金' | '入金待ち' | '売掛・締日決済' = '入金済';
+      // 入金ステータスは楽楽販売の値だけを使う（値が無い伝票は「不明」のまま。推定や機械的な割り振りはしない）
+      let paymentStatus: '入金済' | '未入金' | '入金待ち' | '売掛・締日決済' | undefined;
       if (rawPaymentStatus) {
         if (rawPaymentStatus.includes('済') || rawPaymentStatus.includes('完了')) {
           paymentStatus = '入金済';
@@ -625,48 +625,15 @@ function transformCsvToDeliveryData(csvText: string): any {
         } else if (rawPaymentStatus.includes('未')) {
           paymentStatus = '未入金';
         }
-      } else {
-        if (rawStatus.includes('入金済') || rawStatus.includes('決済完了')) {
-          paymentStatus = '入金済';
-        } else if (rawStatus.includes('入金待ち') || rawStatus.includes('未入金')) {
-          paymentStatus = '入金待ち';
-        } else {
-          // 実務データ連携時の適正な推定（約75%入金済、15%入金待ち、10%売掛・締日決済）
-          let hash = 0;
-          for (let i = 0; i < orderId.length; i++) hash = (hash * 31 + orderId.charCodeAt(i)) & 0xffffffff;
-          const mod = Math.abs(hash) % 100;
-          if (mod < 75) {
-            paymentStatus = '入金済';
-          } else if (mod < 90) {
-            paymentStatus = '入金待ち';
-          } else {
-            paymentStatus = '売掛・締日決済';
-          }
-        }
+      } else if (rawStatus.includes('入金済') || rawStatus.includes('決済完了')) {
+        paymentStatus = '入金済';
+      } else if (rawStatus.includes('入金待ち') || rawStatus.includes('未入金')) {
+        paymentStatus = '入金待ち';
       }
 
-      let paymentDate = rawPaymentDate || null;
-      if (!paymentDate && paymentStatus === '入金済' && orderDate) {
-        // 受注日の同日または翌日を入金日とする
-        paymentDate = orderDate;
-      }
-
-      const rawPaymentDueDate = getVal(row, 'paymentDueDate');
-      let paymentDueDate = rawPaymentDueDate || null;
-      if (!paymentDueDate && orderDate) {
-        const oD = new Date(orderDate + 'T00:00:00+09:00');
-        if (!isNaN(oD.getTime())) {
-          if (paymentStatus === '売掛・締日決済') {
-            // 翌月末日
-            const nextMonthLast = new Date(oD.getFullYear(), oD.getMonth() + 2, 0);
-            paymentDueDate = nextMonthLast.toISOString().slice(0, 10);
-          } else {
-            // 受注日 + 7日 (入金期日)
-            const dueD = new Date(oD.getTime() + 7 * 24 * 60 * 60 * 1000);
-            paymentDueDate = dueD.toISOString().slice(0, 10);
-          }
-        }
-      }
+      // 入金日・入金予定日・支払方法も楽楽販売の値だけ（受注日から推定しない）
+      const paymentDate = rawPaymentDate || null;
+      const paymentDueDate = getVal(row, 'paymentDueDate') || null;
 
       ordersMap.set(orderId, {
         orderId,
@@ -681,7 +648,7 @@ function transformCsvToDeliveryData(csvText: string): any {
         paymentStatus,
         paymentDate,
         paymentDueDate,
-        paymentMethod: rawPaymentMethod || (paymentStatus === '売掛・締日決済' ? '月末締め翌月末払い' : '銀行振込 (事前入金)'),
+        paymentMethod: rawPaymentMethod || undefined,
         totalAmount: parseFloat(getVal(row, 'totalAmount')) || 0,
         quoteDate: getVal(row, 'quoteDate') || null,
         quoteValidUntil: getVal(row, 'quoteValidUntil') || null,
@@ -760,7 +727,7 @@ function transformCsvToDeliveryData(csvText: string): any {
       productId,
       productName: getVal(row, 'productName') || '商品',
       quantity,
-      supplierName: getVal(row, 'supplierName') || '仕入先',
+      supplierName: getVal(row, 'supplierName') || '',
       stage,
       earliestDate: getVal(row, 'earliestDate') || null,
       latestDate: getVal(row, 'latestDate') || null,
@@ -1036,6 +1003,7 @@ interface RakurakuServerStore {
   rateLimitBackoffMs: number;
   rateLimitUntil: number | null;
   refreshIntervalMinutes: number;
+  sourceHeaders: Record<string, string[]>;
   lastError: {
     type: 'rate_limit' | 'ip_blocked' | 'auth_error' | 'network_error';
     message: string;
@@ -1058,8 +1026,15 @@ const serverRakurakuStore: RakurakuServerStore = {
   rateLimitBackoffMs: 5 * 60 * 1000, // 初回 5分
   rateLimitUntil: null,
   refreshIntervalMinutes: 15, // 15分おき自動同期
+  sourceHeaders: {},
   lastError: null,
 };
+
+// 楽楽販売から実際に届いた列名を記録する（どの項目が本物のデータかを確認するため）
+function recordHeaders(schemaId: string, csv: string) {
+  const firstLine = csv.split(/\r?\n/, 1)[0] || '';
+  if (firstLine) serverRakurakuStore.sourceHeaders[schemaId] = parseCsv(firstLine)[0] || [];
+}
 
 function parseRakurakuError(err: any): { type: 'rate_limit' | 'ip_blocked' | 'auth_error' | 'network_error'; message: string; errorCode: string } {
   const code = String(err?.json?.errors?.code || err?.errorCode || err?.status || '');
@@ -1172,6 +1147,7 @@ async function syncAllRakurakuData(isManual = false): Promise<boolean> {
     // 1. 出荷管理 (101270)
     try {
       const resShip = await fetchRakurakuCsv(baseUrl, token, '101270', '103958', '101059', 50);
+      recordHeaders('101270', resShip.csv);
       const parsedShipments = transformCsvToShipments(resShip.csv);
       if (parsedShipments && parsedShipments.length > 0) {
         serverRakurakuStore.shipments = parsedShipments;
@@ -1188,6 +1164,7 @@ async function syncAllRakurakuData(isManual = false): Promise<boolean> {
     // 2. ご注文管理 (101248)
     try {
       const resOrders = await fetchRakurakuCsv(baseUrl, token, '101248', undefined, undefined, 50);
+      recordHeaders('101248', resOrders.csv);
       const parsedOrders = transformCsvToDeliveryData(resOrders.csv);
       if (parsedOrders) {
         serverRakurakuStore.orders = parsedOrders;
@@ -1327,6 +1304,7 @@ app.get('/api/rakuraku/all-data', async (_req, res) => {
     rateLimitUntil: serverRakurakuStore.rateLimitUntil,
     rateLimitRemainingSec: serverRakurakuStore.rateLimitUntil ? Math.max(0, Math.ceil((serverRakurakuStore.rateLimitUntil - Date.now()) / 1000)) : 0,
     refreshIntervalMinutes: serverRakurakuStore.refreshIntervalMinutes,
+    sourceHeaders: serverRakurakuStore.sourceHeaders,
     lastError: serverRakurakuStore.lastError,
     serverIp: currentIp,
   });

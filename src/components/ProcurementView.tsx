@@ -110,8 +110,9 @@ export const ProcurementView: React.FC<ProcurementViewProps> = ({
       // 見積もりステータスのものは発注管理に含めない
       if (isQuoteOrder(ord)) return;
 
-      const payStatus = ord.paymentStatus || '入金済';
-      const payDate = ord.paymentDate || (payStatus === '入金済' ? ord.orderDate : null);
+      const payStatus = ord.paymentStatus;
+      // 入金日は楽楽販売の値だけ（受注日で代用しない）
+      const payDate = ord.paymentDate || null;
 
       let daysSincePay: number | null = null;
       let isAging = false;
