@@ -357,8 +357,8 @@ export const InventoryManagementView: React.FC<InventoryManagementViewProps> = (
               <span>シンガポール倉庫 (SIN) 在庫</span>
               <span className="w-2 h-2 rounded-full bg-indigo-400" />
             </div>
-            <span className="text-2xl font-extrabold font-mono text-white">{totalSingaporeStock.toLocaleString()}</span>
-            <span className="text-[10px] text-slate-400 block mt-0.5">稼働中品目: {stockRecords.filter((r) => r.singaporeStock > 0).length}品目</span>
+            <span className="text-lg font-bold text-slate-300">未連携</span>
+            <span className="text-[10px] text-slate-400 block mt-0.5">在庫データの取り込み元がまだありません</span>
           </div>
 
           <div className="bg-slate-800/60 border border-slate-700/80 p-3.5 rounded-2xl">
@@ -378,7 +378,7 @@ export const InventoryManagementView: React.FC<InventoryManagementViewProps> = (
           {[
             { id: 'all', label: '全倉庫表示', icon: Globe },
             { id: 'korea', label: `韓国倉庫 (KR) ${totalKoreaStock > 0 ? `(${totalKoreaStock})` : '(0)'}`, icon: Building },
-            { id: 'singapore', label: `シンガポール倉庫 (SIN) (${totalSingaporeStock})`, icon: MapPin },
+            { id: 'singapore', label: 'シンガポール倉庫 (SIN)（未連携）', icon: MapPin },
           ].map((tab) => {
             const Icon = tab.icon;
             const active = selectedWarehouse === tab.id;
@@ -437,7 +437,7 @@ export const InventoryManagementView: React.FC<InventoryManagementViewProps> = (
                   <th className="py-3 px-4 text-right bg-blue-50/50">韓国倉庫 (KR) 在庫</th>
                 )}
                 {(selectedWarehouse === 'all' || selectedWarehouse === 'singapore') && (
-                  <th className="py-3 px-4 text-right bg-indigo-50/50">シンガポール (SIN) 在庫</th>
+                  <th className="py-3 px-4 text-right bg-indigo-50/50">シンガポール (SIN) 在庫（未連携）</th>
                 )}
                 <th className="py-3 px-4 text-center">在庫ステータス</th>
               </tr>

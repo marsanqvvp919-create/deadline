@@ -626,28 +626,6 @@ export const ClinicMasterView: React.FC<ClinicMasterViewProps> = ({
                           <Package className="w-3.5 h-3.5" />
                           <span>商品進捗</span>
                         </button>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleOpenEdit(c);
-                          }}
-                          className="p-1.5 hover:bg-slate-200 rounded-lg text-slate-500 hover:text-slate-800 transition cursor-pointer"
-                          title="クリニック情報を編集"
-                        >
-                          <Edit2 className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setClinicToDelete(c);
-                          }}
-                          className="p-1.5 hover:bg-rose-100 rounded-lg text-slate-400 hover:text-rose-600 transition cursor-pointer"
-                          title="クリニックをマスタから削除"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
                       </div>
                     </td>
                   </tr>
@@ -739,17 +717,6 @@ export const ClinicMasterView: React.FC<ClinicMasterViewProps> = ({
             </div>
 
             <div className="flex items-center justify-between pt-3 border-t border-slate-100">
-              <button
-                type="button"
-                onClick={() => {
-                  const target = clinics.find((c) => c.clinicId === editForm.clinicId);
-                  if (target) setClinicToDelete(target);
-                }}
-                className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer transition"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                <span>クリニックを削除</span>
-              </button>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
@@ -788,13 +755,6 @@ export const ClinicMasterView: React.FC<ClinicMasterViewProps> = ({
               クリニック「<b className="text-slate-900">{clinicToDelete.clinicName}</b>」をマスタから削除してもよろしいですか？
             </p>
             <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
-              <button
-                type="button"
-                onClick={() => setClinicToDelete(null)}
-                className="px-3.5 py-1.5 rounded-lg border border-slate-300 text-slate-700 text-xs font-semibold hover:bg-slate-50 cursor-pointer"
-              >
-                キャンセル
-              </button>
               <button
                 type="button"
                 onClick={handleConfirmDeleteClinic}

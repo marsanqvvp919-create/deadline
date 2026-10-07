@@ -300,10 +300,18 @@ export function isShippingOrFee(productName?: string, productId?: string): boole
 /**
  * 楽楽販売レコードURLの生成（dbSchemaId=101248, viewId=0）
  */
-export function buildRakurakuUrl(baseUrl: string, orderId: string): string {
+// 楽楽販売は画面ごとのURLが無い（常に top/main）ため、レコードを直接は開けない。トップを開く
+export function buildRakurakuUrl(baseUrl: string, _orderId?: string): string {
   const cleanBase = baseUrl.endsWith('/') ? baseUrl : baseUrl + '/';
-  // 楽楽販売のURL規則例
-  return `${cleanBase}#/db/101248/view/0/rec/${encodeURIComponent(orderId)}`;
+  return `${cleanBase}top/main`;
+}
+
+/** IDをクリップボードにコピーしてから楽楽販売を開く（楽楽販売の検索に貼り付けて使う） */
+export function openRakurakuWithCopiedId(baseUrl: string, id: string) {
+  try {
+    navigator.clipboard?.writeText(id);
+  } catch {}
+  window.open(buildRakurakuUrl(baseUrl), '_blank', 'noopener,noreferrer');
 }
 
 /**

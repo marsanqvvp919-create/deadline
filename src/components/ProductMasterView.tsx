@@ -518,28 +518,6 @@ export const ProductMasterView: React.FC<ProductMasterViewProps> = ({
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
-                            handleOpenEdit(p);
-                          }}
-                          className="p-1 hover:bg-slate-200 rounded-lg text-slate-500 hover:text-slate-800 transition cursor-pointer"
-                          title="商品情報を編集"
-                        >
-                          <Edit2 className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setProductToDelete(p);
-                          }}
-                          className="p-1 hover:bg-rose-100 rounded-lg text-slate-400 hover:text-rose-600 transition cursor-pointer"
-                          title="商品をマスタから削除"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
                             setSelectedProduct(p);
                           }}
                           className="p-1 hover:bg-slate-200 rounded-lg text-slate-500 hover:text-slate-800 transition cursor-pointer"
@@ -600,20 +578,6 @@ export const ProductMasterView: React.FC<ProductMasterViewProps> = ({
                     取扱ステータス: <b>{selectedProduct.status}</b>
                   </span>
                   <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => handleOpenEdit(selectedProduct)}
-                      className="px-2.5 py-1 text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg flex items-center gap-1 cursor-pointer"
-                    >
-                      <Edit2 className="w-3.5 h-3.5" />
-                      <span>単価・メモ編集</span>
-                    </button>
-                    <button
-                      onClick={() => setProductToDelete(selectedProduct)}
-                      className="px-2.5 py-1 text-xs bg-rose-50 hover:bg-rose-100 text-rose-700 font-semibold rounded-lg flex items-center gap-1 cursor-pointer"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                      <span>商品を削除</span>
-                    </button>
                   </div>
                 </div>
 
@@ -805,17 +769,6 @@ export const ProductMasterView: React.FC<ProductMasterViewProps> = ({
             </div>
 
             <div className="flex items-center justify-between pt-3 border-t border-slate-100">
-              <button
-                type="button"
-                onClick={() => {
-                  const prod = products.find((p) => p.productId === editForm.productId);
-                  if (prod) setProductToDelete(prod);
-                }}
-                className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer transition"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                <span>商品を削除</span>
-              </button>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
@@ -854,13 +807,6 @@ export const ProductMasterView: React.FC<ProductMasterViewProps> = ({
               商品「<b className="text-slate-900">{productToDelete.productName}</b>」を商品マスタから削除してもよろしいですか？
             </p>
             <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
-              <button
-                type="button"
-                onClick={() => setProductToDelete(null)}
-                className="px-3.5 py-1.5 rounded-lg border border-slate-300 text-slate-700 text-xs font-semibold hover:bg-slate-50 cursor-pointer"
-              >
-                キャンセル
-              </button>
               <button
                 type="button"
                 onClick={handleConfirmDeleteProduct}

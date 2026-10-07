@@ -324,13 +324,6 @@ export function getOrderOverrides(): Record<string, any> {
   }
 }
 
-export function saveOrderOverride(orderId: string, updates: Record<string, any>) {
-  try {
-    const current = getOrderOverrides();
-    current[orderId] = { ...(current[orderId] || {}), ...updates };
-    localStorage.setItem(STORAGE_ORDER_OVERRIDES_KEY, JSON.stringify(current));
-  } catch {}
-}
 
 export function getLineOverrides(): Record<string, any> {
   try {
@@ -341,13 +334,6 @@ export function getLineOverrides(): Record<string, any> {
   }
 }
 
-export function saveLineOverride(lineKey: string, updates: Record<string, any>) {
-  try {
-    const current = getLineOverrides();
-    current[lineKey] = { ...(current[lineKey] || {}), ...updates };
-    localStorage.setItem(STORAGE_LINE_OVERRIDES_KEY, JSON.stringify(current));
-  } catch {}
-}
 
 const STORAGE_PAYMENT_REMINDERS_KEY = 'nouki_payment_reminders_v1';
 
@@ -403,25 +389,16 @@ export function normalizeDeliveryData(data: DeliveryData): DeliveryData {
     return true;
   });
 
-  const orderOverrides = getOrderOverrides();
-  const lineOverrides = getLineOverrides();
+  // 以前は画面での「発注済にする」「入金ステータス切替」をこのブラウザだけに保存し、楽楽販売の値を上書きしていた。
+  // 楽楽販売にも他の人の画面にも反映されないため、上書きは使わず、残っている分も消す。
+  try {
+    localStorage.removeItem(STORAGE_ORDER_OVERRIDES_KEY);
+    localStorage.removeItem(STORAGE_LINE_OVERRIDES_KEY);
+  } catch {}
 
   data.orders.forEach((order) => {
-    // 受注日が未記録の場合、伝票IDから抽出または補完
-    if (!order.orderDate || !order.orderDate.trim()) {
-      const m = order.orderId ? order.orderId.match(/20\d{2}[-/]?\d{2}[-/]?\d{2}/) : null;
-      if (m) {
-        const raw = m[0].replace(/[-/]/g, '');
-        order.orderDate = `${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}`;
-      } else {
-        order.orderDate = '2026-09-01';
-      }
-    }
-
-    // ユーザー変更の反映
-    if (orderOverrides[order.orderId]) {
-      Object.assign(order, orderOverrides[order.orderId]);
-    }
+    // 受注日は楽楽販売の値だけ（未入力なら空のまま。以前は 2026-09-01 などを仮に入れていた）
+    if (!order.orderDate) order.orderDate = '';
 
     // 入金ステータス・入金日は楽楽販売の値だけを使う（ステータス文言に入金済/入金待ちがあるときだけ補う）
     if (!order.paymentStatus) {
@@ -510,10 +487,6 @@ export function normalizeDeliveryData(data: DeliveryData): DeliveryData {
         line.lineKey = `${baseKey}_${count}`;
       }
 
-      // 明細ローカル変更の反映
-      if (lineOverrides[line.lineKey]) {
-        Object.assign(line, lineOverrides[line.lineKey]);
-      }
     });
 
     const totalLines = order.lines.length;
