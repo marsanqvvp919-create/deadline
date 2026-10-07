@@ -629,7 +629,9 @@ export const ArrivalTrackingView: React.FC<{
                       <div className="text-[11px] text-slate-500 bg-slate-50 rounded-lg px-2.5 py-1.5">
                         {now === 'no_info'
                           ? carrier.label === 'DHL'
-                            ? 'DHL の状況はまだ取得していません（2時間ごとの自動取得を待つか、上のボタンで取得）'
+                            ? dhlInfo && dhlInfo.usedToday >= dhlInfo.budget - 40
+                              ? `DHL の今日の取得回数（${dhlInfo.usedToday}/${dhlInfo.budget}回）が上限近くのため、自動取得は明日の朝7時以降になります。急ぐときは右下の更新ボタンで取得できます（残り${Math.max(0, dhlInfo.budget - dhlInfo.usedToday)}回）`
+                              : 'DHL の状況はまだ取得していません（2時間ごとの自動取得で順番に取得します。急ぐときは右下の更新ボタン）'
                             : `${carrier.label} の状況はまだ取得していません（上のボタンで取得）`
                           : now === 'bad_number'
                             ? '追跡番号の誤りの可能性：DHL・FedEx のどちらにも該当がありません。楽楽販売の出荷番号を確認してください'
