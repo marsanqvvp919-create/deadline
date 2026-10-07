@@ -22,6 +22,7 @@ export interface ShipmentLike {
   shipStatus?: string;
   warehouse?: string;
   warehouseInvoiceNo?: string;
+  courier?: string;
 }
 
 export interface ClinicLike {
@@ -131,6 +132,17 @@ function narrowByWarehouse<T extends ShipmentLike>(origin: string, candidates: T
   return exact.length > 0 ? exact : notConflicting;
 }
 
+/** 配送業者で候補を絞る：シートのクーリエと出荷管理の配送業者がどちらも入っていて違うものは外す */
+function narrowByCourier<T extends ShipmentLike>(courier: string, candidates: T[]): T[] {
+  const c = normalizeWarehouse(courier);
+  if (!c) return candidates;
+  const filtered = candidates.filter((x) => {
+    const v = normalizeWarehouse(x.courier);
+    return !v || v.includes(c) || c.includes(v);
+  });
+  return filtered;
+}
+
 function namesMatch(a: string, b: string): boolean {
   const na = normalizeClinicName(a);
   const nb = normalizeClinicName(b);
@@ -214,7 +226,7 @@ export function findUnmatched(
     const narrowed =
       invoiceHits.length > 0
         ? invoiceHits.map((s) => ({ ...s, reason: 'インボイス番号が一致' as const }))
-        : narrowByWarehouse(row.origin, candidates);
+        : narrowByCourier(row.courier, narrowByWarehouse(row.origin, candidates));
 
     unmatched.push({
       ...row,

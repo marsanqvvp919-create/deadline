@@ -258,8 +258,9 @@ const SHIPMENT_FIELD_MAP: Record<string, string[]> = {
   shipmentId: ['110187', '出荷ID', '出荷管理ID', 'DO番号', 'DO-', '出荷コード', 'shipmentId'],
   orderId: ['109974', '受注ID', '受注番号', 'ご注文管理ID', 'orderId'],
   customerName: ['110108', 'クリニック名', '顧客名', '取引先名', 'customerName', 'クリニック'],
-  customerId: ['109898', 'クリニックID', '顧客ID', '取引先ID', 'customerId'],
-  warehouse: ['出荷元倉庫', '出荷倉庫', '倉庫', '出荷元', 'warehouse'],
+  customerId: ['110191', '109898', 'クリニックID', '顧客ID', '取引先ID', 'customerId'],
+  warehouse: ['110732', '出荷元倉庫', '出荷倉庫', '倉庫', '出荷元', 'warehouse'],
+  courier: ['110197', '配送業者', 'courier'],
   arrivalAirport: ['到着空港', '仕向空港', '空港', 'arrivalAirport'],
   importStatus: ['輸入確認ステータス', '輸入確認', '輸入ステータス', 'importStatus'],
   coolApplicationStatus: ['クール申請', 'クール便申請', 'クール申請ステータス', 'クール便手配', 'coolApplicationStatus'],
@@ -268,12 +269,15 @@ const SHIPMENT_FIELD_MAP: Record<string, string[]> = {
   phaNumber: ['PHA番号', 'PHA No', 'PHA-No', 'PHA', 'phaNumber'],
   warehouseInvoiceNo: ['倉庫インボイス番号', '倉庫インボイス', '倉庫Invoice番号', 'インボイス番号', 'warehouseInvoiceNo'],
   currentLocation: ['現在地', '貨物現在地', 'ステータス現在地', 'currentLocation'],
-  trackingNo: ['出荷番号', '送り状番号', 'トラッキング番号', '追跡番号', 'trackingNo'],
+  trackingNo: ['110195', '出荷番号', '送り状番号', 'トラッキング番号', '追跡番号', 'trackingNo'],
   kantoCustomsPermitted: ['関東通関可否', '関東通関', '関東通関判定', 'kantoCustomsPermitted'],
   customsStatus: ['通関ステータス', '通関状況', '税関状況', 'customsStatus'],
-  shippedDate: ['110017', '出荷日', '発送日', 'shippedDate'],
-  shipStatus: ['出荷状態', '出荷ステータス', 'shipStatus'],
+  shippedDate: ['110194', '110017', '出荷日', '発送日', 'shippedDate'],
+  // 出荷管理の「ステータス」(110188)。部分一致だと輸入確認ステータス等に当たるので完全一致のみ
+  shipStatus: ['110188', 'ステータス', '出荷状態', 'shipStatus'],
 };
+
+const SHIPMENT_EXACT_ONLY_KEYS = new Set(['shipStatus']);
 
 function transformCsvToShipments(csvText: string): any[] {
   const rows = parseCsv(csvText);
@@ -282,9 +286,18 @@ function transformCsvToShipments(csvText: string): any[] {
   const headers = rows[0].map(h => h.replace(/^["'\s]+|["'\s]+$/g, ''));
   const headerMap: Record<string, number> = {};
 
+  // 完全一致を優先し、見つからない項目だけ部分一致で探す
   for (const [key, aliases] of Object.entries(SHIPMENT_FIELD_MAP)) {
     for (const alias of aliases) {
-      const idx = headers.findIndex(h => h === alias || h.includes(alias));
+      const idx = headers.findIndex(h => h === alias);
+      if (idx !== -1) {
+        headerMap[key] = idx;
+        break;
+      }
+    }
+    if (headerMap[key] !== undefined || SHIPMENT_EXACT_ONLY_KEYS.has(key)) continue;
+    for (const alias of aliases) {
+      const idx = headers.findIndex(h => h.includes(alias));
       if (idx !== -1) {
         headerMap[key] = idx;
         break;
@@ -325,6 +338,7 @@ function transformCsvToShipments(csvText: string): any[] {
     const customsStatus = getVal(row, 'customsStatus') || '—';
     const shippedDate = getVal(row, 'shippedDate') || '—';
     const shipStatus = getVal(row, 'shipStatus') || '';
+    const courier = getVal(row, 'courier') || '';
 
     // クール手配漏れの条件: クール申請・委任状・伝票のどれかが「未」
     const isCoolMissing =
@@ -356,6 +370,7 @@ function transformCsvToShipments(csvText: string): any[] {
       customsStatus,
       shippedDate,
       shipStatus,
+      courier,
       isKantoNg,
       isCoolMissing,
       updatedAt: new Date().toISOString().replace('T', ' ').slice(0, 16),
@@ -1213,7 +1228,10 @@ async function syncAllRakurakuData(isManual = false): Promise<boolean> {
     const needMasters =
       isManual ||
       !serverRakurakuStore.lastMastersTime ||
-      Date.now() - serverRakurakuStore.lastMastersTime > ONE_DAY_MS;
+      Date.now() - serverRakurakuStore.lastMastersTime > ONE_DAY_MS ||
+      !serverRakurakuStore.products?.length ||
+      !serverRakurakuStore.clinics?.length ||
+      !serverRakurakuStore.suppliers?.length;
 
     if (needMasters) {
       console.log('[Rakuraku Sync] Fetching masters (products, clinics, suppliers)...');
