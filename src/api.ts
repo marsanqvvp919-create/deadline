@@ -35,10 +35,23 @@ export function getLocalShipments(): ShipmentItem[] {
     const raw = localStorage.getItem(STORAGE_SHIPMENTS_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        // 架空サンプルデータ（SHP-…やORD-…などのダミー）を完全に除外
+        const realItems = parsed.filter((s: any) => {
+          if (!s || typeof s !== 'object') return false;
+          const sId = String(s.shipmentId || '');
+          const oId = String(s.orderId || '');
+          if (sId.startsWith('SHP-') || oId.startsWith('ORD-202610-')) return false;
+          return true;
+        });
+        if (realItems.length !== parsed.length) {
+          saveLocalShipments(realItems);
+        }
+        return realItems;
+      }
     }
   } catch {}
-  return INITIAL_SHIPMENTS;
+  return [];
 }
 
 export function saveLocalShipments(shipments: ShipmentItem[]) {
@@ -183,6 +196,8 @@ export type ConnectionMode = 'rakuraku' | 'gas' | 'sample';
 
 export interface FetchResult {
   data: DeliveryData;
+  shipments?: ShipmentItem[];
+  suppliers?: SupplierItem[];
   isStale: boolean;
   isFallback: boolean;
   error: string | null;
@@ -551,6 +566,9 @@ export async function fetchData(): Promise<FetchResult> {
 
   // 1. 楽楽販売 API直接連携モード（パターンC）
   if (config.mode === 'rakuraku' || true) {
+    let fetchedShipments: ShipmentItem[] = getLocalShipments();
+    let fetchedSuppliers: SupplierItem[] = getLocalSuppliers();
+
     try {
       // 1. 出荷管理 (dbSchemaId: 101270 / searchId: 103958 / listId: 101059)
       try {
@@ -567,6 +585,7 @@ export async function fetchData(): Promise<FetchResult> {
         });
         const shipJson = await resShip.json();
         if (resShip.ok && shipJson.success && Array.isArray(shipJson.data) && shipJson.data.length > 0) {
+          fetchedShipments = shipJson.data;
           saveLocalShipments(shipJson.data);
         }
       } catch (e) {
@@ -588,6 +607,7 @@ export async function fetchData(): Promise<FetchResult> {
         });
         const supJson = await resSup.json();
         if (resSup.ok && supJson.success && Array.isArray(supJson.data) && supJson.data.length > 0) {
+          fetchedSuppliers = supJson.data;
           saveLocalSuppliers(supJson.data);
         }
       } catch (e) {
@@ -623,6 +643,8 @@ export async function fetchData(): Promise<FetchResult> {
 
         return {
           data: diffResult.mergedData,
+          shipments: fetchedShipments,
+          suppliers: fetchedSuppliers,
           isStale: checkIsStale(diffResult.mergedData.generatedAt),
           isFallback: false,
           error: null,
@@ -641,6 +663,8 @@ export async function fetchData(): Promise<FetchResult> {
       });
       return {
         data: emptyData,
+        shipments: fetchedShipments,
+        suppliers: fetchedSuppliers,
         isStale: false,
         isFallback: true,
         error: errorMessage,

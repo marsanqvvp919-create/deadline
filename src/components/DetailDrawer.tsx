@@ -251,39 +251,39 @@ export const DetailDrawer: React.FC<DetailDrawerProps> = ({
                 <div>
                   <span className="text-slate-400 block text-[11px]">出荷ID</span>
                   <span className="font-mono font-bold text-indigo-700">
-                    {order.shipmentId || 'SHP-202610-042'}
+                    {order.shipmentId || '—'}
                   </span>
                 </div>
                 <div>
                   <span className="text-slate-400 block text-[11px]">到着空港</span>
                   <span className="font-semibold text-slate-800 flex items-center gap-1">
                     <Plane className="w-3 h-3 text-indigo-500" />
-                    {order.arrivalAirport || '関西国際空港 (KIX)'}
+                    {order.arrivalAirport || '—'}
                   </span>
                 </div>
                 <div>
                   <span className="text-slate-400 block text-[11px]">輸入確認ステータス</span>
                   <span className={`font-bold ${order.importStatus === '要修正' ? 'text-rose-600' : 'text-emerald-700'}`}>
-                    {order.importStatus || '承認済'}
+                    {order.importStatus || '—'}
                   </span>
                 </div>
                 <div>
                   <span className="text-slate-400 block text-[11px]">クール便申請</span>
                   <span className="font-bold text-slate-800 flex items-center gap-1">
                     <Thermometer className="w-3 h-3 text-blue-500" />
-                    {order.coolApplicationStatus || '申請済'}
+                    {order.coolApplicationStatus || '—'}
                   </span>
                 </div>
                 <div>
                   <span className="text-slate-400 block text-[11px]">通関委任状 / 伝票</span>
                   <span className="font-medium text-slate-700">
-                    委任状:{order.powerOfAttorneyStatus || '受領済'} / 伝票:{order.slipStatus || '作成済'}
+                    委任状:{order.powerOfAttorneyStatus || '—'} / 伝票:{order.slipStatus || '—'}
                   </span>
                 </div>
                 <div>
                   <span className="text-slate-400 block text-[11px]">現在地</span>
                   <span className="text-slate-800 font-medium">
-                    {order.currentLocation || '成田税関 審査場'}
+                    {order.currentLocation || '—'}
                   </span>
                 </div>
               </div>

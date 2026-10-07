@@ -6,11 +6,13 @@ import {
   Order,
   OrderLine,
   AlertItem,
-  ClinicItem
+  ClinicItem,
+  ShipmentItem
 } from './types';
 import { fetchData, getConfiguredUrls, saveConnectionConfig, saveCachedDeliveryData } from './api';
 import { syncAndDiffOrders } from './utils/syncEngine';
 import { isWithinPeriod } from './utils';
+import { isCoolMissingShipment, isCustomsNgShipment } from './utils/customsUtils';
 import { Navbar } from './components/Navbar';
 import { SettingsModal } from './components/SettingsModal';
 import { DetailDrawer } from './components/DetailDrawer';
@@ -34,7 +36,6 @@ import { ArrivalTrackingView } from './components/ArrivalTrackingView';
 import { CustomsManagementView } from './components/CustomsManagementView';
 import { CoolMissingView } from './components/CoolMissingView';
 import { KantoCustomsNgView } from './components/KantoCustomsNgView';
-import { UnmatchedCustomsView } from './components/UnmatchedCustomsView';
 import { BudgetSettingsModal } from './components/BudgetSettingsModal';
 import { DailyDigestModal } from './components/DailyDigestModal';
 import { ClinicProductStatusDrawer } from './components/ClinicProductStatusDrawer';
@@ -127,6 +128,14 @@ export default function App() {
   }, []);
 
   const [clinics, setClinics] = useState<ClinicItem[]>(() => getLocalClinics());
+  const [shipments, setShipments] = useState<ShipmentItem[]>(() => getLocalShipments());
+
+  // 未照合画面は実照合機能実装まで非表示
+  useEffect(() => {
+    if ((activeTab as string) === 'unmatched_sheets' || (activeTab as string) === 'unmatched_customs') {
+      setActiveTab('customs_management');
+    }
+  }, [activeTab]);
 
   const STORAGE_BUDGET_KEY = 'nouki_sales_budgets_v1';
   const [salesBudgets, setSalesBudgets] = useState<Record<string, number>>(() => {
@@ -187,6 +196,11 @@ export default function App() {
       };
       setDeliveryData(processedData);
       setClinics(getLocalClinics());
+      if (res.shipments && res.shipments.length > 0) {
+        setShipments(res.shipments);
+      } else {
+        setShipments(getLocalShipments());
+      }
       setIsStale(res.isStale);
       setIsFallback(res.isFallback);
       setFetchError(res.error);
@@ -311,24 +325,14 @@ export default function App() {
   }, [deliveryData, filteredOrders]);
 
   // 出荷管理（101270）データのバッジ集計
-  const localShipmentsList = useMemo(() => getLocalShipments(), [deliveryData]);
   const coolMissingCount = useMemo(
-    () => localShipmentsList.filter((s) => s.isCoolMissing || s.coolApplicationStatus === '申請漏れ').length,
-    [localShipmentsList]
+    () => shipments.filter((s) => isCoolMissingShipment(s)).length,
+    [shipments]
   );
   const kantoNgCount = useMemo(
-    () => localShipmentsList.filter((s) => s.isKantoNg || s.customsStatus.includes('NG')).length,
-    [localShipmentsList]
+    () => shipments.filter((s) => isCustomsNgShipment(s, filteredOrders)).length,
+    [shipments, filteredOrders]
   );
-  const unmatchedCustomsCount = useMemo(() => {
-    return localShipmentsList.filter((s) => {
-      const hasOrder = filteredOrders.some((o) => o.orderId === s.orderId);
-      const poaIssue = s.powerOfAttorneyStatus && (s.powerOfAttorneyStatus.includes('未') || s.powerOfAttorneyStatus.includes('不備'));
-      const slipIssue = s.slipStatus && (s.slipStatus.includes('未') || s.slipStatus.includes('不備'));
-      const importIssue = s.importStatus && (s.importStatus.includes('修正') || s.importStatus.includes('不備'));
-      return !hasOrder || poaIssue || slipIssue || importIssue || s.isCoolMissing;
-    }).length;
-  }, [localShipmentsList, filteredOrders]);
 
   // 入金済・未発注 品目数の計算 (送料・各種手数料は除外)
   const paidUnorderedCount = useMemo(() => {
@@ -519,7 +523,7 @@ export default function App() {
       id: 'customs_management' as ViewTab,
       label: '通関・輸入管理 (101270)',
       icon: Plane,
-      badge: `${localShipmentsList.length}`,
+      badge: `${shipments.length}`,
       badgeColor: 'bg-indigo-600 text-white font-bold',
     },
     {
@@ -535,13 +539,6 @@ export default function App() {
       icon: ShieldAlert,
       badge: kantoNgCount > 0 ? `${kantoNgCount}` : null,
       badgeColor: 'bg-rose-600 text-white font-bold',
-    },
-    {
-      id: 'unmatched_sheets' as ViewTab,
-      label: '未照合・書類不備',
-      icon: FileWarning,
-      badge: unmatchedCustomsCount > 0 ? `${unmatchedCustomsCount}` : null,
-      badgeColor: 'bg-orange-600 text-white font-bold',
     },
     {
       id: 'inventory_management' as ViewTab,
@@ -924,28 +921,27 @@ export default function App() {
 
           {activeTab === 'customs_management' && (
             <CustomsManagementView
+              shipments={shipments}
               orders={filteredOrders}
+              clinics={clinics}
               onSelectOrder={handleOpenDetail}
             />
           )}
 
           {activeTab === 'cool_missing' && (
             <CoolMissingView
+              shipments={shipments}
               orders={filteredOrders}
+              clinics={clinics}
               onSelectOrder={handleOpenDetail}
             />
           )}
 
           {activeTab === 'kanto_customs_ng' && (
             <KantoCustomsNgView
+              shipments={shipments}
               orders={filteredOrders}
-              onSelectOrder={handleOpenDetail}
-            />
-          )}
-
-          {activeTab === 'unmatched_sheets' && (
-            <UnmatchedCustomsView
-              orders={filteredOrders}
+              clinics={clinics}
               onSelectOrder={handleOpenDetail}
             />
           )}

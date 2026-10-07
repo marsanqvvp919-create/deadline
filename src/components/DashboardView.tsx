@@ -831,9 +831,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </div>
               <span className="text-[11px] text-slate-400">各週末時点</span>
             </div>
-            <p className="text-[11px] text-slate-500 mb-3">
-              早期アラート検知により遅延件数は減少傾向にあります
-            </p>
 
             {/* SVG Trend Line Chart */}
             <div className="w-full overflow-hidden bg-slate-50 rounded-lg p-2 border border-slate-200">

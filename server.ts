@@ -251,22 +251,23 @@ function transformCsvToBilling(csvText: string): any[] {
 
 // 出荷管理（dbSchemaId: 101270）マッピング
 const SHIPMENT_FIELD_MAP: Record<string, string[]> = {
-  shipmentId: ['110187', '出荷ID', '出荷番号', 'shipmentId'],
-  orderId: ['109974', '受注ID', '受注番号', 'orderId'],
-  customerName: ['110108', 'クリニック名', '顧客名', 'customerName'],
-  productId: ['109991', '商品ID', '商品コード', 'productId'],
-  productName: ['109992', '商品名', 'productName'],
-  quantity: ['109993', '数量', '出荷数量', 'quantity'],
-  trackingNo: ['110071', '送り状番号', 'トラッキング番号', '追跡番号', 'trackingNo'],
-  carrier: ['配送業者', '運送会社', '配送会社', 'carrier'],
-  shippedDate: ['110017', '出荷日', 'shippedDate'],
+  shipmentId: ['110187', '出荷ID', '出荷管理ID', 'DO番号', 'DO-', '出荷コード', 'shipmentId'],
+  orderId: ['109974', '受注ID', '受注番号', 'ご注文管理ID', 'orderId'],
+  customerName: ['110108', 'クリニック名', '顧客名', '取引先名', 'customerName', 'クリニック'],
+  customerId: ['109898', 'クリニックID', '顧客ID', '取引先ID', 'customerId'],
+  warehouse: ['出荷元倉庫', '出荷倉庫', '倉庫', '出荷元', 'warehouse'],
   arrivalAirport: ['到着空港', '仕向空港', '空港', 'arrivalAirport'],
   importStatus: ['輸入確認ステータス', '輸入確認', '輸入ステータス', 'importStatus'],
-  coolApplicationStatus: ['クール申請', 'クール便手配', 'クール申請ステータス', 'coolApplicationStatus'],
-  powerOfAttorneyStatus: ['委任状', '委任状ステータス', '通関委任状', 'powerOfAttorneyStatus'],
-  slipStatus: ['伝票', '出荷伝票', 'slipStatus'],
+  coolApplicationStatus: ['クール申請', 'クール便申請', 'クール申請ステータス', 'クール便手配', 'coolApplicationStatus'],
+  powerOfAttorneyStatus: ['委任状', '通関委任状', '委任状ステータス', 'powerOfAttorneyStatus'],
+  slipStatus: ['伝票', '出荷伝票', '伝票ステータス', 'slipStatus'],
+  phaNumber: ['PHA番号', 'PHA No', 'PHA-No', 'PHA', 'phaNumber'],
+  warehouseInvoiceNo: ['倉庫インボイス番号', '倉庫インボイス', '倉庫Invoice番号', 'インボイス番号', 'warehouseInvoiceNo'],
   currentLocation: ['現在地', '貨物現在地', 'ステータス現在地', 'currentLocation'],
+  trackingNo: ['出荷番号', '送り状番号', 'トラッキング番号', '追跡番号', 'trackingNo'],
+  kantoCustomsPermitted: ['関東通関可否', '関東通関', '関東通関判定', 'kantoCustomsPermitted'],
   customsStatus: ['通関ステータス', '通関状況', '税関状況', 'customsStatus'],
+  shippedDate: ['110017', '出荷日', '発送日', 'shippedDate'],
 };
 
 function transformCsvToShipments(csvText: string): any[] {
@@ -289,7 +290,7 @@ function transformCsvToShipments(csvText: string): any[] {
   const getVal = (row: string[], key: string): string => {
     const idx = headerMap[key];
     if (idx !== undefined && row[idx] !== undefined) {
-      return row[idx].replace(/^["'\s]+|["'\s]+$/g, '');
+      return row[idx].replace(/^["'\s]+|["'\s]+$/g, '').trim();
     }
     return '';
   };
@@ -299,46 +300,58 @@ function transformCsvToShipments(csvText: string): any[] {
     const row = rows[i];
     if (row.length === 0 || row.every(c => c === '')) continue;
 
-    const shipmentId = getVal(row, 'shipmentId') || `SHP-${i}`;
-    const orderId = getVal(row, 'orderId') || `ORD-${i}`;
-    const customerName = getVal(row, 'customerName') || '取引先クリニック';
-    const productId = getVal(row, 'productId') || `PRD-${i}`;
-    const productName = getVal(row, 'productName') || '医療用製剤';
-    const quantity = parseInt(getVal(row, 'quantity'), 10) || 1;
-    const trackingNo = getVal(row, 'trackingNo') || `740980114${String(i).padStart(4, '0')}`;
-    const carrier = getVal(row, 'carrier') || 'FedEx';
-    const shippedDate = getVal(row, 'shippedDate') || '2026-10-06';
-    const arrivalAirport = getVal(row, 'arrivalAirport') || (i % 2 === 0 ? '成田国際空港 (NRT)' : '関西国際空港 (KIX)');
-    const importStatus = getVal(row, 'importStatus') || '承認済';
-    const coolApplicationStatus = getVal(row, 'coolApplicationStatus') || (i % 10 === 0 ? '申請漏れ' : '申請済');
-    const powerOfAttorneyStatus = getVal(row, 'powerOfAttorneyStatus') || '受領済';
-    const slipStatus = getVal(row, 'slipStatus') || '作成済';
-    const currentLocation = getVal(row, 'currentLocation') || '成田税関 審査場';
-    const customsStatus = getVal(row, 'customsStatus') || '税関審査中';
+    const shipmentId = getVal(row, 'shipmentId');
+    const orderId = getVal(row, 'orderId');
+    if (!shipmentId && !orderId) continue;
 
-    const isKantoNg = arrivalAirport.includes('成田') && (customsStatus.includes('NG') || customsStatus.includes('留置'));
-    const isCoolMissing = coolApplicationStatus.includes('漏れ') || coolApplicationStatus.includes('未');
+    const customerName = getVal(row, 'customerName');
+    const customerId = getVal(row, 'customerId');
+    const warehouse = getVal(row, 'warehouse') || '—';
+    const arrivalAirport = getVal(row, 'arrivalAirport') || '—';
+    const importStatus = getVal(row, 'importStatus') || '—';
+    const coolApplicationStatus = getVal(row, 'coolApplicationStatus') || '—';
+    const powerOfAttorneyStatus = getVal(row, 'powerOfAttorneyStatus') || '—';
+    const slipStatus = getVal(row, 'slipStatus') || '—';
+    const phaNumber = getVal(row, 'phaNumber') || '—';
+    const warehouseInvoiceNo = getVal(row, 'warehouseInvoiceNo') || '—';
+    const currentLocation = getVal(row, 'currentLocation') || '—';
+    const trackingNo = getVal(row, 'trackingNo') || '—';
+    const kantoCustomsPermitted = getVal(row, 'kantoCustomsPermitted') || '—';
+    const customsStatus = getVal(row, 'customsStatus') || '—';
+    const shippedDate = getVal(row, 'shippedDate') || '—';
+
+    // クール手配漏れの条件: クール申請・委任状・伝票のどれかが「未」
+    const isCoolMissing =
+      coolApplicationStatus.includes('未') ||
+      powerOfAttorneyStatus.includes('未') ||
+      slipStatus.includes('未');
+
+    // 通関NGの条件: 到着空港がNRTで、関東通関可否「不可」
+    const airportUpper = arrivalAirport.toUpperCase();
+    const isNrt = airportUpper.includes('NRT') || arrivalAirport.includes('成田');
+    const isKantoNg = isNrt && kantoCustomsPermitted.includes('不可');
 
     records.push({
-      shipmentId,
-      orderId,
-      customerName,
-      productId,
-      productName,
-      quantity,
-      trackingNo,
-      carrier,
-      shippedDate,
+      shipmentId: shipmentId || `DO-${String(i).padStart(5, '0')}`,
+      orderId: orderId || '—',
+      customerId: customerId || '',
+      customerName: customerName || '—',
+      warehouse,
       arrivalAirport,
       importStatus,
       coolApplicationStatus,
       powerOfAttorneyStatus,
       slipStatus,
+      phaNumber,
+      warehouseInvoiceNo,
       currentLocation,
+      trackingNo,
+      kantoCustomsPermitted,
       customsStatus,
+      shippedDate,
       isKantoNg,
       isCoolMissing,
-      updatedAt: '2026-10-06 17:00',
+      updatedAt: new Date().toISOString().replace('T', ' ').slice(0, 16),
     });
   }
 

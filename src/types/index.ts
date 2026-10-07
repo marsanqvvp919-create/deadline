@@ -74,24 +74,29 @@ export interface Order {
 }
 
 export interface ShipmentItem {
-  shipmentId: string;
-  orderId: string;
-  customerName: string;
-  productId: string;
-  productName: string;
-  quantity: number;
-  trackingNo: string;
+  shipmentId: string;              // 出荷ID (DO-…)
+  orderId: string;                 // 受注ID
+  customerId?: string;             // クリニックID
+  customerName: string;            // クリニック名（顧客マスタより）
+  warehouse?: string;              // 出荷元倉庫
+  arrivalAirport: string;          // 到着空港 (KIX/NRT/NGO)
+  importStatus: string;            // 輸入確認ステータス
+  coolApplicationStatus: string;   // クール申請
+  powerOfAttorneyStatus: string;   // 委任状
+  slipStatus: string;              // 伝票
+  phaNumber?: string;              // PHA番号
+  warehouseInvoiceNo?: string;     // 倉庫インボイス番号
+  currentLocation: string;         // 現在地
+  trackingNo: string;              // 出荷番号
+  kantoCustomsPermitted?: string;  // 関東通関可否
+  productId?: string;
+  productName?: string;
+  quantity?: number;
   carrier?: string;
   shippedDate?: string;
-  arrivalAirport: string;
-  importStatus: string;
-  coolApplicationStatus: string;
-  powerOfAttorneyStatus: string;
-  slipStatus: string;
-  currentLocation: string;
-  customsStatus: string;
-  isKantoNg: boolean;
-  isCoolMissing: boolean;
+  customsStatus?: string;
+  isKantoNg: boolean;              // 通関NG (到着空港がNRTで、関東通関可否「不可」)
+  isCoolMissing: boolean;          // クール手配漏れ (クール申請・委任状・伝票のどれかが「未」)
   memo?: string;
   updatedAt?: string;
 }
