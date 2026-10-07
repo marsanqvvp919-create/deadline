@@ -1988,7 +1988,8 @@ async function importCsvToRakuraku(
   const token = process.env.VITE_DATA_KEY || '';
   const baseUrl = (process.env.VITE_RAKURAKU_BASE_URL || 'https://hnsibot.rakurakuhanbai.jp/ykbxg2a/').replace(/\/+$/, '');
   const form = new FormData();
-  form.append('json', new Blob([JSON.stringify({ dbSchemaId: '101270', importId })], { type: 'application/json' }));
+  // 「json」はファイルではなく文字の項目として送る（ファイルとして送ると dbSchemaId・importId が空と判定される）
+  form.append('json', JSON.stringify({ dbSchemaId: '101270', importId }));
   form.append('uploadFile', new Blob([csv], { type: 'text/csv' }), fileName);
   const res = await fetch(`${baseUrl}/api/csvdataimport/version/v1`, {
     method: 'POST',
@@ -2821,8 +2822,14 @@ async function runCarrierWriteback(): Promise<{ rows: number; succeedCount?: num
   if (!serverRakurakuStore.shipments || serverRakurakuStore.shipments.length === 0) return { rows: 0 };
   carrierWritebackRunning = true;
   try {
-    const rows = buildCarrierWritebackRows();
+    let rows = buildCarrierWritebackRows();
     if (rows.length === 0) return { rows: 0 };
+    // 初回は確認用に、配達完了の DHL 3件・FedEx 3件だけを送る（楽楽販売で確認してから残りを送る）
+    if (Object.keys(carrierWritten).length === 0) {
+      const pick = (carrier: string) => rows.filter((r) => r[4].startsWith(`${carrier}：配達完了`)).slice(0, 3);
+      const first = [...pick('DHL'), ...pick('FedEx')];
+      if (first.length > 0) rows = first;
+    }
     let succeed = 0;
     let failure = 0;
     let error: string | undefined;
