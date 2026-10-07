@@ -111,8 +111,19 @@ export function trackingDigits(value: string): string[] {
   return [...new Set([all, ...parts])].filter((d) => d.length >= 8);
 }
 
-/** クリニック名の比較用の正規化 */
+const normalizeCache = new Map<string, string>();
+
+/** クリニック名の比較用の正規化（同じ名前を何度も正規化しないよう結果を覚えておく） */
 export function normalizeClinicName(value: string): string {
+  const cached = normalizeCache.get(value);
+  if (cached !== undefined) return cached;
+  const normalized = normalizeClinicNameUncached(value);
+  if (normalizeCache.size > 50000) normalizeCache.clear();
+  normalizeCache.set(value, normalized);
+  return normalized;
+}
+
+function normalizeClinicNameUncached(value: string): string {
   return value
     .normalize('NFKC')
     .toLowerCase()
@@ -223,6 +234,12 @@ export function findUnmatched(
     })
   );
   const issues: MatchedIssue[] = [];
+  const shipmentsByCustomer = new Map<string, ShipmentLike[]>();
+  shipments.forEach((s) => {
+    const key = s.customerName || '';
+    if (!shipmentsByCustomer.has(key)) shipmentsByCustomer.set(key, []);
+    shipmentsByCustomer.get(key)!.push(s);
+  });
 
   // シートのクリニック名に当たる顧客マスタの行（顧客名・英語表記で照合）
   const resolveClinics = (sheetName: string) =>
@@ -280,10 +297,14 @@ export function findUnmatched(
     const sheetDate = parseDate(row.shipDate);
     const candidates: UnmatchedRow['candidates'] = [];
     const seen = new Set<string>();
-    for (const s of shipments) {
+    // クリニック名ごとにまとめた出荷から探す（出荷1件ずつ名前を比べると遅いため）
+    const clinicShipments: ShipmentLike[] = [];
+    shipmentsByCustomer.forEach((list, customerName) => {
+      if (nameSet.some((n) => namesMatch(n, customerName))) clinicShipments.push(...list);
+    });
+    for (const s of clinicShipments) {
       // 出荷管理は明細ごとに行があるので、出荷IDごとに1件にする
       if (seen.has(s.shipmentId)) continue;
-      if (!nameSet.some((n) => namesMatch(n, s.customerName || ''))) continue;
       // そのクリニックの出荷待ち（出荷状態が出荷待ち、または出荷日が空欄）と、出荷日が近い出荷済みを候補にする
       const sd = parseDate(s.shippedDate || '');
       if ((s.shipStatus || '').includes('出荷待ち') || !sd) {

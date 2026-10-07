@@ -56,8 +56,9 @@ function carrierTrackingUrl(courier: string | undefined, trackingNo: string): st
   return null;
 }
 
-// 追跡の対象：出荷待ちと、出荷日から45日以内でまだ配達完了していない出荷、直近7日に配達完了した出荷
-const ACTIVE_DAYS = 45;
+// 追跡の対象：出荷待ちと、出荷日から21日以内でまだ配達完了していない出荷、直近7日に配達完了した出荷
+// 配達完了日がまだ楽楽販売で入力されていないため、出荷から21日を過ぎたものは表示しない
+const ACTIVE_DAYS = 21;
 const RECENT_DELIVERED_DAYS = 7;
 
 export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: ShipmentItem[] }> = ({ orders, shipments }) => {

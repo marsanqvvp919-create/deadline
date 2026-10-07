@@ -102,13 +102,17 @@ export function formatValue(val?: string | number | null): string {
   return str;
 }
 
-/** 未完了の出荷：出荷待ち、または出荷から45日以内で配達完了日が空欄（倉庫出荷日があればそれを出荷日とする） */
+/**
+ * 未完了の出荷：出荷待ち、輸入確認が終わっていない、または出荷から21日以内で配達完了日が空欄
+ * （配達完了日・通関完了日はまだ楽楽販売で入力されていないため、日数で区切る。倉庫出荷日があればそれを出荷日とする）
+ */
 export function isOpenShipment(item: ShipmentItem): boolean {
   const s = item as ShipmentItem & { shipStatus?: string; deliveredDate?: string; warehouseShippedDate?: string };
   if ((s.shipStatus || '').includes('出荷待ち')) return true;
+  if (['下書き', '申請中', '決済待ち', '交付待ち', '差戻し'].includes(s.importStatus)) return true;
   if (s.deliveredDate && s.deliveredDate !== '—') return false;
   const shipped = (s.warehouseShippedDate && s.warehouseShippedDate !== '—' ? s.warehouseShippedDate : s.shippedDate) || '';
   const d = new Date(shipped.replace(/\//g, '-').slice(0, 10) + 'T00:00:00');
   if (isNaN(d.getTime())) return false;
-  return (Date.now() - d.getTime()) / 86400000 <= 45;
+  return (Date.now() - d.getTime()) / 86400000 <= 21;
 }

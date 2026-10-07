@@ -415,7 +415,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       </div>
 
       {/* 今日の対応（朝会で見るもの） */}
-      <h2 className="text-xs font-bold text-slate-500 -mb-3">今日の対応</h2>
+      <h2 className="text-sm font-bold text-slate-600 -mb-2 pt-1">今日の対応</h2>
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
         {/* Banner 1: 発注管理 (入金済みの未発注) */}
         <div
@@ -597,7 +597,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       </div>
 
       {/* 状況（参考の数値） */}
-      <h2 className="text-xs font-bold text-slate-500 -mb-3">状況</h2>
+      <h2 className="text-sm font-bold text-slate-600 -mb-2 pt-1">状況</h2>
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3.5">
         {/* 1. 未完了明細数 */}
         <div

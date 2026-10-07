@@ -367,7 +367,8 @@ function transformCsvToShipments(csvText: string): any[] {
     const vendorShipDate = getVal(row, 'vendorShipDate') || '';
     const handlingMemo = getVal(row, 'handlingMemo') || '';
     const lineRef = {
-      orderId: getVal(row, 'lineOrderId') || orderId,
+      // 明細の受注IDは「000002950-1」のように行番号が付くので外す
+      orderId: (getVal(row, 'lineOrderId') || orderId).replace(/-\d+$/, ''),
       productId: getVal(row, 'lineProductId'),
     };
 
@@ -1797,9 +1798,18 @@ app.get('/api/shipment-sheet/unmatched', async (req, res) => {
     // 出荷管理の一覧にはクリニック名が無いため、受注ID からご注文管理のクリニック名を補う
     const orderCustomer = new Map<string, string>();
     (serverRakurakuStore.orders?.orders || []).forEach((o: any) => orderCustomer.set(o.orderId, o.customerName));
+    // 照合に使う項目だけにする（全項目を返すと応答が大きくなる）
     const enriched = shipments.map((s: any) => ({
-      ...s,
+      shipmentId: s.shipmentId,
+      orderId: s.orderId,
+      customerId: s.customerId,
       customerName: s.customerName && s.customerName !== '—' ? s.customerName : orderCustomer.get(s.orderId) || '',
+      trackingNo: s.trackingNo,
+      shippedDate: s.shippedDate,
+      shipStatus: s.shipStatus,
+      warehouse: s.warehouse,
+      warehouseInvoiceNo: s.warehouseInvoiceNo,
+      courier: s.courier,
     }));
     const ordersLite = (serverRakurakuStore.orders?.orders || []).map((o: any) => ({
       orderId: o.orderId,
