@@ -78,6 +78,9 @@ async function getFedexToken(cred: NonNullable<CarrierCredentials['fedex']>): Pr
   return fedexToken.token;
 }
 
+// 通関が終わったことを表す配送会社の文言（日本語・英語）
+const CLEARED_PATTERN = /通関手続きが完了|通関が完了|clearance processing complete|cleared customs|customs clearance complete|international shipment release|通関手続き完了/i;
+
 function normalizeFedex(trackingNo: string, r: any): CarrierStatus {
   const latest = r?.latestStatusDetail || {};
   const code = String(latest.code || latest.derivedCode || '').toUpperCase();
@@ -90,6 +93,18 @@ function normalizeFedex(trackingNo: string, r: any): CarrierStatus {
   else if (['OC', 'PU'].includes(code) && !scan) status = 'pre_transit';
   else if (code) status = 'in_transit';
   const loc = latest.scanLocation || scan?.scanLocation;
+  const events: any[] = r?.scanEvents || [];
+  const arrivedJapan =
+    String(loc?.countryCode || '').toUpperCase() === 'JP' ||
+    events.some((e) => String(e?.scanLocation?.countryCode || '').toUpperCase() === 'JP');
+  // 通関完了：イベントコード CC（Cleared customs）か、通関完了の文言。配達完了も通関済みとみなす
+  const customsCleared =
+    code === 'DL' ||
+    events.some(
+      (e) =>
+        String(e?.eventType || '').toUpperCase() === 'CC' ||
+        CLEARED_PATTERN.test(`${e?.eventDescription || ''} ${e?.derivedStatus || ''}`)
+    );
   return {
     carrier: 'fedex',
     trackingNo,
@@ -101,6 +116,8 @@ function normalizeFedex(trackingNo: string, r: any): CarrierStatus {
     estimatedDelivery: pick('ESTIMATED_DELIVERY'),
     fetchedAt: new Date().toISOString(),
     error: r?.error?.message,
+    arrivedJapan,
+    customsCleared,
   };
 }
 
@@ -131,8 +148,6 @@ export async function trackFedex(cred: NonNullable<CarrierCredentials['fedex']>,
 // ----------------------------------------------------------------------
 // DHL（Shipment Tracking - Unified。1件ずつ問い合わせる）
 // ----------------------------------------------------------------------
-// 通関が終わったことを表す配送会社の文言（日本語・英語）
-const CLEARED_PATTERN = /通関手続きが完了|通関が完了|clearance processing complete|cleared customs|customs clearance complete/i;
 
 function normalizeDhl(trackingNo: string, s: any): CarrierStatus {
   const st = s?.status || {};
