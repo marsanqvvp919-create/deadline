@@ -584,7 +584,7 @@ function transformCsvToClinics(csvText: string): any[] {
 }
 
 // CSV行からDeliveryDataを構築
-function transformCsvToDeliveryData(csvText: string): any {
+function parseOrdersFromCsv(csvText: string): any[] | null {
   const rows = parseCsv(csvText);
   if (rows.length < 2) {
     return null;
@@ -765,7 +765,19 @@ function transformCsvToDeliveryData(csvText: string): any {
     });
   }
 
-  const orders = Array.from(ordersMap.values());
+  return Array.from(ordersMap.values());
+}
+
+function transformCsvToDeliveryData(csvText: string): any {
+  const orders = parseOrdersFromCsv(csvText);
+  if (!orders) return null;
+  return finalizeDeliveryData(orders);
+}
+
+// 伝票の状態（orderState）とアラートを計算する。差分取得で一部の伝票を差し替えたあとにも全件で計算し直す
+function finalizeDeliveryData(orders: any[]): any {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
 
   // orderState と アラートの計算
   const alerts: any[] = [];
@@ -1027,6 +1039,7 @@ interface RakurakuServerStore {
   rateLimitUntil: number | null;
   refreshIntervalMinutes: number;
   sourceHeaders: Record<string, string[]>;
+  lastFullSyncTime: number | null;
   lastError: {
     type: 'rate_limit' | 'ip_blocked' | 'auth_error' | 'network_error';
     message: string;
@@ -1050,8 +1063,22 @@ const serverRakurakuStore: RakurakuServerStore = {
   rateLimitUntil: null,
   refreshIntervalMinutes: 15, // 15分おき自動同期
   sourceHeaders: {},
+  lastFullSyncTime: null,
   lastError: null,
 };
+
+// 差分取得用の楽楽販売の絞込みID（「更新日時が直近2日以内」などの絞込みを楽楽販売で作って設定する）
+const RECENT_ORDERS_SEARCH_ID = process.env.RAKURAKU_ORDERS_RECENT_SEARCH_ID || '';
+const RECENT_SHIPMENTS_SEARCH_ID = process.env.RAKURAKU_SHIPMENTS_RECENT_SEARCH_ID || '';
+
+// 自動同期の間隔：平日8〜20時（日本時間）は設定値（既定15分）、それ以外は60分
+function currentSyncIntervalMinutes(): number {
+  const jst = new Date(Date.now() + 9 * 60 * 60 * 1000);
+  const hour = jst.getUTCHours();
+  const day = jst.getUTCDay();
+  const businessHours = day >= 1 && day <= 5 && hour >= 8 && hour < 20;
+  return businessHours ? serverRakurakuStore.refreshIntervalMinutes : 60;
+}
 
 // 楽楽販売から実際に届いた列名を記録する（どの項目が本物のデータかを確認するため）
 function recordHeaders(schemaId: string, csv: string) {
@@ -1111,6 +1138,7 @@ async function saveStoreSnapshot(): Promise<void> {
       clinics: serverRakurakuStore.clinics,
       lastSuccessTime: serverRakurakuStore.lastSuccessTime,
       lastMastersTime: serverRakurakuStore.lastMastersTime,
+      lastFullSyncTime: serverRakurakuStore.lastFullSyncTime,
     };
     await new Storage().bucket(CACHE_BUCKET).file(CACHE_OBJECT).save(JSON.stringify(snapshot), {
       contentType: 'application/json',
@@ -1133,6 +1161,7 @@ async function loadStoreSnapshot(): Promise<boolean> {
     serverRakurakuStore.clinics = snap.clinics ?? null;
     serverRakurakuStore.lastSuccessTime = snap.lastSuccessTime ?? null;
     serverRakurakuStore.lastMastersTime = snap.lastMastersTime ?? null;
+    serverRakurakuStore.lastFullSyncTime = snap.lastFullSyncTime ?? null;
     // 次回の自動同期は前回成功時刻から数えて間隔があいたときに行う
     serverRakurakuStore.lastAttemptTime = snap.lastSuccessTime ?? null;
     console.log(`[Rakuraku Cache] Restored snapshot saved at ${snap.savedAt}`);
@@ -1167,14 +1196,31 @@ async function syncAllRakurakuData(isManual = false): Promise<boolean> {
   try {
     console.log(`[Rakuraku Sync Start] isManual=${isManual}, baseUrl=${baseUrl}`);
 
+    // 差分取得：楽楽販売に「最近更新されたレコード」の絞込みがあれば、それだけを取得して差し替える。
+    // 全件の取り直しは1日1回（初回・手動・前回の全件取得から24時間後）。絞込みが無い間は毎回全件を取る。
+    const fullSyncDue =
+      isManual ||
+      !serverRakurakuStore.orders ||
+      !serverRakurakuStore.shipments ||
+      !serverRakurakuStore.lastFullSyncTime ||
+      Date.now() - serverRakurakuStore.lastFullSyncTime > 24 * 60 * 60 * 1000;
+    const useIncremental = !fullSyncDue && !!RECENT_SHIPMENTS_SEARCH_ID && !!RECENT_ORDERS_SEARCH_ID;
+
     // 1. 出荷管理 (101270)
     try {
-      const resShip = await fetchRakurakuCsv(baseUrl, token, '101270', '103958', '101059', 50);
+      const resShip = await fetchRakurakuCsv(
+        baseUrl, token, '101270', useIncremental ? RECENT_SHIPMENTS_SEARCH_ID : '103958', '101059', 50
+      );
       recordHeaders('101270', resShip.csv);
       const parsedShipments = transformCsvToShipments(resShip.csv);
-      if (parsedShipments && parsedShipments.length > 0) {
+      if (useIncremental) {
+        const byId = new Map((serverRakurakuStore.shipments || []).map((sh: any) => [sh.shipmentId, sh]));
+        parsedShipments.forEach((sh: any) => byId.set(sh.shipmentId, sh));
+        serverRakurakuStore.shipments = Array.from(byId.values());
+        console.log(`[Rakuraku Sync] Shipments updated (incremental): ${parsedShipments.length}`);
+      } else if (parsedShipments && parsedShipments.length > 0) {
         serverRakurakuStore.shipments = parsedShipments;
-        console.log(`[Rakuraku Sync] Shipments loaded: ${parsedShipments.length} rows`);
+        console.log(`[Rakuraku Sync] Shipments loaded: ${parsedShipments.length} shipments`);
       }
     } catch (e: any) {
       console.warn('[Rakuraku Sync] Shipments fetch warning:', e?.message || e);
@@ -1186,17 +1232,28 @@ async function syncAllRakurakuData(isManual = false): Promise<boolean> {
 
     // 2. ご注文管理 (101248)
     try {
-      const resOrders = await fetchRakurakuCsv(baseUrl, token, '101248', undefined, undefined, 50);
+      const resOrders = await fetchRakurakuCsv(
+        baseUrl, token, '101248', useIncremental ? RECENT_ORDERS_SEARCH_ID : undefined, undefined, 50
+      );
       recordHeaders('101248', resOrders.csv);
-      const parsedOrders = transformCsvToDeliveryData(resOrders.csv);
-      if (parsedOrders) {
-        serverRakurakuStore.orders = parsedOrders;
-        console.log(`[Rakuraku Sync] Orders loaded: ${parsedOrders.orders?.length || 0} orders`);
+      if (useIncremental) {
+        const changed = parseOrdersFromCsv(resOrders.csv) || [];
+        const byId = new Map((serverRakurakuStore.orders?.orders || []).map((o: any) => [o.orderId, o]));
+        changed.forEach((o: any) => byId.set(o.orderId, o));
+        serverRakurakuStore.orders = finalizeDeliveryData(Array.from(byId.values()));
+        console.log(`[Rakuraku Sync] Orders updated (incremental): ${changed.length}`);
+      } else {
+        const parsedOrders = transformCsvToDeliveryData(resOrders.csv);
+        if (parsedOrders) {
+          serverRakurakuStore.orders = parsedOrders;
+          console.log(`[Rakuraku Sync] Orders loaded: ${parsedOrders.orders?.length || 0} orders`);
+        }
       }
     } catch (e: any) {
       console.warn('[Rakuraku Sync] Orders fetch warning:', e?.message || e);
       throw e;
     }
+    if (!useIncremental) serverRakurakuStore.lastFullSyncTime = Date.now();
 
     // マスタ系（商品・クリニック・仕入先）は1日1回（24時間）または手動時のみ取得
     const ONE_DAY_MS = 24 * 60 * 60 * 1000;
@@ -1296,9 +1353,9 @@ setTimeout(async () => {
   }
 }, 3000);
 
-// 自動更新ループ（15分おき、設定可能）
+// 自動更新ループ（平日日中は15分おき・設定可能、それ以外は60分おき）
 setInterval(() => {
-  const intervalMs = serverRakurakuStore.refreshIntervalMinutes * 60 * 1000;
+  const intervalMs = currentSyncIntervalMinutes() * 60 * 1000;
   const lastAttempt = serverRakurakuStore.lastAttemptTime ? new Date(serverRakurakuStore.lastAttemptTime).getTime() : 0;
   if (Date.now() - lastAttempt >= intervalMs) {
     syncAllRakurakuData(false).catch((err) => console.error('[Interval Sync Err]', err));
