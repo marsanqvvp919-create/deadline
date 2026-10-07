@@ -37,11 +37,13 @@ interface DashboardViewProps {
   onRefresh?: () => void;
   isRefreshing?: boolean;
   onSelectOrder?: (order: Order, lineKey?: string) => void;
+  sheetUnmatchedCount?: number | null;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
   orders,
   alerts,
+  sheetUnmatchedCount,
   weeklyDelayHistory = [],
   onSelectRepForView,
   onNavigateToTab,
@@ -412,214 +414,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
       </div>
 
-      {/* KPI Cards (5 Cards) - Enhanced Button-like Touch & Visual Freshness Indicators */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
-        {/* 1. 未完了明細数 */}
-        <div
-          onClick={() => onNavigateToTab('unshipped_clinics')}
-          className="bg-white p-4 rounded-xl border-2 border-slate-200 hover:border-blue-400 shadow-xs hover:shadow-md active:translate-y-0.5 active:scale-[0.99] transition-all cursor-pointer group flex flex-col justify-between"
-        >
-          <div>
-            <div className="flex items-center justify-between gap-1 mb-2">
-              <div className="flex items-center gap-1.5">
-                <div className="p-1 rounded-md bg-blue-50 text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition">
-                  <Package className="w-3.5 h-3.5" />
-                </div>
-                <span className="text-xs font-bold text-slate-700">未完了商品数</span>
-              </div>
-              <FreshnessBadge info={freshness} />
-            </div>
-            <div className="mt-1 flex items-baseline gap-1.5">
-              <span className="text-2xl font-extrabold font-mono text-slate-900 group-hover:text-blue-600 transition">
-                {incompleteLines.length}
-              </span>
-              <span className="text-xs text-slate-400 font-semibold">品目</span>
-            </div>
-            <span className="text-[11px] text-slate-400 mt-1 block leading-tight">
-              出荷未完了の商品（発注残）
-            </span>
-          </div>
-          <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between">
-            <span className="text-[10px] text-slate-400 group-hover:text-blue-600 transition font-medium">
-              未出荷管理へ
-            </span>
-            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-700 group-hover:text-blue-600 bg-slate-100 group-hover:bg-blue-50 border border-slate-300 group-hover:border-blue-300 px-2 py-0.5 rounded-md shadow-2xs transition">
-              <span>表示</span>
-              <ChevronRight className="w-3 h-3 group-hover:translate-x-0.5 transition" />
-            </span>
-          </div>
-        </div>
-
-        {/* 2. 納期超過件数 */}
-        <div
-          onClick={() => onNavigateToTab('overdue')}
-          className="bg-white p-4 rounded-xl border-2 border-rose-200 hover:border-rose-400 bg-rose-50/20 shadow-xs hover:shadow-md active:translate-y-0.5 active:scale-[0.99] transition-all cursor-pointer group flex flex-col justify-between"
-        >
-          <div>
-            <div className="flex items-center justify-between gap-1 mb-2">
-              <div className="flex items-center gap-1.5">
-                <div className="p-1 rounded-md bg-rose-100 text-rose-600 group-hover:bg-rose-600 group-hover:text-white transition">
-                  <AlertTriangle className="w-3.5 h-3.5" />
-                </div>
-                <span className="text-xs font-bold text-rose-900">納期超過</span>
-              </div>
-              <FreshnessBadge info={freshness} />
-            </div>
-            <div className="mt-1 flex items-baseline gap-1.5">
-              <span className="text-2xl font-extrabold font-mono text-rose-600">
-                {delayedOrders.length}
-              </span>
-              <span className="text-xs text-rose-600 font-bold">件</span>
-              <span className="text-sm font-bold text-rose-700 font-mono ml-1">
-                （{delayedLines.length}明細）
-              </span>
-            </div>
-            <span className="text-[11px] text-slate-400 mt-1 block leading-tight">
-              最長納品予定日超過・未出荷
-            </span>
-          </div>
-          <div className="mt-3 pt-2.5 border-t border-rose-100 flex items-center justify-between">
-            <span className="text-[10px] text-rose-700 transition font-medium">
-              超過一覧へ
-            </span>
-            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-rose-900 bg-rose-100 group-hover:bg-rose-200 border border-rose-300 px-2 py-0.5 rounded-md shadow-2xs transition">
-              <span>表示</span>
-              <ChevronRight className="w-3 h-3 group-hover:translate-x-0.5 transition" />
-            </span>
-          </div>
-        </div>
-
-        {/* 3. 納期間近（5日以内） */}
-        <div
-          onClick={() => onNavigateToTab('unshipped_clinics')}
-          className="bg-white p-4 rounded-xl border-2 border-amber-200 hover:border-amber-400 bg-amber-50/20 shadow-xs hover:shadow-md active:translate-y-0.5 active:scale-[0.99] transition-all cursor-pointer group flex flex-col justify-between"
-        >
-          <div>
-            <div className="flex items-center justify-between gap-1 mb-2">
-              <div className="flex items-center gap-1.5">
-                <div className="p-1 rounded-md bg-amber-100 text-amber-600 group-hover:bg-amber-600 group-hover:text-white transition">
-                  <Clock className="w-3.5 h-3.5" />
-                </div>
-                <span className="text-xs font-bold text-amber-900">納期間近（{APPROACHING_DAYS}日以内）</span>
-              </div>
-              <FreshnessBadge info={freshness} />
-            </div>
-            <div className="mt-1 flex items-baseline gap-1.5">
-              <span className="text-2xl font-extrabold font-mono text-amber-600">
-                {approachingCounts.ordersCount}
-              </span>
-              <span className="text-xs text-amber-600 font-bold">件（{approachingCounts.linesCount}明細）</span>
-            </div>
-            <span className="text-[11px] text-slate-500 mt-1 block leading-tight">
-              最長納品予定日まで{APPROACHING_DAYS}日以内で、出荷日が空欄の明細がある伝票（楽楽販売「②注意」と同じ）
-            </span>
-          </div>
-          <div className="mt-3 pt-2.5 border-t border-amber-100 flex items-center justify-between">
-            <span className="text-[10px] text-amber-700 transition font-medium">
-              間近案件へ
-            </span>
-            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-900 bg-amber-100 group-hover:bg-amber-200 border border-amber-300 px-2 py-0.5 rounded-md shadow-2xs transition">
-              <span>表示</span>
-              <ChevronRight className="w-3 h-3 group-hover:translate-x-0.5 transition" />
-            </span>
-          </div>
-        </div>
-
-        {/* 4. 漏れ件数 */}
-        <div
-          onClick={() => onNavigateToTab('alerts')}
-          className="bg-white p-4 rounded-xl border-2 border-orange-200 hover:border-orange-400 bg-orange-50/20 shadow-xs hover:shadow-md active:translate-y-0.5 active:scale-[0.99] transition-all cursor-pointer group flex flex-col justify-between"
-        >
-          <div>
-            <div className="flex items-center justify-between gap-1 mb-2">
-              <div className="flex items-center gap-1.5">
-                <div className="p-1 rounded-md bg-orange-100 text-orange-600 group-hover:bg-orange-600 group-hover:text-white transition">
-                  <AlertTriangle className="w-3.5 h-3.5" />
-                </div>
-                <span className="text-xs font-bold text-orange-900">漏れ件数</span>
-              </div>
-              <FreshnessBadge info={freshness} />
-            </div>
-            <div className="mt-1 flex items-baseline gap-1.5">
-              <span className="text-2xl font-extrabold font-mono text-orange-600">
-                {leakageOrdersCount}
-              </span>
-              <span className="text-xs text-orange-600 font-bold">件（{leakageAlertsCount}明細）</span>
-            </div>
-            <div className="mt-1 flex flex-wrap gap-1 text-[10px] font-bold text-orange-800">
-              <span className="px-1.5 py-0.5 rounded bg-orange-100">
-                発注漏れ {missedOrdersCount}件（{missedOrderLinesCount}明細）
-              </span>
-              <span className="px-1.5 py-0.5 rounded bg-orange-100">
-                納期未設定 {missingDueDateOrdersCount}件（{missingDueDateLinesCount}明細）
-              </span>
-            </div>
-            <span className="text-[11px] text-slate-500 mt-1 block leading-tight">
-              受注日から3日以上たっても未発注の明細と、納品予定日が未入力の明細（見積・出荷済みの伝票は除く）
-            </span>
-          </div>
-          <div className="mt-3 pt-2.5 border-t border-orange-100 flex items-center justify-between">
-            <span className="text-[10px] text-orange-700 transition font-medium">
-              漏れ案件へ
-            </span>
-            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-orange-900 bg-orange-100 group-hover:bg-orange-200 border border-orange-300 px-2 py-0.5 rounded-md shadow-2xs transition">
-              <span>表示</span>
-              <ChevronRight className="w-3 h-3 group-hover:translate-x-0.5 transition" />
-            </span>
-          </div>
-        </div>
-
-        {/* 5. 今月の納期遵守率 */}
-        <div
-          onClick={() => onNavigateToTab('completed')}
-          className="bg-white p-4 rounded-xl border-2 border-emerald-200 hover:border-emerald-400 bg-emerald-50/20 shadow-xs hover:shadow-md active:translate-y-0.5 active:scale-[0.99] transition-all cursor-pointer group flex flex-col justify-between"
-        >
-          <div>
-            <div className="flex items-center justify-between gap-1 mb-2">
-              <div className="flex items-center gap-1.5">
-                <div className="p-1 rounded-md bg-emerald-100 text-emerald-600 group-hover:bg-emerald-600 group-hover:text-white transition">
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                </div>
-                <span className="text-xs font-bold text-emerald-900">今月の遵守率</span>
-              </div>
-              <FreshnessBadge info={freshness} />
-            </div>
-            <div className="mt-1 flex items-baseline gap-1.5">
-              {completedThisMonth.length > 0 ? (
-                <>
-                  <span className="text-2xl font-extrabold font-mono text-emerald-700">
-                    {onTimeRate}%
-                  </span>
-                  <span className="text-xs text-emerald-600 font-medium">
-                    ({onTimeShippedCount}/{completedThisMonth.length}件)
-                  </span>
-                </>
-              ) : (
-                <span className="text-lg font-bold text-slate-400">
-                  データなし
-                </span>
-              )}
-            </div>
-            <span className="text-[11px] text-slate-400 mt-1 block leading-tight">
-              出荷日 ≦ 最長納品予定日
-            </span>
-          </div>
-          <div className="mt-3 pt-2.5 border-t border-emerald-100 flex items-center justify-between">
-            <span className="text-[10px] text-emerald-700 transition font-medium">
-              納品完了実績
-            </span>
-            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-900 bg-emerald-100 group-hover:bg-emerald-200 border border-emerald-300 px-2 py-0.5 rounded-md shadow-2xs transition">
-              <span>表示</span>
-              <ChevronRight className="w-3 h-3 group-hover:translate-x-0.5 transition" />
-            </span>
-          </div>
-        </div>
-      </div>
-
-
-
-      {/* Quick Action Alert Cards Grid - Tactile Button Affordance */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      {/* 今日の対応（朝会で見るもの） */}
+      <h2 className="text-xs font-bold text-slate-500 -mb-3">今日の対応</h2>
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
         {/* Banner 1: 発注管理 (入金済みの未発注) */}
         <div
           onClick={() => onNavigateToTab('procurement')}
@@ -772,7 +569,200 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </a>
           </div>
         </div>
+              {/* Banner 4: 楽楽販売と未照合 */}
+        <div
+          onClick={() => onNavigateToTab('unmatched_sheets' as ViewTab)}
+          className="bg-gradient-to-br from-amber-500/10 via-white to-white border-2 border-amber-300 hover:border-amber-400 hover:shadow-md active:translate-y-0.5 p-4.5 rounded-2xl flex flex-col justify-between cursor-pointer transition shadow-xs group"
+        >
+          <div className="space-y-2.5">
+            <h3 className="text-sm font-bold text-slate-900">楽楽販売と未照合</h3>
+            <div className="flex items-baseline gap-1.5">
+              <span className="font-mono text-2xl font-extrabold text-amber-600">
+                {sheetUnmatchedCount === null || sheetUnmatchedCount === undefined ? '—' : sheetUnmatchedCount}
+              </span>
+              <span className="text-xs text-slate-500 font-medium">件</span>
+            </div>
+            <p className="text-[11px] text-slate-500 line-clamp-2">
+              「◆出荷ステータス」の追跡番号のうち、楽楽販売の出荷にまだ登録されていないもの。
+            </p>
+          </div>
+          <button
+            type="button"
+            className="w-full mt-4 py-2 px-3 bg-white hover:bg-amber-50 border border-amber-300 rounded-lg text-xs font-bold text-amber-900 flex items-center justify-between shadow-xs transition"
+          >
+            <span>未照合の一覧を開く</span>
+            <ChevronRight className="w-4 h-4 group-hover:translate-x-0.5 transition" />
+          </button>
+        </div>
       </div>
+
+      {/* 状況（参考の数値） */}
+      <h2 className="text-xs font-bold text-slate-500 -mb-3">状況</h2>
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3.5">
+        {/* 1. 未完了明細数 */}
+        <div
+          onClick={() => onNavigateToTab('unshipped_clinics')}
+          className="bg-white p-4 rounded-xl border-2 border-slate-200 hover:border-blue-400 shadow-xs hover:shadow-md active:translate-y-0.5 active:scale-[0.99] transition-all cursor-pointer group flex flex-col justify-between"
+        >
+          <div>
+            <div className="flex items-center justify-between gap-1 mb-2">
+              <div className="flex items-center gap-1.5">
+                <div className="p-1 rounded-md bg-blue-50 text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition">
+                  <Package className="w-3.5 h-3.5" />
+                </div>
+                <span className="text-xs font-bold text-slate-700">未完了商品数</span>
+              </div>
+              <FreshnessBadge info={freshness} />
+            </div>
+            <div className="mt-1 flex items-baseline gap-1.5">
+              <span className="text-2xl font-extrabold font-mono text-slate-900 group-hover:text-blue-600 transition">
+                {incompleteLines.length}
+              </span>
+              <span className="text-xs text-slate-400 font-semibold">品目</span>
+            </div>
+            <span className="text-[11px] text-slate-400 mt-1 block leading-tight">
+              出荷未完了の商品（発注残）
+            </span>
+          </div>
+          <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between">
+            <span className="text-[10px] text-slate-400 group-hover:text-blue-600 transition font-medium">
+              未出荷管理へ
+            </span>
+            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-700 group-hover:text-blue-600 bg-slate-100 group-hover:bg-blue-50 border border-slate-300 group-hover:border-blue-300 px-2 py-0.5 rounded-md shadow-2xs transition">
+              <span>表示</span>
+              <ChevronRight className="w-3 h-3 group-hover:translate-x-0.5 transition" />
+            </span>
+          </div>
+        </div>
+
+        {/* 3. 納期間近（5日以内） */}
+        <div
+          onClick={() => onNavigateToTab('unshipped_clinics')}
+          className="bg-white p-4 rounded-xl border-2 border-amber-200 hover:border-amber-400 bg-amber-50/20 shadow-xs hover:shadow-md active:translate-y-0.5 active:scale-[0.99] transition-all cursor-pointer group flex flex-col justify-between"
+        >
+          <div>
+            <div className="flex items-center justify-between gap-1 mb-2">
+              <div className="flex items-center gap-1.5">
+                <div className="p-1 rounded-md bg-amber-100 text-amber-600 group-hover:bg-amber-600 group-hover:text-white transition">
+                  <Clock className="w-3.5 h-3.5" />
+                </div>
+                <span className="text-xs font-bold text-amber-900">納期間近（{APPROACHING_DAYS}日以内）</span>
+              </div>
+              <FreshnessBadge info={freshness} />
+            </div>
+            <div className="mt-1 flex items-baseline gap-1.5">
+              <span className="text-2xl font-extrabold font-mono text-amber-600">
+                {approachingCounts.ordersCount}
+              </span>
+              <span className="text-xs text-amber-600 font-bold">件（{approachingCounts.linesCount}明細）</span>
+            </div>
+            <span className="text-[11px] text-slate-500 mt-1 block leading-tight">
+              最長納品予定日まで{APPROACHING_DAYS}日以内で、出荷日が空欄の明細がある伝票（楽楽販売「②注意」と同じ）
+            </span>
+          </div>
+          <div className="mt-3 pt-2.5 border-t border-amber-100 flex items-center justify-between">
+            <span className="text-[10px] text-amber-700 transition font-medium">
+              間近案件へ
+            </span>
+            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-900 bg-amber-100 group-hover:bg-amber-200 border border-amber-300 px-2 py-0.5 rounded-md shadow-2xs transition">
+              <span>表示</span>
+              <ChevronRight className="w-3 h-3 group-hover:translate-x-0.5 transition" />
+            </span>
+          </div>
+        </div>
+
+        {/* 4. 漏れ件数 */}
+        <div
+          onClick={() => onNavigateToTab('alerts')}
+          className="bg-white p-4 rounded-xl border-2 border-orange-200 hover:border-orange-400 bg-orange-50/20 shadow-xs hover:shadow-md active:translate-y-0.5 active:scale-[0.99] transition-all cursor-pointer group flex flex-col justify-between"
+        >
+          <div>
+            <div className="flex items-center justify-between gap-1 mb-2">
+              <div className="flex items-center gap-1.5">
+                <div className="p-1 rounded-md bg-orange-100 text-orange-600 group-hover:bg-orange-600 group-hover:text-white transition">
+                  <AlertTriangle className="w-3.5 h-3.5" />
+                </div>
+                <span className="text-xs font-bold text-orange-900">漏れ件数</span>
+              </div>
+              <FreshnessBadge info={freshness} />
+            </div>
+            <div className="mt-1 flex items-baseline gap-1.5">
+              <span className="text-2xl font-extrabold font-mono text-orange-600">
+                {leakageOrdersCount}
+              </span>
+              <span className="text-xs text-orange-600 font-bold">件（{leakageAlertsCount}明細）</span>
+            </div>
+            <div className="mt-1 flex flex-wrap gap-1 text-[10px] font-bold text-orange-800">
+              <span className="px-1.5 py-0.5 rounded bg-orange-100">
+                発注漏れ {missedOrdersCount}件（{missedOrderLinesCount}明細）
+              </span>
+              <span className="px-1.5 py-0.5 rounded bg-orange-100">
+                納期未設定 {missingDueDateOrdersCount}件（{missingDueDateLinesCount}明細）
+              </span>
+            </div>
+            <span className="text-[11px] text-slate-500 mt-1 block leading-tight">
+              受注日から3日以上たっても未発注の明細と、納品予定日が未入力の明細（見積・出荷済みの伝票は除く）
+            </span>
+          </div>
+          <div className="mt-3 pt-2.5 border-t border-orange-100 flex items-center justify-between">
+            <span className="text-[10px] text-orange-700 transition font-medium">
+              漏れ案件へ
+            </span>
+            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-orange-900 bg-orange-100 group-hover:bg-orange-200 border border-orange-300 px-2 py-0.5 rounded-md shadow-2xs transition">
+              <span>表示</span>
+              <ChevronRight className="w-3 h-3 group-hover:translate-x-0.5 transition" />
+            </span>
+          </div>
+        </div>
+
+        {/* 5. 今月の納期遵守率 */}
+        <div
+          onClick={() => onNavigateToTab('completed')}
+          className="bg-white p-4 rounded-xl border-2 border-emerald-200 hover:border-emerald-400 bg-emerald-50/20 shadow-xs hover:shadow-md active:translate-y-0.5 active:scale-[0.99] transition-all cursor-pointer group flex flex-col justify-between"
+        >
+          <div>
+            <div className="flex items-center justify-between gap-1 mb-2">
+              <div className="flex items-center gap-1.5">
+                <div className="p-1 rounded-md bg-emerald-100 text-emerald-600 group-hover:bg-emerald-600 group-hover:text-white transition">
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                </div>
+                <span className="text-xs font-bold text-emerald-900">今月の遵守率</span>
+              </div>
+              <FreshnessBadge info={freshness} />
+            </div>
+            <div className="mt-1 flex items-baseline gap-1.5">
+              {completedThisMonth.length > 0 ? (
+                <>
+                  <span className="text-2xl font-extrabold font-mono text-emerald-700">
+                    {onTimeRate}%
+                  </span>
+                  <span className="text-xs text-emerald-600 font-medium">
+                    ({onTimeShippedCount}/{completedThisMonth.length}件)
+                  </span>
+                </>
+              ) : (
+                <span className="text-lg font-bold text-slate-400">
+                  データなし
+                </span>
+              )}
+            </div>
+            <span className="text-[11px] text-slate-400 mt-1 block leading-tight">
+              出荷日 ≦ 最長納品予定日
+            </span>
+          </div>
+          <div className="mt-3 pt-2.5 border-t border-emerald-100 flex items-center justify-between">
+            <span className="text-[10px] text-emerald-700 transition font-medium">
+              納品完了実績
+            </span>
+            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-900 bg-emerald-100 group-hover:bg-emerald-200 border border-emerald-300 px-2 py-0.5 rounded-md shadow-2xs transition">
+              <span>表示</span>
+              <ChevronRight className="w-3 h-3 group-hover:translate-x-0.5 transition" />
+            </span>
+          </div>
+        </div>
+      </div>
+
+
 
       {/* Main Content Grid: 営業別テーブル & グラフ */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -1105,164 +1095,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
       </div>
 
-      {/* Integrated Delivery Progress Schedule Timeline Section */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
-        <div className="px-5 py-3.5 border-b border-slate-200 flex items-center justify-between bg-indigo-50/50">
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-sm font-bold text-indigo-900 flex items-center gap-1.5">
-                <Calendar className="w-4 h-4 text-indigo-600" />
-                <span>納期進捗スケジュール・タイムライン一覧</span>
-              </h2>
-            </div>
-            <p className="text-[11px] text-indigo-700 mt-0.5">
-              進行中の全注文明細の最長納品予定日および進捗ステージを一覧でタイムライン確認できます
-            </p>
-          </div>
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs text-left">
-            <thead className="bg-slate-50 text-slate-600 border-b border-slate-200">
-              <tr>
-                <th className="py-2.5 px-4 font-semibold">受注ID</th>
-                <th className="py-2.5 px-3 font-semibold">クリニック名</th>
-                <th className="py-2.5 px-3 font-semibold">商品名</th>
-                <th className="py-2.5 px-3 font-semibold">担当営業</th>
-                <th className="py-2.5 px-3 font-semibold">工程ステージ</th>
-                <th className="py-2.5 px-3 font-semibold">最長納期</th>
-                <th className="py-2.5 px-4 font-semibold text-right">操作</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {incompleteLines.slice(0, 10).map((line) => {
-                const parent = orders.find((o) => o.orderId === line.orderId);
-                return (
-                  <tr
-                    key={line.lineKey}
-                    onClick={() => parent && onSelectOrder?.(parent, line.lineKey)}
-                    className="hover:bg-indigo-50/40 transition-colors cursor-pointer group"
-                  >
-                    <td className="py-3 px-4 font-mono font-bold text-blue-600 group-hover:underline">
-                      {line.orderId}
-                    </td>
-                    <td className="py-3 px-3 font-bold text-slate-900">
-                      {line.orderCustomer}
-                    </td>
-                    <td className="py-3 px-3 text-slate-800 font-medium truncate max-w-xs">
-                      {line.productName}
-                    </td>
-                    <td className="py-3 px-3 text-slate-700">
-                      {line.salesRep || '未設定'}
-                    </td>
-                    <td className="py-3 px-3">
-                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                        line.stage === '出荷完了' ? 'bg-emerald-100 text-emerald-800' :
-                        line.stage === '一部出荷' ? 'bg-sky-100 text-sky-800' :
-                        line.stage === '発注済・入荷待ち' ? 'bg-blue-100 text-blue-800' :
-                        'bg-slate-100 text-slate-700'
-                      }`}>
-                        {line.stage}
-                      </span>
-                    </td>
-                    <td className="py-3 px-3 font-mono font-bold text-slate-800">
-                      {formatDate(line.latestDate)}
-                    </td>
-                    <td className="py-3 px-4 text-right">
-                      <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-white group-hover:bg-indigo-600 text-slate-700 group-hover:text-white rounded border border-slate-300 group-hover:border-indigo-600 font-bold text-[10px] shadow-2xs transition">
-                        <span>詳細</span>
-                        <ChevronRight className="w-3 h-3" />
-                      </span>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Quick Delayed Orders Detail Table */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
-        <div className="px-5 py-3.5 border-b border-slate-200 flex items-center justify-between bg-rose-50/50">
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-sm font-bold text-rose-900 flex items-center gap-1.5">
-                <AlertTriangle className="w-4 h-4 text-rose-600" />
-                要対応・超過伝票のクイック詳細
-              </h2>
-              <FreshnessBadge info={freshness} />
-            </div>
-            <p className="text-[11px] text-rose-700 mt-0.5">
-              行をクリックすると、該当伝票の詳細内容や進捗をいつでも確認・操作できます
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => onNavigateToTab('overdue')}
-            className="text-xs font-bold text-rose-700 hover:text-rose-800 bg-white border border-rose-300 px-3 py-1.5 rounded-lg transition flex items-center gap-1 shadow-xs active:translate-y-px cursor-pointer"
-          >
-            <span>超過管理へ移動</span>
-            <ArrowRight className="w-3.5 h-3.5" />
-          </button>
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs text-left">
-            <thead className="bg-slate-50 text-slate-600 border-b border-slate-200">
-              <tr>
-                <th className="py-2.5 px-4 font-semibold">受注ID</th>
-                <th className="py-2.5 px-3 font-semibold">クリニック名</th>
-                <th className="py-2.5 px-3 font-semibold">担当営業</th>
-                <th className="py-2.5 px-3 font-semibold">商品・明細</th>
-                <th className="py-2.5 px-3 font-semibold">最長納期</th>
-                <th className="py-2.5 px-4 font-semibold text-right">操作</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {orders
-                .filter((o) => {
-                  const hasDelayedLine = o.lines.some((l) => {
-                    if (l.stage === '出荷完了' || isShippingOrFee(l.productName, l.productId)) return false;
-                    if (!l.latestDate) return false;
-                    return new Date(l.latestDate + 'T00:00:00+09:00') < today && isEligibleForOverdue(o);
-                  });
-                  return hasDelayedLine;
-                })
-                .slice(0, 8)
-                .map((ord) => (
-                  <tr
-                    key={ord.orderId}
-                    onClick={() => onSelectOrder?.(ord)}
-                    className="hover:bg-rose-50/60 transition-colors cursor-pointer group"
-                  >
-                    <td className="py-3 px-4 font-mono font-bold text-blue-600 group-hover:underline">
-                      {ord.orderId}
-                    </td>
-                    <td className="py-3 px-3 font-bold text-slate-900">
-                      {ord.customerName}
-                    </td>
-                    <td className="py-3 px-3 text-slate-700">
-                      {ord.salesRep || '未設定'}
-                    </td>
-                    <td className="py-3 px-3 text-slate-600 truncate max-w-xs">
-                      {ord.lines.map((l) => l.productName).join(', ')}
-                    </td>
-                    <td className="py-3 px-3 font-mono text-rose-600 font-bold">
-                      {formatDate(ord.lines.reduce((max, l) => (!max || (l.latestDate && l.latestDate > max)) ? l.latestDate : max, null as string | null))}
-                    </td>
-                    <td className="py-3 px-4 text-right">
-                      <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-white group-hover:bg-rose-600 text-slate-700 group-hover:text-white rounded border border-slate-300 group-hover:border-rose-600 font-bold text-[10px] shadow-2xs transition">
-                        <span>詳細を見る</span>
-                        <ChevronRight className="w-3 h-3" />
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
     </div>
   );
 };

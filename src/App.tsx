@@ -935,6 +935,7 @@ export default function App() {
             <DashboardView
               orders={filteredOrders}
               alerts={filteredAlerts}
+              sheetUnmatchedCount={sheetUnmatchedCount}
               weeklyDelayHistory={deliveryData.weeklyDelayHistory}
               onSelectRepForView={handleSelectRepFromDashboard}
               onNavigateToTab={setActiveTab}
