@@ -488,7 +488,7 @@ export const ClinicMasterView: React.FC<ClinicMasterViewProps> = ({
 
       {/* Main Clinics Table */}
       <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-xs">
-        <div className="overflow-x-auto">
+        <div className="data-table-wrap overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-bold uppercase tracking-wider text-[11px]">
               <tr>

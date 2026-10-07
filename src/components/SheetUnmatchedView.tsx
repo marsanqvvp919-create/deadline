@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useUrlState } from '../utils/listState';
 import { AlertCircle, CheckCircle2, Copy, ExternalLink, Layers, RefreshCw, Search, Truck } from 'lucide-react';
 import { getRakurakuUrl } from '../utils/customsUtils';
 import { useSharedNotes } from '../utils/sharedNotes';
@@ -95,8 +96,8 @@ export async function fetchSheetUnmatched(refresh = false): Promise<UnmatchedRes
 export const SheetUnmatchedView: React.FC<{ onCountChange?: (count: number | null) => void }> = ({ onCountChange }) => {
   const [data, setData] = useState<UnmatchedResponse | null>(null);
   const [loading, setLoading] = useState(true);
-  const [kindFilter, setKindFilter] = useState<'all' | UnmatchedRow['kind']>('all');
-  const [view, setView] = useState<'unmatched' | MatchedIssue['issue']>('unmatched');
+  const [kindFilter, setKindFilter] = useUrlState<'all' | UnmatchedRow['kind']>('kind', 'all');
+  const [view, setView] = useUrlState<'unmatched' | MatchedIssue['issue']>('view', 'unmatched');
   // 対応済みの印（チームで共有）。キーは追跡番号（シートの行が並べ替わっても同じ行を指すように）
   const [doneMarks, setDoneMark] = useSharedNotes<{ by?: string; at: string }>('unmatched_done');
   const [showDone, setShowDone] = useState(false);

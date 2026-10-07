@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
+import { useUrlState } from '../utils/listState';
 import {
   Order,
   OrderLine,
@@ -77,10 +78,10 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
   onRetry,
 }) => {
   // Scope: 'overdue' (納期超過のみ - isLineDelayed統一) | 'approaching' (納期間近（5日以内） - 別指標として分離)
-  const [activeScope, setActiveScope] = useState<'overdue' | 'approaching'>('overdue');
+  const [activeScope, setActiveScope] = useUrlState<'overdue' | 'approaching'>('scope', 'overdue');
 
   // View mode: 'orders' (伝票・明細別) | 'clinics' (取引先別)
-  const [viewMode, setViewMode] = useState<'orders' | 'clinics'>('orders');
+  const [viewMode, setViewMode] = useUrlState<'orders' | 'clinics'>('view', 'orders');
 
   // Filters
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -908,7 +909,7 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
               </p>
             </div>
           ) : (
-            <div className="overflow-x-auto">
+            <div className="data-table-wrap overflow-x-auto">
               <table className="w-full text-left text-xs">
                 <thead>
                   <tr className="bg-slate-50/80 text-slate-600 font-semibold border-b border-slate-200">

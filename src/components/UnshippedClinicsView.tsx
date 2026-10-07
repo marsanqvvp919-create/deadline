@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { useUrlState } from '../utils/listState';
 import { Order, OrderLine, ViewTab, ClinicItem } from '../types';
 import { formatDate, getRemainingDaysInfo, getOrderBorderColor, buildRakurakuUrl, isShippingOrFee } from '../utils';
 import { getConfiguredUrls, getLocalClinics } from '../api';
@@ -82,7 +83,7 @@ export const UnshippedClinicsView: React.FC<UnshippedClinicsViewProps> = ({
   const clinicsMaster: ClinicItem[] = useMemo(() => getLocalClinics(), []);
 
   // UI States
-  const [activeFilter, setActiveFilter] = useState<ClinicFilter>(initialFilter);
+  const [activeFilter, setActiveFilter] = useUrlState<ClinicFilter>('filter', initialFilter);
   const [localSearch, setLocalSearch] = useState<string>('');
   const [selectedSalesRep, setSelectedSalesRep] = useState<string>('all');
   const [expandedClinics, setExpandedClinics] = useState<Set<string>>(new Set());

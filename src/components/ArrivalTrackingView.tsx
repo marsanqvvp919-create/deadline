@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { useUrlState } from '../utils/listState';
 import { Order, ShipmentItem } from '../types';
 import { getConfiguredUrls } from '../api';
 import { openRakurakuWithCopiedId } from '../utils';
@@ -62,8 +63,8 @@ const ACTIVE_DAYS = 21;
 const RECENT_DELIVERED_DAYS = 7;
 
 export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: ShipmentItem[] }> = ({ orders, shipments }) => {
-  const [stageFilter, setStageFilter] = useState<Stage | 'all'>('all');
-  const [warehouseFilter, setWarehouseFilter] = useState<string>('all');
+  const [stageFilter, setStageFilter] = useUrlState<Stage | 'all'>('stage', 'all');
+  const [warehouseFilter, setWarehouseFilter] = useUrlState<string>('wh', 'all');
   const [query, setQuery] = useState('');
   const [copied, setCopied] = useState<string | null>(null);
   const { rakurakuBaseUrl } = getConfiguredUrls();

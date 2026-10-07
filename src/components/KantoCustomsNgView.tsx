@@ -14,6 +14,7 @@ import {
   getRakurakuUrl,
   formatValue,
 } from '../utils/customsUtils';
+import { useSort } from '../utils/listState';
 import { TableEmptyState } from './TableEmptyState';
 
 interface KantoCustomsNgViewProps {
@@ -61,6 +62,24 @@ export const KantoCustomsNgView: React.FC<KantoCustomsNgViewProps> = ({
     });
   }, [shipments, orders, clinics, searchQuery]);
 
+
+  // 列見出しのクリックで並べ替え
+  const { sorted: sortedRows, toggle: toggleSort, indicator: sortMark } = useSort(kantoNgShipments, {
+    shipmentId: (s) => s.shipmentId,
+    nextDeadline: (s) => (s as any).nextDeadline,
+    orderId: (s) => s.orderId,
+    clinic: (s) => resolveClinicName(s, orders, clinics),
+    warehouse: (s) => s.warehouse,
+    arrivalAirport: (s) => s.arrivalAirport,
+    importStatus: (s) => s.importStatus,
+    coolApplicationStatus: (s) => s.coolApplicationStatus,
+    powerOfAttorneyStatus: (s) => s.powerOfAttorneyStatus,
+    slipStatus: (s) => s.slipStatus,
+    phaNumber: (s) => s.phaNumber,
+    warehouseInvoiceNo: (s) => s.warehouseInvoiceNo,
+    currentLocation: (s) => s.currentLocation,
+    trackingNo: (s) => s.trackingNo,
+  });
   // 案件詳細用Order生成
   const getClickableOrder = (s: ShipmentItem): Order => {
     const matching = orders.find((o) => o.orderId === s.orderId);
@@ -253,23 +272,23 @@ export const KantoCustomsNgView: React.FC<KantoCustomsNgViewProps> = ({
           </span>
         </div>
 
-        <div className="overflow-x-auto">
+        <div className="data-table-wrap overflow-x-auto">
           <table className="w-full text-left border-collapse text-xs">
             <thead>
               <tr className="bg-slate-50 text-slate-500 border-b border-slate-200 font-semibold">
-                <th className="py-3 px-3">出荷ID</th>
-                <th className="py-3 px-3">受注ID</th>
-                <th className="py-3 px-4">クリニック名</th>
-                <th className="py-3 px-3">出荷元倉庫</th>
-                <th className="py-3 px-3">到着空港</th>
-                <th className="py-3 px-3 text-center">輸入確認</th>
-                <th className="py-3 px-3 text-center">クール申請</th>
-                <th className="py-3 px-3 text-center">委任状</th>
-                <th className="py-3 px-3 text-center">伝票</th>
-                <th className="py-3 px-3">PHA番号</th>
-                <th className="py-3 px-3">倉庫Inv番号</th>
-                <th className="py-3 px-3">現在地</th>
-                <th className="py-3 px-3 text-right">出荷番号</th>
+                <th data-sortable onClick={() => toggleSort('shipmentId')} className="py-3 px-3">出荷ID{sortMark('shipmentId')}</th>
+                <th data-sortable onClick={() => toggleSort('orderId')} className="py-3 px-3">受注ID{sortMark('orderId')}</th>
+                <th data-sortable onClick={() => toggleSort('clinic')} className="py-3 px-4">クリニック名{sortMark('clinic')}</th>
+                <th data-sortable onClick={() => toggleSort('warehouse')} className="py-3 px-3">出荷元倉庫{sortMark('warehouse')}</th>
+                <th data-sortable onClick={() => toggleSort('arrivalAirport')} className="py-3 px-3">到着空港{sortMark('arrivalAirport')}</th>
+                <th data-sortable onClick={() => toggleSort('importStatus')} className="py-3 px-3 text-center">輸入確認{sortMark('importStatus')}</th>
+                <th data-sortable onClick={() => toggleSort('coolApplicationStatus')} className="py-3 px-3 text-center">クール申請{sortMark('coolApplicationStatus')}</th>
+                <th data-sortable onClick={() => toggleSort('powerOfAttorneyStatus')} className="py-3 px-3 text-center">委任状{sortMark('powerOfAttorneyStatus')}</th>
+                <th data-sortable onClick={() => toggleSort('slipStatus')} className="py-3 px-3 text-center">伝票{sortMark('slipStatus')}</th>
+                <th data-sortable onClick={() => toggleSort('phaNumber')} className="py-3 px-3">PHA番号{sortMark('phaNumber')}</th>
+                <th data-sortable onClick={() => toggleSort('warehouseInvoiceNo')} className="py-3 px-3">倉庫Inv番号{sortMark('warehouseInvoiceNo')}</th>
+                <th data-sortable onClick={() => toggleSort('currentLocation')} className="py-3 px-3">現在地{sortMark('currentLocation')}</th>
+                <th data-sortable onClick={() => toggleSort('trackingNo')} className="py-3 px-3 text-right">出荷番号{sortMark('trackingNo')}</th>
                 <th className="py-3 px-3 text-center">操作</th>
               </tr>
             </thead>
@@ -284,7 +303,7 @@ export const KantoCustomsNgView: React.FC<KantoCustomsNgViewProps> = ({
                   emptyMessage="該当する通関NG案件はありません"
                 />
               ) : (
-                kantoNgShipments.map((item, idx) => {
+                sortedRows.map((item, idx) => {
                   const clinicName = resolveClinicName(item, orders, clinics);
 
                   return (

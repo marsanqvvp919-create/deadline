@@ -12,3 +12,19 @@
     font-variant-numeric: tabular-nums;
   }
 }
+
+/* 一覧表：長い表でも見出し行が残るよう、表の中でスクロールさせる */
+.data-table-wrap {
+  max-height: 72vh;
+  overflow: auto;
+}
+.data-table-wrap thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background-color: #f8fafc;
+}
+.data-table-wrap thead th[data-sortable] {
+  cursor: pointer;
+  user-select: none;
+}

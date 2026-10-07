@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   DeliveryData,
   ViewTab,
@@ -254,10 +254,15 @@ export default function App() {
   // Mobile sidebar open state
   const [isMobileNavOpen, setIsMobileNavOpen] = useState<boolean>(false);
 
+  const lastSyncedTabRef = useRef<ViewTab | null>(activeTab);
   // 2. URLクエリパラメータとの双方向同期（フェーズ3要件）
   useEffect(() => {
     try {
-      const params = new URLSearchParams();
+      // タブが変わったときは画面ごとの絞り込みを消し、同じタブの間は画面側のパラメータを残す
+      const tabChanged = lastSyncedTabRef.current !== activeTab;
+      lastSyncedTabRef.current = activeTab;
+      const params = tabChanged ? new URLSearchParams() : new URLSearchParams(window.location.search);
+      ['tab', 'rep', 'supplier', 'period', 'q'].forEach((k) => params.delete(k));
       if (activeTab !== 'dashboard') params.set('tab', activeTab);
       if (selectedRep) params.set('rep', selectedRep);
       if (selectedSupplier) params.set('supplier', selectedSupplier);

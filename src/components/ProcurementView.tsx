@@ -881,7 +881,7 @@ ${linesText}
                   </div>
 
                   {/* Supplier Lines Table */}
-                  <div className="overflow-x-auto">
+                  <div className="data-table-wrap overflow-x-auto">
                     <table className="w-full text-left text-xs">
                       <thead>
                         <tr className="bg-slate-50/80 text-slate-500 font-semibold border-b border-slate-200">
@@ -1235,7 +1235,7 @@ ${linesText}
       {/* VIEW 3: 商品一覧表（高密度フラットテーブル） */}
       {viewMode === 'all_lines' && (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-2xs overflow-hidden">
-          <div className="overflow-x-auto">
+          <div className="data-table-wrap overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead>
                 <tr className="bg-slate-50 text-slate-500 font-semibold border-b border-slate-200">

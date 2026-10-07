@@ -208,7 +208,7 @@ export const CompletedView: React.FC<CompletedViewProps> = ({ orders, onSelectOr
 
       {/* Completed Orders Table */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-2xs overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="data-table-wrap overflow-x-auto">
           <table className="w-full text-xs text-left">
             <thead className="bg-slate-50 text-slate-600 border-b border-slate-200">
               <tr>
