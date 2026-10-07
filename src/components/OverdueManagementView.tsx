@@ -807,7 +807,7 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
           {/* Keyword Search */}
           <div className="relative">
             <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
+            <input autoComplete="off"
               type="text"
               placeholder={viewMode === 'orders' ? '伝票ID、クリニック名、商品名...' : 'クリニック名、院長名、商品名...'}
               value={searchQuery}
@@ -910,7 +910,7 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
             </div>
           ) : (
             <div className="data-table-wrap overflow-x-auto">
-              <table className="w-full text-left text-xs">
+              <table className="tbl-overdue w-full text-left text-xs">
                 <thead>
                   <tr className="bg-slate-50/80 text-slate-600 font-semibold border-b border-slate-200">
                     <th className="py-3 px-4">受注ID</th>
@@ -1372,7 +1372,7 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
                           取引先に対する特記事項・交渉メモ:
                         </label>
                         <div className="flex gap-2">
-                          <input
+                          <input autoComplete="off"
                             type="text"
                             placeholder="例: 9/25 院長へ直接電話。来週月曜日に代替品到着予定と案内済。"
                             value={clinicNotes[clinic.clinicName] || ''}

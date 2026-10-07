@@ -438,7 +438,7 @@ export const ClinicMasterView: React.FC<ClinicMasterViewProps> = ({
       <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs flex flex-col md:flex-row gap-3 items-stretch md:items-center justify-between">
         <div className="flex-1 relative">
           <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-          <input
+          <input autoComplete="off"
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
@@ -490,7 +490,7 @@ export const ClinicMasterView: React.FC<ClinicMasterViewProps> = ({
       {/* Main Clinics Table */}
       <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-xs">
         <div className="data-table-wrap overflow-x-auto">
-          <table className="w-full text-left text-xs">
+          <table className="tbl-clinic w-full text-left text-xs">
             <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-bold uppercase tracking-wider text-[11px]">
               <tr>
                 <th className="py-3 px-3.5">楽楽ID (109898)</th>
@@ -524,14 +524,10 @@ export const ClinicMasterView: React.FC<ClinicMasterViewProps> = ({
                       {c.clinicId}
                     </td>
                     <td className="py-3 px-3.5">
-                      <div className="font-bold text-slate-900 group-hover:text-indigo-700 transition flex items-center gap-1.5">
-                        <span>{c.clinicName}</span>
-                        <span className="text-[10px] text-indigo-600 opacity-0 group-hover:opacity-100 transition flex items-center gap-0.5">
-                          <Package className="w-3 h-3" />
-                          <span>クリックで商品ステータス</span>
-                        </span>
+                      <div className="font-bold text-slate-900 group-hover:text-indigo-700 transition" title="クリックで商品ステータスを表示">
+                        {c.clinicName}
                       </div>
-                      <div className="text-[11px] text-slate-400 font-mono">
+                      <div className="text-[11px] text-slate-400 break-all">
                         {c.email || 'メール未登録'}
                       </div>
                     </td>
@@ -663,7 +659,7 @@ export const ClinicMasterView: React.FC<ClinicMasterViewProps> = ({
             <div className="space-y-3 text-xs">
               <div>
                 <label className="font-bold text-slate-700 block mb-1">クリニック名</label>
-                <input
+                <input autoComplete="off"
                   type="text"
                   value={editForm.clinicName || ''}
                   onChange={(e) => setEditForm({ ...editForm, clinicName: e.target.value })}
@@ -673,7 +669,7 @@ export const ClinicMasterView: React.FC<ClinicMasterViewProps> = ({
 
               <div>
                 <label className="font-bold text-slate-700 block mb-1">担当営業</label>
-                <input
+                <input autoComplete="off"
                   type="text"
                   value={editForm.salesRep || ''}
                   onChange={(e) => setEditForm({ ...editForm, salesRep: e.target.value })}

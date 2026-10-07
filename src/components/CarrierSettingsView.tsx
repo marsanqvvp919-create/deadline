@@ -171,7 +171,7 @@ export const CarrierSettingsView: React.FC = () => {
           >
             保存
           </button>
-          <input
+          <input autoComplete="off"
             placeholder="テスト用の追跡番号（任意）"
             value={testNo.fedex}
             onChange={(e) => setTestNo({ ...testNo, fedex: e.target.value })}
@@ -221,7 +221,7 @@ export const CarrierSettingsView: React.FC = () => {
           >
             保存
           </button>
-          <input
+          <input autoComplete="off"
             placeholder="テスト用の追跡番号（任意）"
             value={testNo.dhl}
             onChange={(e) => setTestNo({ ...testNo, dhl: e.target.value })}

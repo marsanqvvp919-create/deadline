@@ -627,7 +627,7 @@ ${linesDetail}
       <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs space-y-3.5">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
           {/* Filter Chips */}
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 lg:pb-0 scrollbar-none text-xs">
+          <div className="flex flex-wrap items-center gap-1.5 pb-1 lg:pb-0 text-xs">
             <button
               onClick={() => setActiveFilter('all')}
               className={`px-3 py-1.5 rounded-xl font-bold transition shrink-0 cursor-pointer flex items-center gap-1.5 ${
@@ -727,7 +727,7 @@ ${linesDetail}
         {/* Search input */}
         <div className="relative pt-2 border-t border-slate-100">
           <Search className="w-4 h-4 text-slate-400 absolute left-3 top-4.5" />
-          <input
+          <input autoComplete="off"
             type="text"
             value={localSearch}
             onChange={(e) => setLocalSearch(e.target.value)}
@@ -1060,7 +1060,7 @@ ${linesDetail}
                 <label className="block text-[11px] font-bold text-slate-700 mb-1">
                   メール件名
                 </label>
-                <input
+                <input autoComplete="off"
                   type="text"
                   value={contactSubject}
                   onChange={(e) => setContactSubject(e.target.value)}

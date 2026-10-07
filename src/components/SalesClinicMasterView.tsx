@@ -183,7 +183,7 @@ export const SalesClinicMasterView: React.FC<SalesClinicMasterViewProps> = ({
           {/* Search Bar */}
           <div className="relative">
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
+            <input autoComplete="off"
               type="text"
               placeholder="医院名・住所・担当者で検索..."
               value={searchQuery}

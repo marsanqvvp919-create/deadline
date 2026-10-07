@@ -14,16 +14,6 @@ import {
 } from 'lucide-react';
 
 interface NavbarProps {
-  salesReps: string[];
-  suppliers: string[];
-  selectedRep: string;
-  onSelectRep: (rep: string) => void;
-  selectedSupplier: string;
-  onSelectSupplier: (supplier: string) => void;
-  period: PeriodFilter;
-  onSelectPeriod: (period: PeriodFilter) => void;
-  searchQuery: string;
-  onSearchChange: (q: string) => void;
   totalAlertsCount: number;
   highSeverityCount: number;
   generatedAt: string;
@@ -46,16 +36,6 @@ interface NavbarProps {
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
-  salesReps,
-  suppliers,
-  selectedRep,
-  onSelectRep,
-  selectedSupplier,
-  onSelectSupplier,
-  period,
-  onSelectPeriod,
-  searchQuery,
-  onSearchChange,
   totalAlertsCount,
   highSeverityCount,
   generatedAt,
@@ -241,82 +221,7 @@ export const Navbar: React.FC<NavbarProps> = ({
       )}
 
       {/* Main Filter Bar */}
-      <div className="px-4 sm:px-6 py-2.5 flex flex-wrap items-center justify-between gap-3">
-        {/* Left: Global Filters */}
-        <div className="flex flex-wrap items-center gap-2 sm:gap-3 flex-1 min-w-[320px]">
-          <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-500">
-            <SlidersHorizontal className="w-3.5 h-3.5 text-slate-400" />
-            <span>絞り込み:</span>
-          </div>
-
-          {/* Sales Rep Filter */}
-          <div className="min-w-[130px]">
-            <select
-              value={selectedRep}
-              onChange={(e) => onSelectRep(e.target.value)}
-              className="w-full text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1.5 shadow-2xs focus:ring-2 focus:ring-blue-500 focus:outline-hidden transition cursor-pointer"
-            >
-              <option value="">担当営業: 全員</option>
-              {salesReps.map((rep) => (
-                <option key={rep} value={rep}>
-                  {rep}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Supplier Filter */}
-          <div className="min-w-[140px]">
-            <select
-              value={selectedSupplier}
-              onChange={(e) => onSelectSupplier(e.target.value)}
-              className="w-full text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1.5 shadow-2xs focus:ring-2 focus:ring-blue-500 focus:outline-hidden transition cursor-pointer"
-            >
-              <option value="">仕入先: すべて</option>
-              {suppliers.map((sup) => (
-                <option key={sup} value={sup}>
-                  {sup}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Period Filter */}
-          <div className="min-w-[120px]">
-            <select
-              value={period}
-              onChange={(e) => onSelectPeriod(e.target.value as PeriodFilter)}
-              className="w-full text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1.5 shadow-2xs focus:ring-2 focus:ring-blue-500 focus:outline-hidden transition cursor-pointer"
-            >
-              <option value="all">期間: 全期間</option>
-              <option value="7d">直近7日</option>
-              <option value="30d">直近30日</option>
-              <option value="this_month">今月</option>
-              <option value="90d">直近90日</option>
-            </select>
-          </div>
-
-          {/* Search Input (Phase 3) */}
-          <div className="relative max-w-[220px] w-full">
-            <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input
-              type="text"
-              placeholder="受注ID・顧客名・商品名"
-              value={searchQuery}
-              onChange={(e) => onSearchChange(e.target.value)}
-              className="w-full pl-8 pr-3 py-1.5 text-xs bg-white border border-slate-300 rounded-lg placeholder-slate-400 shadow-2xs focus:ring-2 focus:ring-blue-500 focus:outline-hidden transition"
-            />
-            {searchQuery && (
-              <button
-                onClick={() => onSearchChange('')}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs font-bold p-1 cursor-pointer"
-              >
-                ×
-              </button>
-            )}
-          </div>
-        </div>
-
+      <div className="px-4 sm:px-6 py-2.5 flex flex-wrap items-center justify-end gap-3">
         {/* Right: Status, Alerts Badge, Refresh, Settings */}
         <div className="flex items-center gap-2.5 shrink-0 ml-auto">
           {/* Alerts Badge Button */}

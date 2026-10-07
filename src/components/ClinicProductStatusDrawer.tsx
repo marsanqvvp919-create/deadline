@@ -579,7 +579,7 @@ export const ClinicProductStatusDrawer: React.FC<ClinicProductStatusDrawerProps>
                         <div className="absolute left-0 mt-2 w-72 bg-white text-slate-900 rounded-xl shadow-2xl border border-slate-200 z-50 p-2 space-y-2">
                           <div className="relative">
                             <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
-                            <input
+                            <input autoComplete="off"
                               type="text"
                               placeholder="クリニック名で絞り込み..."
                               value={clinicSearchText}
@@ -792,7 +792,7 @@ export const ClinicProductStatusDrawer: React.FC<ClinicProductStatusDrawerProps>
                     {/* Search box */}
                     <div className="relative flex-1">
                       <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                      <input
+                      <input autoComplete="off"
                         type="text"
                         placeholder="商品名、商品ID、仕入先名、受注伝票ID（000003xxx）で検索..."
                         value={searchQuery}

@@ -276,7 +276,7 @@ export const CoolMissingView: React.FC<CoolMissingViewProps> = ({
       <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs flex items-center justify-between gap-3">
         <div className="relative w-full sm:w-80">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-          <input
+          <input autoComplete="off"
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
@@ -302,12 +302,10 @@ export const CoolMissingView: React.FC<CoolMissingViewProps> = ({
         </div>
 
         <div className="data-table-wrap overflow-x-auto">
-          <table className="w-full text-left border-collapse text-xs">
+          <table className="tbl-ship w-full text-left border-collapse text-xs">
             <thead>
               <tr className="bg-slate-50 text-slate-500 border-b border-slate-200 font-semibold">
-                <th data-sortable onClick={() => toggleSort('shipmentId')} className="py-3 px-3">出荷ID{sortMark('shipmentId')}</th>
-                <th data-sortable onClick={() => toggleSort('nextDeadline')} className="py-3 px-3">次の期限{sortMark('nextDeadline')}</th>
-                <th data-sortable onClick={() => toggleSort('orderId')} className="py-3 px-3">受注ID{sortMark('orderId')}</th>
+                <th data-sortable onClick={() => toggleSort('shipmentId')} className="py-3 px-3">出荷ID / 受注ID{sortMark('shipmentId')}</th>
                 <th data-sortable onClick={() => toggleSort('clinic')} className="py-3 px-4">クリニック名{sortMark('clinic')}</th>
                 <th data-sortable onClick={() => toggleSort('warehouse')} className="py-3 px-3">出荷元倉庫{sortMark('warehouse')}</th>
                 <th data-sortable onClick={() => toggleSort('arrivalAirport')} className="py-3 px-3">到着空港{sortMark('arrivalAirport')}</th>
@@ -315,8 +313,7 @@ export const CoolMissingView: React.FC<CoolMissingViewProps> = ({
                 <th data-sortable onClick={() => toggleSort('coolApplicationStatus')} className="py-3 px-3 text-center">クール申請{sortMark('coolApplicationStatus')}</th>
                 <th data-sortable onClick={() => toggleSort('powerOfAttorneyStatus')} className="py-3 px-3 text-center">委任状{sortMark('powerOfAttorneyStatus')}</th>
                 <th data-sortable onClick={() => toggleSort('slipStatus')} className="py-3 px-3 text-center">伝票{sortMark('slipStatus')}</th>
-                <th data-sortable onClick={() => toggleSort('phaNumber')} className="py-3 px-3">PHA番号{sortMark('phaNumber')}</th>
-                <th data-sortable onClick={() => toggleSort('warehouseInvoiceNo')} className="py-3 px-3">倉庫Inv番号{sortMark('warehouseInvoiceNo')}</th>
+                <th data-sortable onClick={() => toggleSort('phaNumber')} className="py-3 px-3">PHA / 倉庫Inv{sortMark('phaNumber')}</th>
                 <th data-sortable onClick={() => toggleSort('currentLocation')} className="py-3 px-3">現在地{sortMark('currentLocation')}</th>
                 <th data-sortable onClick={() => toggleSort('trackingNo')} className="py-3 px-3 text-right">出荷番号{sortMark('trackingNo')}</th>
                 <th className="py-3 px-3 text-center">操作</th>
@@ -329,7 +326,7 @@ export const CoolMissingView: React.FC<CoolMissingViewProps> = ({
                   error={error}
                   lastSuccessTime={lastSuccessTime}
                   onRetry={onRetry}
-                  colSpan={15}
+                  colSpan={12}
                   emptyMessage="該当するクール手配漏れ案件はありません"
                 />
               ) : (
@@ -342,20 +339,16 @@ export const CoolMissingView: React.FC<CoolMissingViewProps> = ({
                       onClick={() => onSelectOrder?.(getClickableOrder(item))}
                       className="hover:bg-slate-50/80 transition cursor-pointer bg-amber-50/20"
                     >
-                      {/* 出荷ID */}
-                      <td className="py-3 px-3 font-mono font-bold text-slate-900 whitespace-nowrap">
-                        {formatValue(item.shipmentId)}
+                      {/* 出荷ID・受注ID */}
+                      <td className="py-3 px-3">
+                        <div className="font-mono font-bold text-slate-900">{formatValue(item.shipmentId)}</div>
+                        <div className="font-mono text-[10px] text-blue-600">受注 {formatValue(item.orderId)}</div>
+                        {!['', '—', undefined, null].includes((item as any).nextDeadline) && (
+                          <div className="text-[10px] font-bold text-amber-700">期限 {(item as any).nextDeadline}</div>
+                        )}
                       </td>
 
-                      {/* 次の期限 */}
-                      <td className="py-3 px-3 font-mono font-bold text-amber-700 whitespace-nowrap">
-                        {formatValue((item as any).nextDeadline)}
-                      </td>
 
-                      {/* 受注ID */}
-                      <td className="py-3 px-3 font-mono text-blue-600 whitespace-nowrap">
-                        {formatValue(item.orderId)}
-                      </td>
 
                       {/* クリニック名 */}
                       <td className="py-3 px-4 font-bold text-slate-900">
@@ -418,15 +411,12 @@ export const CoolMissingView: React.FC<CoolMissingViewProps> = ({
                         </span>
                       </td>
 
-                      {/* PHA番号 */}
-                      <td className="py-3 px-3 font-mono text-slate-700 whitespace-nowrap">
-                        {formatValue(item.phaNumber)}
+                      {/* PHA番号・倉庫インボイス番号 */}
+                      <td className="py-3 px-3 font-mono text-[11px] text-slate-700">
+                        <div>{formatValue(item.phaNumber)}</div>
+                        <div className="text-slate-500">{formatValue(item.warehouseInvoiceNo)}</div>
                       </td>
 
-                      {/* 倉庫インボイス番号 */}
-                      <td className="py-3 px-3 font-mono text-slate-700 whitespace-nowrap">
-                        {formatValue(item.warehouseInvoiceNo)}
-                      </td>
 
                       {/* 現在地 */}
                       <td className="py-3 px-3 text-slate-600 max-w-xs truncate">
@@ -447,7 +437,7 @@ export const CoolMissingView: React.FC<CoolMissingViewProps> = ({
                           className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold transition"
                         >
                           <ExternalLink className="w-3 h-3 text-slate-500" />
-                          楽楽販売で開く
+                          開く
                         </a>
                       </td>
                     </tr>

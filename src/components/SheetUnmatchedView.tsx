@@ -349,7 +349,7 @@ export const SheetUnmatchedView: React.FC<{ onCountChange?: (count: number | nul
           </label>
           <div className="relative max-w-sm">
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
+            <input autoComplete="off"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="クリニック名・追跡番号・INVOICEで絞り込み"

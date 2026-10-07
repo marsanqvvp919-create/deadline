@@ -374,7 +374,7 @@ export const InventoryManagementView: React.FC<InventoryManagementViewProps> = (
 
       {/* Warehouse Selector & Search Bar */}
       <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-3">
-        <div className="flex items-center gap-2 w-full sm:w-auto overflow-x-auto pb-2 sm:pb-0">
+        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto pb-2 sm:pb-0">
           {[
             { id: 'all', label: '全倉庫表示', icon: Globe },
             { id: 'korea', label: `韓国倉庫 (KR) ${totalKoreaStock > 0 ? `(${totalKoreaStock})` : '(0)'}`, icon: Building },
@@ -401,7 +401,7 @@ export const InventoryManagementView: React.FC<InventoryManagementViewProps> = (
 
         <div className="relative w-full sm:w-72">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-          <input
+          <input autoComplete="off"
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}

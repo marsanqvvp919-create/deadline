@@ -92,18 +92,13 @@ export default function App() {
       return {
         // 画面のない旧タブ（rep・delivery_dashboard など）はダッシュボードを開く
         tab: (KNOWN_TABS.includes(params.get('tab') as ViewTab) ? params.get('tab') : 'dashboard') as ViewTab,
-        rep: params.get('rep') || '',
-        supplier: params.get('supplier') || '',
-        period: (params.get('period') as PeriodFilter) || 'all',
-        q: params.get('q') || '',
+        // 画面上部の絞り込み（担当営業・仕入先・期間・検索）はやめた。担当営業はダッシュボードから要対応リストを開くときだけ使う
+        rep: params.get('tab') === 'alerts' ? params.get('rep') || '' : '',
       };
     } catch {
       return {
         tab: 'dashboard' as ViewTab,
         rep: '',
-        supplier: '',
-        period: 'all' as PeriodFilter,
-        q: '',
       };
     }
   };
@@ -113,9 +108,8 @@ export default function App() {
   // Navigation & Filter States
   const [activeTab, setActiveTab] = useState<ViewTab>(initial.tab);
   const [selectedRep, setSelectedRep] = useState<string>(initial.rep);
-  const [selectedSupplier, setSelectedSupplier] = useState<string>(initial.supplier);
-  const [period, setPeriod] = useState<PeriodFilter>(initial.period);
-  const [searchQuery, setSearchQuery] = useState<string>(initial.q);
+  const selectedSupplier = '';
+  const period: PeriodFilter = 'all';
 
   // Data & Fetch Status States
   const [deliveryData, setDeliveryData] = useState<DeliveryData | null>(null);
@@ -276,9 +270,6 @@ export default function App() {
       ['tab', 'rep', 'supplier', 'period', 'q'].forEach((k) => params.delete(k));
       if (activeTab !== 'dashboard') params.set('tab', activeTab);
       if (selectedRep) params.set('rep', selectedRep);
-      if (selectedSupplier) params.set('supplier', selectedSupplier);
-      if (period !== 'all') params.set('period', period);
-      if (searchQuery) params.set('q', searchQuery);
 
       const newRelativePathQuery =
         window.location.pathname + (params.toString() ? '?' + params.toString() : '');
@@ -286,7 +277,12 @@ export default function App() {
     } catch {
       // ignore
     }
-  }, [activeTab, selectedRep, selectedSupplier, period, searchQuery]);
+  }, [activeTab, selectedRep]);
+
+  // 担当営業の絞り込みは要対応リストの中だけ。ほかの画面へ移ったら解除する
+  useEffect(() => {
+    if (activeTab !== 'alerts' && selectedRep) setSelectedRep('');
+  }, [activeTab, selectedRep]);
 
   // 3. データ取得ハンドラ
   const loadData = useCallback(async (isManual = false) => {
@@ -921,16 +917,6 @@ export default function App() {
 
         {/* Global Filter Bar (Navbar) */}
         <Navbar
-          salesReps={salesReps}
-          suppliers={suppliers}
-          selectedRep={selectedRep}
-          onSelectRep={setSelectedRep}
-          selectedSupplier={selectedSupplier}
-          onSelectSupplier={setSelectedSupplier}
-          period={period}
-          onSelectPeriod={setPeriod}
-          searchQuery={searchQuery}
-          onSearchChange={setSearchQuery}
           totalAlertsCount={totalAlertsCount}
           highSeverityCount={highSeverityCount}
           generatedAt={deliveryData.generatedAt || ''}
@@ -977,7 +963,6 @@ export default function App() {
           {activeTab === 'procurement' && (
             <ProcurementView
               orders={filteredOrders}
-              searchQuery={searchQuery}
               onSelectOrderLine={handleOpenDetail}
               onOpenClinicStatus={handleOpenClinicStatus}
               onDataUpdated={() => loadData(false)}
@@ -987,7 +972,6 @@ export default function App() {
           {activeTab === 'unshipped_clinics' && (
             <UnshippedClinicsView
               orders={filteredOrders}
-              searchQuery={searchQuery}
               onSelectOrderLine={handleOpenDetail}
               onOpenClinicStatus={handleOpenClinicStatus}
               onNavigateToTab={setActiveTab}
@@ -999,7 +983,6 @@ export default function App() {
             <UnshippedClinicsView
               key="partial"
               orders={filteredOrders}
-              searchQuery={searchQuery}
               onSelectOrderLine={handleOpenDetail}
               onOpenClinicStatus={handleOpenClinicStatus}
               onNavigateToTab={setActiveTab}

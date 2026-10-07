@@ -777,10 +777,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
 
       {/* Main Content Grid: 営業別テーブル & グラフ */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
         
         {/* Left: 営業別の表 (8 cols on lg) */}
-        <div className="lg:col-span-7 bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden flex flex-col">
+        <div className="xl:col-span-7 bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden flex flex-col">
           <div className="px-5 py-3.5 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2 bg-slate-50/70">
             <div>
               <div className="flex items-center gap-2">
@@ -805,7 +805,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full text-xs text-left">
+            <table className="tbl-rep w-full text-xs text-left">
               <thead className="bg-slate-50 text-slate-600 border-b border-slate-200">
                 <tr>
                   <th className="py-2.5 px-4 font-semibold">担当営業</th>
@@ -902,7 +902,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
 
         {/* Right: 週次遅延推移グラフ (Phase 3 Requirement) (5 cols on lg) */}
-        <div className="lg:col-span-5 bg-white rounded-xl border border-slate-200 shadow-xs p-5 flex flex-col justify-between">
+        <div className="xl:col-span-5 bg-white rounded-xl border border-slate-200 shadow-xs p-5 flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between mb-1">
               <div className="flex items-center gap-2">

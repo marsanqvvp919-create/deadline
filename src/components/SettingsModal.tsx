@@ -244,7 +244,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
               <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
                 <label className="text-xs font-bold text-slate-700 block">新規営業担当者の追加</label>
                 <div className="flex items-center gap-2">
-                  <input
+                  <input autoComplete="off"
                     type="text"
                     placeholder="例: 山田 太郎"
                     value={newRepName}
@@ -500,7 +500,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                     <label className="block text-xs font-semibold text-slate-700 mb-1">
                       対象DBスキーマID (dbSchemaId)
                     </label>
-                    <input
+                    <input autoComplete="off"
                       type="text"
                       value={rakurakuSchemaId}
                       onChange={(e) => setRakurakuSchemaId(e.target.value)}

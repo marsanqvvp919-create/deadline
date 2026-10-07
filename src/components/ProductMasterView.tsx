@@ -387,7 +387,7 @@ export const ProductMasterView: React.FC<ProductMasterViewProps> = ({
       <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs flex flex-col md:flex-row gap-3 items-stretch md:items-center justify-between">
         <div className="flex-1 relative">
           <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-          <input
+          <input autoComplete="off"
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
@@ -439,7 +439,7 @@ export const ProductMasterView: React.FC<ProductMasterViewProps> = ({
       {/* Main Products Table */}
       <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-xs">
         <div className="data-table-wrap overflow-x-auto">
-          <table className="w-full text-left text-xs">
+          <table className="tbl-product w-full text-left text-xs">
             <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-bold uppercase tracking-wider text-[11px]">
               <tr>
                 <th className="py-3 px-3.5">楽楽ID (109958)</th>

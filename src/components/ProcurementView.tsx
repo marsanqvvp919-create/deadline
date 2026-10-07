@@ -642,7 +642,7 @@ ${linesText}
       <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs space-y-3.5">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
           {/* Status Filter Chips */}
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 lg:pb-0 scrollbar-none text-xs">
+          <div className="flex flex-wrap items-center gap-1.5 pb-1 lg:pb-0 text-xs">
             <button
               onClick={() => setActiveFilter('paid_unordered')}
               className={`px-3 py-1.5 rounded-xl font-bold transition shrink-0 cursor-pointer flex items-center gap-1.5 ${
@@ -768,7 +768,7 @@ ${linesText}
         <div className="flex flex-col sm:flex-row items-center gap-3 pt-2 border-t border-slate-100 text-xs">
           <div className="relative flex-1 w-full">
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
-            <input
+            <input autoComplete="off"
               type="text"
               value={localSearch}
               onChange={(e) => setLocalSearch(e.target.value)}
@@ -928,7 +928,7 @@ ${linesText}
 
                   {/* Supplier Lines Table */}
                   <div className="data-table-wrap overflow-x-auto">
-                    <table className="w-full text-left text-xs">
+                    <table className="tbl-proc w-full text-left text-xs">
                       <thead>
                         <tr className="bg-slate-50/80 text-slate-500 font-semibold border-b border-slate-200">
                           <th className="py-2.5 px-3.5 w-10 text-center">
@@ -1128,7 +1128,7 @@ ${linesText}
                                     title="受注IDをコピーして楽楽販売を開きます"
                                   >
                                     <Check className="w-3 h-3 text-emerald-600" />
-                                    <span>楽楽販売で発注登録</span>
+                                    <span>発注登録</span>
                                   </button>
 
                                 </div>
