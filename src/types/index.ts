@@ -19,6 +19,7 @@ export interface OrderLine {
   latestDate: string | null;   // YYYY-MM-DD
   poDate: string | null;       // YYYY-MM-DD
   shippedDate: string | null;  // YYYY-MM-DD
+  rawShippedDate?: string | null; // 楽楽販売の明細「出荷日」そのまま（出荷番号の有無で補正しない）
   shippedQty: number;
   remainingQty: number;
   trackingNo: string;
@@ -40,6 +41,8 @@ export interface Order {
   deliveredDate: string | null;// YYYY-MM-DD
   orderState: OrderState;
   lines: OrderLine[];
+  // 楽楽販売「納期：①超過」判定用。送料・手数料を含む全明細の最長納品予定日と出荷日
+  overdueBasis?: { latestDate: string | null; shippedDate: string | null }[];
   paymentStatus?: PaymentStatus;
   paymentDate?: string | null;
   paymentDueDate?: string | null; // 入金予定日・支払期日 YYYY-MM-DD

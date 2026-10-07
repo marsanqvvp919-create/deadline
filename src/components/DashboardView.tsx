@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Order, AlertItem, WeeklyHistoryItem, ViewTab } from '../types';
 import { formatDate, formatDateTime, isShippingOrFee, getElapsedTimeInfo, ElapsedTimeInfo } from '../utils';
 import { calculateComprehensiveSalesMetrics, isEligibleForOverdue } from '../utils/salesCalculations';
-import { isOrderDelayed, isLineDelayed, getLineDelayDays } from '../utils/delayCalculation';
+import { isOrderDelayed, isLineDelayed, getLineDelayDays, getOverdueBreakdown, RAKURAKU_OVERDUE_LIST_URL } from '../utils/delayCalculation';
 import {
   AlertCircle,
   Clock,
@@ -96,6 +96,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const delayedOrders = useMemo(() => {
     return orders.filter((o) => isOrderDelayed(o));
   }, [orders]);
+
+  const overdueBreakdown = useMemo(() => getOverdueBreakdown(orders), [orders]);
 
   const delayedLines = useMemo(() => {
     return allLines.filter((l) => {
@@ -702,21 +704,49 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   {delayedOrders.length}
                 </span>
                 <span className="text-xs text-slate-500 font-medium">
-                  件 ({delayedLines.length}品目)
+                  件（{delayedLines.length}明細）
                 </span>
               </div>
-              <p className="text-[11px] text-slate-500 mt-1 line-clamp-2">
-                予定納期を過ぎて未出荷となっている商品明細の集中フォローアップ管理。
+              <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] font-bold">
+                <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700">
+                  発注済み {overdueBreakdown.ordered}
+                </span>
+                <span
+                  className={`px-1.5 py-0.5 rounded ${
+                    overdueBreakdown.unordered > 0 ? 'bg-rose-600 text-white' : 'bg-slate-100 text-slate-700'
+                  }`}
+                >
+                  発注漏れ {overdueBreakdown.unordered}
+                </span>
+                <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700">
+                  その他 {overdueBreakdown.other}
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-500 mt-1.5 line-clamp-2">
+                楽楽販売「納期：①超過」と同じ条件（最長納品予定日が過ぎ、出荷日が空欄の明細がある伝票）。
               </p>
             </div>
           </div>
-          <button
-            type="button"
-            className="w-full mt-4 py-2 px-3 bg-white hover:bg-rose-50 active:bg-rose-100 border border-rose-300 hover:border-rose-400 rounded-lg text-xs font-bold text-rose-900 flex items-center justify-between shadow-xs transition active:translate-y-px"
-          >
-            <span>納期超過一覧を開く</span>
-            <ChevronRight className="w-4 h-4 group-hover:translate-x-0.5 transition" />
-          </button>
+          <div className="mt-4 flex gap-2">
+            <button
+              type="button"
+              className="flex-1 py-2 px-3 bg-white hover:bg-rose-50 active:bg-rose-100 border border-rose-300 hover:border-rose-400 rounded-lg text-xs font-bold text-rose-900 flex items-center justify-between shadow-xs transition active:translate-y-px"
+            >
+              <span>納期超過一覧を開く</span>
+              <ChevronRight className="w-4 h-4 group-hover:translate-x-0.5 transition" />
+            </button>
+            <a
+              href={RAKURAKU_OVERDUE_LIST_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              className="py-2 px-3 bg-white hover:bg-slate-50 border border-slate-300 rounded-lg text-xs font-bold text-slate-700 flex items-center gap-1 shadow-xs transition"
+              title="楽楽販売の「納期：①超過・②注意」一覧を開く"
+            >
+              楽楽販売で開く
+              <ExternalLink className="w-3.5 h-3.5" />
+            </a>
+          </div>
         </div>
       </div>
 

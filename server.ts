@@ -679,10 +679,16 @@ function transformCsvToDeliveryData(csvText: string): any {
         quoteValidUntil: getVal(row, 'quoteValidUntil') || null,
         billingDate: getVal(row, 'billingDate') || null,
         billingAmount: parseFloat(getVal(row, 'billingAmount')) || 0,
+        // 楽楽販売「納期：①超過」と同じ判定に使う明細ごとの元データ（送料・手数料の明細も含む）
+        overdueBasis: [],
       });
     }
 
     const order = ordersMap.get(orderId)!;
+    order.overdueBasis.push({
+      latestDate: getVal(row, 'latestDate') || null,
+      shippedDate: getVal(row, 'shippedDate') || null,
+    });
     const productId = getVal(row, 'productId') || `PRD-${order.lines.length + 1}`;
     const productName = getVal(row, 'productName') || '商品';
 
@@ -752,6 +758,7 @@ function transformCsvToDeliveryData(csvText: string): any {
       latestDate: getVal(row, 'latestDate') || null,
       poDate,
       shippedDate: finalShippedDate,
+      rawShippedDate: shippedDate,
       shippedQty,
       remainingQty,
       trackingNo: finalTrackingNo,

@@ -3,44 +3,90 @@ import { isShippingOrFee } from '../utils';
 
 /**
  * 納期超過（遅延）判定の統一関数
- * 
- * ユーザー指定の厳密な定義:
- * 「納期超過」は「納品予定日が今日より前で、かつ未出荷の明細」と定義し、
- * isLineDelayed の1か所だけで判定する。
- * 表示は「○件（○明細）」の形にそろえる（○件は伝票の数、○明細は商品明細の数）。
+ *
+ * 楽楽販売 ご注文管理「納期：①超過」と同じ条件で判定する:
+ * - 明細の最長納品予定日が今日より前
+ * - その明細の出荷日が空欄
+ * - 伝票のステータスが「見積作成中」「見積済み」「出荷済み」ではない
+ * 伝票数はこの条件に当たる明細を1つでも持つ伝票の数（楽楽販売の一覧件数と一致させる）。
  */
+
+export const RAKURAKU_OVERDUE_LIST_URL =
+  'https://hnsibot.rakurakuhanbai.jp/ykbxg2a/recordlist/list/dbgId/100145/dbSchemaId/101248/menuId/102243';
+
+const OVERDUE_EXCLUDED_STATUSES = ['見積作成中', '見積済み', '出荷済み'];
+
+export function isOverdueExcludedStatus(status?: string): boolean {
+  return OVERDUE_EXCLUDED_STATUSES.includes((status || '').trim());
+}
+
+function startOfDay(d: Date): number {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+}
+
+function isBeforeToday(dateStr: string | null | undefined, referenceDate?: Date): boolean {
+  if (!dateStr) return false;
+  const target = new Date(dateStr);
+  if (isNaN(target.getTime())) return false;
+  return startOfDay(target) < startOfDay(referenceDate || new Date());
+}
+
+/** 明細の出荷日（楽楽販売の値をそのまま使う。古いキャッシュでは補正後の値で代用） */
+function lineShippedDate(line: OrderLine): string | null {
+  return line.rawShippedDate !== undefined ? line.rawShippedDate : line.shippedDate;
+}
 
 /**
  * 明細が納期超過しているかを判定（単一の真実）
  */
 export function isLineDelayed(line: OrderLine, order?: Order, referenceDate?: Date): boolean {
-  // 送料・各種手数料は明細カウントから除外
-  if (isShippingOrFee(line.productName, line.productId)) return false;
-
-  // すでに出荷完了または納品済みの明細は遅延とみなさない
-  if (line.stage === '出荷完了') return false;
-  if (line.shippedQty >= line.quantity && line.quantity > 0) return false;
-  if (order && (order.deliveredDate || order.orderState === '納品完了')) return false;
-
-  if (!line.latestDate) return false;
-
-  const targetDate = new Date(line.latestDate);
-  if (isNaN(targetDate.getTime())) return false;
-
-  const ref = referenceDate || new Date();
-  const refStartOfDay = new Date(ref.getFullYear(), ref.getMonth(), ref.getDate()).getTime();
-  const targetStartOfDay = new Date(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate()).getTime();
-
-  // 納品予定日が今日より前（今日を含まず、昨日以前）
-  return targetStartOfDay < refStartOfDay;
+  if (order && isOverdueExcludedStatus(order.status)) return false;
+  if (lineShippedDate(line)) return false;
+  return isBeforeToday(line.latestDate, referenceDate);
 }
 
 /**
- * 伝票が納期超過しているかを判定（1明細でも納期超過があれば遅延伝票）
+ * 伝票が納期超過しているかを判定（送料・手数料を含む全明細で判定し、楽楽販売の件数と一致させる）
  */
 export function isOrderDelayed(order: Order, referenceDate?: Date): boolean {
-  if (order.deliveredDate || order.orderState === '納品完了') return false;
+  if (isOverdueExcludedStatus(order.status)) return false;
+  if (order.overdueBasis && order.overdueBasis.length > 0) {
+    return order.overdueBasis.some((b) => !b.shippedDate && isBeforeToday(b.latestDate, referenceDate));
+  }
   return order.lines.some((l) => isLineDelayed(l, order, referenceDate));
+}
+
+/**
+ * 納期超過伝票の内訳（楽楽販売のステータス別）
+ * 受注済み（未発注）のまま期限切れのものは「発注漏れ」として扱う
+ */
+export type OverdueCategory = '発注済み' | '発注漏れ' | 'その他';
+
+export function getOverdueCategory(order: Order): OverdueCategory {
+  const status = (order.status || '').trim();
+  if (status.startsWith('発注済')) return '発注済み';
+  if (status.startsWith('受注済')) return '発注漏れ';
+  return 'その他';
+}
+
+export interface OverdueBreakdown {
+  total: number;
+  ordered: number;   // 発注済み
+  unordered: number; // 受注済み（未発注）＝発注漏れ
+  other: number;
+}
+
+export function getOverdueBreakdown(orders: Order[], referenceDate?: Date): OverdueBreakdown {
+  const result: OverdueBreakdown = { total: 0, ordered: 0, unordered: 0, other: 0 };
+  orders.forEach((o) => {
+    if (!isOrderDelayed(o, referenceDate)) return;
+    result.total++;
+    const category = getOverdueCategory(o);
+    if (category === '発注済み') result.ordered++;
+    else if (category === '発注漏れ') result.unordered++;
+    else result.other++;
+  });
+  return result;
 }
 
 /**
@@ -48,9 +94,8 @@ export function isOrderDelayed(order: Order, referenceDate?: Date): boolean {
  */
 export function isLineApproaching(line: OrderLine, order?: Order, referenceDate?: Date, days: number = 10): boolean {
   if (isShippingOrFee(line.productName, line.productId)) return false;
-  if (line.stage === '出荷完了') return false;
-  if (line.shippedQty >= line.quantity && line.quantity > 0) return false;
-  if (order && (order.deliveredDate || order.orderState === '納品完了')) return false;
+  if (order && isOverdueExcludedStatus(order.status)) return false;
+  if (lineShippedDate(line)) return false;
 
   if (!line.latestDate) return false;
 
@@ -70,7 +115,7 @@ export function isLineApproaching(line: OrderLine, order?: Order, referenceDate?
  * 伝票が納期間近（10日以内）かを判定（納期超過伝票は除外）
  */
 export function isOrderApproaching(order: Order, referenceDate?: Date, days: number = 10): boolean {
-  if (order.deliveredDate || order.orderState === '納品完了') return false;
+  if (isOverdueExcludedStatus(order.status)) return false;
   // 納期超過伝票とは合算しない
   if (isOrderDelayed(order, referenceDate)) return false;
   return order.lines.some((l) => isLineApproaching(l, order, referenceDate, days));
@@ -117,16 +162,12 @@ export function getDelayCounts(orders: Order[], referenceDate?: Date): DelayCoun
   let linesCount = 0;
 
   orders.forEach((o) => {
-    let orderHasDelayed = false;
+    // 伝票数は楽楽販売「①超過」と同じく、送料・手数料を含む全明細で判定する
+    if (!isOrderDelayed(o, referenceDate)) return;
+    ordersCount++;
     o.lines.forEach((l) => {
-      if (isLineDelayed(l, o, referenceDate)) {
-        linesCount++;
-        orderHasDelayed = true;
-      }
+      if (isLineDelayed(l, o, referenceDate)) linesCount++;
     });
-    if (orderHasDelayed) {
-      ordersCount++;
-    }
   });
 
   return { ordersCount, linesCount };
