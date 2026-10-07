@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Order, AlertItem, WeeklyHistoryItem, ViewTab } from '../types';
-import { formatDate, formatDateTime, isShippingOrFee, getElapsedTimeInfo, ElapsedTimeInfo } from '../utils';
+import { formatDate, formatDateTime, isShippingOrFee, getElapsedTimeInfo, ElapsedTimeInfo, parseYmd } from '../utils';
 import { calculateComprehensiveSalesMetrics, isEligibleForOverdue } from '../utils/salesCalculations';
-import { isOrderDelayed, isLineDelayed, getLineDelayDays, getOverdueBreakdown, getApproachingCounts, APPROACHING_DAYS, RAKURAKU_OVERDUE_LIST_URL } from '../utils/delayCalculation';
+import { isOrderDelayed, isLineDelayed, getLineDelayDays, getOverdueBreakdown, getApproachingCounts, APPROACHING_DAYS, RAKURAKU_OVERDUE_LIST_URL, isStaleUnpaid, STALE_UNPAID_DAYS } from '../utils/delayCalculation';
 import {
   AlertCircle,
   Clock,
@@ -122,7 +122,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     const set = new Set<string>();
     incompleteLines.forEach((l) => {
       if (!l.latestDate) return;
-      const target = new Date(l.latestDate + 'T00:00:00+09:00');
+      const target = parseYmd(l.latestDate);
+      if (!target) return;
       if (target.getTime() > today.getTime() && target.getTime() <= tenDaysLater.getTime()) {
         if (l.orderCustomer) set.add(l.orderCustomer);
       }
@@ -130,14 +131,19 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     return set.size;
   }, [incompleteLines, today, tenDaysLater]);
 
-  // 漏れアラート件数
-  const leakageAlertsCount = alerts.filter((a) => a.type === '漏れ').length;
-  const missedOrderLinesCount = alerts.filter((a) => a.ruleId === 'B1').length;
-  const missingDueDateLinesCount = alerts.filter((a) => a.ruleId === 'B2').length;
+  // 漏れアラート件数（要対応リストと同じく、受注から60日以上たって未入金の伝票は除く）
+  const staleUnpaidIds = useMemo(() => new Set(orders.filter((o) => isStaleUnpaid(o)).map((o) => o.orderId)), [orders]);
+  const leakAlerts = useMemo(
+    () => alerts.filter((a) => a.type === '漏れ' && !staleUnpaidIds.has(a.orderId)),
+    [alerts, staleUnpaidIds]
+  );
+  const leakageAlertsCount = leakAlerts.length;
+  const missedOrderLinesCount = leakAlerts.filter((a) => a.ruleId === 'B1').length;
+  const missingDueDateLinesCount = leakAlerts.filter((a) => a.ruleId === 'B2').length;
   // 朝会では伝票単位で見るため、伝票数を主に出す
-  const leakageOrdersCount = new Set(alerts.filter((a) => a.type === '漏れ').map((a) => a.orderId)).size;
-  const missedOrdersCount = new Set(alerts.filter((a) => a.ruleId === 'B1').map((a) => a.orderId)).size;
-  const missingDueDateOrdersCount = new Set(alerts.filter((a) => a.ruleId === 'B2').map((a) => a.orderId)).size;
+  const leakageOrdersCount = new Set(leakAlerts.map((a) => a.orderId)).size;
+  const missedOrdersCount = new Set(leakAlerts.filter((a) => a.ruleId === 'B1').map((a) => a.orderId)).size;
+  const missingDueDateOrdersCount = new Set(leakAlerts.filter((a) => a.ruleId === 'B2').map((a) => a.orderId)).size;
 
   // 入金済みの未発注品目 (送料・手数料は除外)
   const paidUnorderedLines = incompleteLines.filter((l) => {
@@ -169,8 +175,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     if (payStatus === '入金済') return;
     if (!o.paymentDueDate) return;
 
-    const dueDate = new Date(o.paymentDueDate + 'T00:00:00+09:00');
-    if (!isNaN(dueDate.getTime()) && dueDate < today && o.customerName) {
+    const dueDate = parseYmd(o.paymentDueDate);
+    if (dueDate && dueDate < today && o.customerName) {
       overduePaymentClinicsSet.add(o.customerName);
       let amount = o.totalAmount || 0;
       if (amount === 0 && o.lines.length > 0) {
@@ -208,6 +214,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       delayedOrders: Set<string>;
       delayedLines: number;
       leakage: number;
+      leakageOrders: Set<string>;
       completedThisMonth: number;
       onTimeThisMonth: number;
     }
@@ -223,6 +230,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         delayedOrders: new Set<string>(),
         delayedLines: 0,
         leakage: 0,
+        leakageOrders: new Set<string>(),
         completedThisMonth: 0,
         onTimeThisMonth: 0,
       });
@@ -257,15 +265,19 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   });
 
   // Count leakage per rep
-  alerts.forEach((a) => {
-    if (a.type === '漏れ') {
-      const rep = a.salesRep || '未設定';
-      const entry = salesRepMap.get(rep);
-      if (entry) entry.leakage++;
+  leakAlerts.forEach((a) => {
+    const rep = a.salesRep || '未設定';
+    const entry = salesRepMap.get(rep);
+    if (entry) {
+      entry.leakage++;
+      entry.leakageOrders.add(a.orderId);
     }
   });
 
-  const repSummaryList = Array.from(salesRepMap.values()).sort(
+  // 未完了・遅延・漏れがどれも0の担当（退職者など）は表に出さない
+  const repSummaryList = Array.from(salesRepMap.values()).filter(
+    (r) => r.incomplete > 0 || r.delayedLines > 0 || r.leakage > 0 || r.completedThisMonth > 0
+  ).sort(
     (a, b) => b.delayedLines - a.delayedLines || b.incomplete - a.incomplete
   );
 
@@ -537,7 +549,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     overdueBreakdown.unordered > 0 ? 'bg-rose-600 text-white' : 'bg-slate-100 text-slate-700'
                   }`}
                 >
-                  発注漏れ {overdueBreakdown.unordered}
+                  未発注 {overdueBreakdown.unordered}
                 </span>
                 <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700">
                   その他 {overdueBreakdown.other}
@@ -701,7 +713,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </span>
             </div>
             <span className="text-[11px] text-slate-500 mt-1 block leading-tight">
-              受注日から3日以上たっても未発注の明細と、納品予定日が未入力の明細（見積・出荷済みの伝票は除く）
+              受注日から3日以上たっても未発注の明細と、納品予定日が未入力の明細（見積・出荷済みの伝票と、受注から{STALE_UNPAID_DAYS}日以上たって未入金の伝票は除く。要対応リストと同じ数）
             </span>
           </div>
           <div className="mt-3 pt-2.5 border-t border-orange-100 flex items-center justify-between">
@@ -820,7 +832,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                         <span>{item.rep}</span>
                       </td>
                       <td className="py-3 px-3 text-right font-mono font-medium text-slate-700">
-                        {item.incomplete} 件
+                        {item.incomplete} 明細
                       </td>
                       <td className="py-3 px-3 text-right font-mono">
                         <span
@@ -839,7 +851,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                             item.leakage > 0 ? 'text-orange-600' : 'text-slate-400'
                           }`}
                         >
-                          {item.leakage} 件
+                          {item.leakage > 0 ? `${item.leakageOrders.size}件（${item.leakage}明細）` : '—'}
                         </span>
                       </td>
                       <td className="py-3 px-4 text-right font-mono font-semibold text-slate-800">
@@ -874,11 +886,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <tfoot className="bg-slate-100 font-bold text-slate-800 border-t-2 border-slate-300">
                 <tr>
                   <td className="py-2.5 px-4 font-bold">合計</td>
-                  <td className="py-2.5 px-3 text-right font-mono">{incompleteLines.length} 件</td>
+                  <td className="py-2.5 px-3 text-right font-mono">{incompleteLines.length} 明細</td>
                   <td className="py-2.5 px-3 text-right font-mono text-rose-700">
                     {delayedOrders.length}件（{delayedLines.length}明細）
                   </td>
-                  <td className="py-2.5 px-3 text-right font-mono text-orange-700">{alerts.filter(a => a.type === '漏れ').length} 件</td>
+                  <td className="py-2.5 px-3 text-right font-mono text-orange-700">{leakageOrdersCount}件（{leakageAlertsCount}明細）</td>
                   <td className="py-2.5 px-4 text-right font-mono">
                     {onTimeRate !== null ? `${onTimeRate}%` : 'データなし'}
                   </td>
@@ -1045,7 +1057,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       {item.supplier}
                     </td>
                     <td className="py-3 px-3 text-right font-mono font-medium text-slate-700">
-                      {item.incomplete} 件
+                      {item.incomplete} 明細
                     </td>
                     <td className="py-3 px-3 text-right font-mono">
                       <span
@@ -1079,7 +1091,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <tfoot className="bg-slate-100 font-bold text-slate-800 border-t-2 border-slate-300">
               <tr>
                 <td className="py-2.5 px-4 font-bold">合計</td>
-                <td className="py-2.5 px-3 text-right font-mono">{incompleteLines.length} 件</td>
+                <td className="py-2.5 px-3 text-right font-mono">{incompleteLines.length} 明細</td>
                 <td className="py-2.5 px-3 text-right font-mono text-rose-700">
                   {delayedOrders.length}件（{delayedLines.length}明細）
                 </td>

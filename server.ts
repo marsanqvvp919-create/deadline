@@ -192,7 +192,8 @@ const CLINIC_FIELD_MAP: Record<string, string[]> = {
   postalCode: ['クリニック住所：郵便番号', '郵便番号', '〒', 'postalCode'],
   prefecture: ['クリニック住所：都道府県', '都道府県', 'prefecture'],
   address: ['クリニック住所：市区町村', 'クリニック住所：町名・番地', 'クリニック住所：建物名', 'クリニック住所', '住所', '所在地', 'address'],
-  status: ['取引ステータス', '支払方法', 'ステータス', '取引状態', 'status'],
+  status: ['取引ステータス', '取引状態', 'status'],
+  paymentMethod: ['支払方法'],
   paymentTerms: ['支払条件', '決済条件', '締日', 'paymentTerms'],
   memo: ['備考', 'メモ', 'memo'],
 };
@@ -283,7 +284,9 @@ const SHIPMENT_FIELD_MAP: Record<string, string[]> = {
   warehouseInvoiceNo: ['倉庫インボイス番号', '倉庫インボイス', '倉庫Invoice番号', 'インボイス番号', 'warehouseInvoiceNo'],
   currentLocation: ['現在地', '貨物現在地', 'ステータス現在地', 'currentLocation'],
   trackingNo: ['110195', '出荷番号', '送り状番号', 'トラッキング番号', '追跡番号', 'trackingNo'],
-  kantoCustomsPermitted: ['関東通関可否', '関東通関', '関東通関判定', 'kantoCustomsPermitted'],
+  kantoCustomsPermitted: ['関東通関可否（明細）', '関東通関可否', '関東通関', '関東通関判定', 'kantoCustomsPermitted'],
+  // 出荷の中で関東通関「不可」の明細の数（楽楽販売の集計項目）
+  kantoNgLineCount: ['関東不可の明細数'],
   customsStatus: ['通関ステータス', '通関状況', '税関状況', 'customsStatus'],
   shippedDate: ['110194', '110017', '出荷日', '発送日', 'shippedDate'],
   // 出荷管理の「ステータス」(110188)。部分一致だと輸入確認ステータス等に当たるので完全一致のみ
@@ -359,7 +362,9 @@ function transformCsvToShipments(csvText: string): any[] {
     const phaNumber = getVal(row, 'phaNumber') || '—';
     const warehouseInvoiceNo = getVal(row, 'warehouseInvoiceNo') || '—';
     const currentLocation = getVal(row, 'currentLocation') || '—';
-    const trackingNo = getVal(row, 'trackingNo') || '—';
+    // 出荷番号に「0」だけが入っている行は未入力として扱う
+    const rawTracking = getVal(row, 'trackingNo');
+    const trackingNo = rawTracking && !/^0+$/.test(rawTracking) ? rawTracking : '—';
     const kantoCustomsPermitted = getVal(row, 'kantoCustomsPermitted') || '—';
     const customsStatus = getVal(row, 'customsStatus') || '—';
     const shippedDate = getVal(row, 'shippedDate') || '—';
@@ -388,7 +393,8 @@ function transformCsvToShipments(csvText: string): any[] {
     // 通関NGの条件: 到着空港がNRTで、関東通関可否「不可」
     const airportUpper = arrivalAirport.toUpperCase();
     const isNrt = airportUpper.includes('NRT') || arrivalAirport.includes('成田');
-    const isKantoNg = isNrt && kantoCustomsPermitted.includes('不可');
+    const kantoNgLineCount = parseInt(getVal(row, 'kantoNgLineCount'), 10) || 0;
+    const isKantoNg = isNrt && (kantoCustomsPermitted.includes('不可') || kantoNgLineCount > 0);
 
     records.push({
       shipmentId: shipmentId || `DO-${String(i).padStart(5, '0')}`,
@@ -406,6 +412,7 @@ function transformCsvToShipments(csvText: string): any[] {
       currentLocation,
       trackingNo,
       kantoCustomsPermitted,
+      kantoNgLineCount,
       customsStatus,
       shippedDate,
       shipStatus,
@@ -564,19 +571,20 @@ function transformCsvToProducts(csvText: string): any[] {
     products.push({
       productId,
       productName,
-      category: getVal(row, 'category') || '一般医療品',
-      spec: getVal(row, 'spec') || '通常規格',
+      // 楽楽販売で空欄の項目は空のまま（以前は「一般医療品」「日本」「14〜28日」などの仮の値を入れていた）
+      category: getVal(row, 'category') || '',
+      spec: getVal(row, 'spec') || '',
       standardPrice: parseInt(getVal(row, 'standardPrice').replace(/[^0-9]/g, ''), 10) || 0,
       minPrice: parseInt(getVal(row, 'minPrice').replace(/[^0-9]/g, ''), 10) || 0,
       maxPrice: parseInt(getVal(row, 'maxPrice').replace(/[^0-9]/g, ''), 10) || 0,
       costPrice: parseInt(getVal(row, 'costPrice').replace(/[^0-9]/g, ''), 10) || 0,
-      costCurrency: getVal(row, 'costCurrency') || 'JPY',
+      costCurrency: getVal(row, 'costCurrency') || '',
       supplierId: getVal(row, 'supplierId') || '',
-      supplierName: getVal(row, 'supplierName') || '未設定',
-      countryOfOrigin: getVal(row, 'countryOfOrigin') || '日本',
-      minLeadTime: parseInt(getVal(row, 'minLeadTime'), 10) || 14,
-      maxLeadTime: parseInt(getVal(row, 'maxLeadTime'), 10) || 28,
-      status: getVal(row, 'status') || '取扱中',
+      supplierName: getVal(row, 'supplierName') || '',
+      countryOfOrigin: getVal(row, 'countryOfOrigin') || '',
+      minLeadTime: parseInt(getVal(row, 'minLeadTime'), 10) || 0,
+      maxLeadTime: parseInt(getVal(row, 'maxLeadTime'), 10) || 0,
+      status: getVal(row, 'status') || '',
       rakurakuSchemaId: '101252',
       source: 'rakuraku_api',
       updatedAt: new Date().toISOString().replace('T', ' ').slice(0, 16),
@@ -631,7 +639,7 @@ function transformCsvToClinics(csvText: string): any[] {
       clinicId,
       clinicName,
       clinicNameEn: getVal(row, 'clinicNameEn') || '',
-      directorName: getVal(row, 'directorName') || '院長',
+      directorName: getVal(row, 'directorName') || '',
       salesRep: getVal(row, 'salesRep') || '未設定',
       currency: getVal(row, 'currency') || 'JPY',
       commissionRate: parseFloat(getVal(row, 'commissionRate')) || 0,
@@ -640,8 +648,10 @@ function transformCsvToClinics(csvText: string): any[] {
       postalCode: getVal(row, 'postalCode') || '',
       prefecture: getVal(row, 'prefecture') || '',
       address: getVal(row, 'address') || '',
-      status: getVal(row, 'status') || '取引中',
-      paymentTerms: getVal(row, 'paymentTerms') || '月末締め翌月末払い',
+      // 楽楽販売の「支払方法」（前払い・後払いなど）。取引状態の項目はないので status には入れない
+      paymentMethod: getVal(row, 'paymentMethod') || '',
+      status: getVal(row, 'status') || '',
+      paymentTerms: getVal(row, 'paymentTerms') || '',
       rakurakuSchemaId: '101250',
       source: 'rakuraku_api',
       updatedAt: new Date().toISOString().replace('T', ' ').slice(0, 16),
@@ -871,8 +881,8 @@ function finalizeDeliveryData(orders: any[]): any {
       order.orderState = '進行中';
     }
 
-    // 進行中の伝票に対してアラートを判定（納品完了・全明細出荷済、および見積作成中・見積済み・出荷済みの伝票は除外）
-    const alertExcludedStatus = ['見積作成中', '見積済み', '出荷済み'].includes((order.status || '').trim());
+    // 進行中の伝票に対してアラートを判定（納品完了・全明細出荷済、および見積作成中・見積済み・出荷済み・納品済みの伝票は除外）
+    const alertExcludedStatus = ['見積作成中', '見積済み', '出荷済み', '納品済み'].includes((order.status || '').trim());
     if (order.orderState !== '納品完了' && order.orderState !== '全明細出荷済' && !alertExcludedStatus) {
       for (const line of order.lines) {
         // すに出荷完了している明細はアラート対象外

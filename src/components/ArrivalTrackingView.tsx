@@ -1,4 +1,6 @@
 import React, { useMemo, useState } from 'react';
+import { detectCarrier, courierMismatch } from '../utils/tracking';
+import { parseYmd } from '../utils';
 import { useUrlState } from '../utils/listState';
 import { Order, ShipmentItem } from '../types';
 import { getConfiguredUrls, getLocalClinics } from '../api';
@@ -45,17 +47,19 @@ function stageOf(s: TrackingShipment): Stage {
 
 function toDate(v?: string): Date | null {
   if (blank(v)) return null;
-  const d = new Date(String(v).replace(/\//g, '-').slice(0, 10) + 'T00:00:00');
-  return isNaN(d.getTime()) ? null : d;
+  return parseYmd(String(v));
 }
 
-function carrierTrackingUrl(courier: string | undefined, trackingNo: string): string | null {
+// 配送会社は番号の形を優先して判定する（楽楽販売の配送業者に入力違いがあるため）
+function carrierOf(courier: string | undefined, trackingNo: string) {
   const digits = (trackingNo || '').replace(/\D/g, '');
-  if (digits.length < 8) return null;
-  const c = (courier || '').toLowerCase();
-  if (c.includes('fedex')) return `https://www.fedex.com/fedextrack/?trknbr=${digits}`;
-  if (c.includes('dhl')) return `https://www.dhl.com/jp-ja/home/tracking.html?tracking-id=${digits}`;
-  return null;
+  const info = detectCarrier(trackingNo, courier);
+  const known = info.carrierCode === 'fedex' || info.carrierCode === 'dhl';
+  return {
+    label: known ? info.carrier : courier || '配送業者未設定',
+    url: known && digits.length >= 8 ? info.trackingUrl : null,
+    mismatch: courierMismatch(trackingNo, courier),
+  };
 }
 
 // 追跡の対象：出荷待ちと、出荷日から21日以内でまだ配達完了していない出荷、直近7日に配達完了した出荷
@@ -228,7 +232,8 @@ export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: Shipmen
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {visible.slice(0, 300).map(({ s, stage, customerName }) => {
             const stageIndex = STAGES.findIndex((x) => x.id === stage);
-            const trackUrl = carrierTrackingUrl(s.courier, s.trackingNo);
+            const carrier = carrierOf(s.courier, s.trackingNo);
+            const trackUrl = carrier.url;
             const coolPending = s.isCoolMissing;
             return (
               <div key={s.shipmentId} className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs flex flex-col gap-3">
@@ -275,7 +280,7 @@ export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: Shipmen
                 {carrierStatus[digitsOf(s.trackingNo)] && (
                   <div className="text-[11px] flex items-center gap-1.5 flex-wrap">
                     <span className={`px-1.5 py-0.5 rounded font-bold ${CARRIER_STATUS_STYLE[carrierStatus[digitsOf(s.trackingNo)].status]}`}>
-                      {s.courier || '配送会社'}：{CARRIER_STATUS_LABEL[carrierStatus[digitsOf(s.trackingNo)].status]}
+                      {carrier.label}：{CARRIER_STATUS_LABEL[carrierStatus[digitsOf(s.trackingNo)].status]}
                     </span>
                     <span className="text-slate-600">{carrierStatus[digitsOf(s.trackingNo)].statusText}</span>
                     {carrierStatus[digitsOf(s.trackingNo)].lastLocation && (
@@ -296,8 +301,13 @@ export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: Shipmen
                   <span className="text-[11px] text-slate-500 flex items-center gap-1 min-w-0">
                     <Truck className="w-3 h-3 shrink-0" />
                     <span className="truncate">
-                      {s.courier || '配送業者未設定'} {blank(s.trackingNo) ? '' : s.trackingNo}
+                      {carrier.label} {blank(s.trackingNo) ? '' : s.trackingNo}
                     </span>
+                    {carrier.mismatch && (
+                      <span className="text-amber-700 font-bold shrink-0" title="番号の形と、楽楽販売の配送業者が合いません">
+                        （楽楽販売では{s.courier}）
+                      </span>
+                    )}
                   </span>
                   <div className="flex items-center gap-1.5 shrink-0">
                     {trackUrl && (

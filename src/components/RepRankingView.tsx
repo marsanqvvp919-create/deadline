@@ -45,7 +45,7 @@ export const RepRankingView: React.FC<RepRankingViewProps> = ({
 
     return salesReps.map((rep) => {
       const data = map.get(rep) || { totalSales: 0, orderCount: 0 };
-      const target = budgets[rep] || 5000000;
+      const target = budgets[rep] || 0;
       const achievementRate = target > 0 ? (data.totalSales / target) * 100 : 0;
 
       return {
@@ -108,7 +108,7 @@ export const RepRankingView: React.FC<RepRankingViewProps> = ({
               </div>
               <div className="space-y-1 pt-2 border-t border-black/10 text-xs font-semibold flex items-center justify-between">
                 <span>目標達成率:</span>
-                <span className="font-mono text-sm">{item.achievementRate.toFixed(1)}%</span>
+                <span className="font-mono text-sm">{item.target > 0 ? `${item.achievementRate.toFixed(1)}%` : '予算未設定'}</span>
               </div>
             </div>
           );
@@ -153,11 +153,11 @@ export const RepRankingView: React.FC<RepRankingViewProps> = ({
                     </td>
                     <td className="py-3.5 px-4 font-bold text-slate-900">{item.rep}</td>
                     <td className="py-3.5 px-4 font-mono font-bold text-slate-900">{formatCurrency(item.totalSales)}</td>
-                    <td className="py-3.5 px-4 font-mono text-slate-600">{formatCurrency(item.target)}</td>
+                    <td className="py-3.5 px-4 font-mono text-slate-600">{item.target > 0 ? formatCurrency(item.target) : '未設定'}</td>
                     <td className="py-3.5 px-4 font-mono text-slate-700">{item.orderCount} 件</td>
                     <td className="py-3.5 px-4 text-right font-mono font-bold">
                       <span className={`px-2 py-0.5 rounded text-[11px] ${isAchieved ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-700'}`}>
-                        {item.achievementRate.toFixed(1)}%
+                        {item.target > 0 ? `${item.achievementRate.toFixed(1)}%` : '—'}
                       </span>
                     </td>
                   </tr>

@@ -29,7 +29,6 @@ interface DetailDrawerProps {
   isOpen: boolean;
   onClose: () => void;
   onOpenClinicStatus?: (clinicName: string) => void;
-  onUpdateOrderStatus?: (orderIds: string[], updates: Partial<Order>) => void;
 }
 
 export const DetailDrawer: React.FC<DetailDrawerProps> = ({
@@ -39,7 +38,6 @@ export const DetailDrawer: React.FC<DetailDrawerProps> = ({
   isOpen,
   onClose,
   onOpenClinicStatus,
-  onUpdateOrderStatus,
 }) => {
   // ESCキーで閉じる
   useEffect(() => {
@@ -62,15 +60,6 @@ export const DetailDrawer: React.FC<DetailDrawerProps> = ({
     (a) => a.orderId === order.orderId && (!selectedLineKey || !a.lineKey || a.lineKey === selectedLineKey)
   );
 
-  const handleRevertToAwaiting = () => {
-    if (onUpdateOrderStatus) {
-      onUpdateOrderStatus([order.orderId], {
-        orderState: '全明細出荷済',
-        deliveredDate: null as any,
-      });
-      onClose();
-    }
-  };
 
   return (
     <div className="fixed inset-0 z-[70] overflow-hidden">
@@ -91,16 +80,6 @@ export const DetailDrawer: React.FC<DetailDrawerProps> = ({
                   {order.orderState}
                 </span>
                 <span className="text-xs text-slate-400">ステータス: {order.status}</span>
-                {order.orderState === '納品完了' && onUpdateOrderStatus && (
-                  <button
-                    onClick={handleRevertToAwaiting}
-                    className="px-2.5 py-0.5 bg-amber-600 hover:bg-amber-500 text-white rounded text-xs font-semibold transition inline-flex items-center gap-1 cursor-pointer shadow-xs"
-                    title="まだ納品されていない場合、納品確認待ちに戻します"
-                  >
-                    <RefreshCw className="w-3 h-3" />
-                    <span>納品確認待ちに戻す</span>
-                  </button>
-                )}
               </div>
               <h2 className="text-xl font-bold text-white mt-1.5 flex items-center gap-2">
                 {order.orderId}

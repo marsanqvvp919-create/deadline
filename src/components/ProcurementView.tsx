@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Order, OrderLine, PaymentStatus } from '../types';
-import { formatDate, getRemainingDaysInfo, getOrderBorderColor, buildRakurakuUrl, openRakurakuWithCopiedId, isShippingOrFee } from '../utils';
+import { formatDate, getRemainingDaysInfo, getOrderBorderColor, buildRakurakuUrl, openRakurakuWithCopiedId, isShippingOrFee, parseYmd, startOfToday, todayYmd } from '../utils';
 import { getConfiguredUrls } from '../api';
 import { isQuoteOrder } from '../utils/salesCalculations';
 import {
@@ -72,8 +72,8 @@ export const ProcurementView: React.FC<ProcurementViewProps> = ({
   onDataUpdated,
 }) => {
   const { rakurakuBaseUrl } = getConfiguredUrls();
-  const todayStr = '2026-09-24';
-  const today = new Date(todayStr + 'T00:00:00+09:00');
+  const todayStr = todayYmd();
+  const today = startOfToday();
 
   // UI States
   const [activeFilter, setActiveFilter] = useState<ProcurementFilter>('paid_unordered');
@@ -113,8 +113,8 @@ export const ProcurementView: React.FC<ProcurementViewProps> = ({
       let isAging = false;
 
       if (payDate) {
-        const pDate = new Date(payDate + 'T00:00:00+09:00');
-        if (!isNaN(pDate.getTime())) {
+        const pDate = parseYmd(payDate);
+        if (pDate) {
           const diffMs = today.getTime() - pDate.getTime();
           daysSincePay = Math.floor(diffMs / (1000 * 60 * 60 * 24));
           // 入金後2日以上経過して未発注なら滞留アラート
@@ -168,7 +168,8 @@ export const ProcurementView: React.FC<ProcurementViewProps> = ({
     // 直近7日以内発注
     const recentlyOrdered = flatItems.filter((it) => {
       if (it.line.stage !== '発注済・入荷待ち' || !it.line.poDate) return false;
-      const d = new Date(it.line.poDate + 'T00:00:00+09:00');
+      const d = parseYmd(it.line.poDate);
+      if (!d) return false;
       return (today.getTime() - d.getTime()) / (1000 * 60 * 60 * 24) <= 7;
     });
 
@@ -180,7 +181,8 @@ export const ProcurementView: React.FC<ProcurementViewProps> = ({
     const paidUnorderedQty = paidUnordered.reduce((sum, it) => sum + it.line.quantity, 0);
 
     // 仕入先セット
-    const supplierSet = new Set(paidUnordered.map((it) => it.line.supplierName || '未指定'));
+    // 仕入先が未設定の明細は発注先がないので数えない
+    const supplierSet = new Set(paidUnordered.map((it) => it.line.supplierName).filter(Boolean));
 
     return {
       paidUnorderedCount: paidUnordered.length,
@@ -860,7 +862,12 @@ ${linesText}
                       </div>
                     </div>
 
-                    {/* Actions for Supplier */}
+                    {/* Actions for Supplier（仕入先が未設定のときは、宛先がないので操作を出さない） */}
+                    {group.supplierName === '仕入先未設定' ? (
+                      <p className="text-xs text-slate-500 self-start md:self-auto max-w-xs">
+                        楽楽販売で商品の仕入先を入力すると、発注メールと発注登録が使えるようになります。
+                      </p>
+                    ) : (
                     <div className="flex items-center gap-2 flex-wrap self-start md:self-auto">
                       <button
                         onClick={() => handleGeneratePoEmail(group.supplierName, supplierItems)}
@@ -878,6 +885,7 @@ ${linesText}
                         <span>この仕入先の分を楽楽販売で発注登録</span>
                       </button>
                     </div>
+                    )}
                   </div>
 
                   {/* Supplier Lines Table */}

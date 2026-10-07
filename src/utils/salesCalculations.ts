@@ -1,6 +1,8 @@
 import { Order, OrderLine, PaymentStatus } from '../types';
+import { parseYmd, todayYmd, recentYearMonths } from './index';
 
-export const SYSTEM_TODAY_STR = '2026-09-24';
+// 以前は 2026-09-24 に固定していた。今日の日付を使う
+export const SYSTEM_TODAY_STR = todayYmd();
 
 export interface QuoteExpirationInfo {
   isQuote: boolean;
@@ -48,7 +50,7 @@ export function isQuoteOrder(order: Order): boolean {
  */
 export function getQuoteExpirationInfo(
   order: Order,
-  todayStr: string = SYSTEM_TODAY_STR
+  todayStr: string = todayYmd()
 ): QuoteExpirationInfo {
   const isQuote = isQuoteOrder(order);
 
@@ -69,10 +71,10 @@ export function getQuoteExpirationInfo(
 
   // quoteValidUntil が未設定の場合、見積提出日 + 2週間(14日) を標準有効期間として設定
   if (!quoteValidUntil && quoteDate) {
-    const qD = new Date(quoteDate + 'T00:00:00+09:00');
+    const qD = (parseYmd(quoteDate) || new Date(NaN));
     if (!isNaN(qD.getTime())) {
       qD.setDate(qD.getDate() + 14);
-      quoteValidUntil = qD.toISOString().slice(0, 10);
+      quoteValidUntil = `${qD.getFullYear()}-${String(qD.getMonth() + 1).padStart(2, '0')}-${String(qD.getDate()).padStart(2, '0')}`;
     }
   }
 
@@ -88,8 +90,8 @@ export function getQuoteExpirationInfo(
     };
   }
 
-  const today = new Date(todayStr + 'T00:00:00+09:00');
-  const validUntilDate = new Date(quoteValidUntil + 'T00:00:00+09:00');
+  const today = (parseYmd(todayStr) || new Date(NaN));
+  const validUntilDate = (parseYmd(quoteValidUntil) || new Date(NaN));
   const diffMs = today.getTime() - validUntilDate.getTime();
   const daysDiff = Math.floor(diffMs / (1000 * 60 * 60 * 24));
 
@@ -127,7 +129,7 @@ export function getQuoteExpirationInfo(
  */
 export function isOrderExcludedFromCalculations(
   order: Order,
-  todayStr: string = SYSTEM_TODAY_STR
+  todayStr: string = todayYmd()
 ): boolean {
   const quoteInfo = getQuoteExpirationInfo(order, todayStr);
   return quoteInfo.isExpiredOverWeek;
@@ -139,7 +141,7 @@ export function isOrderExcludedFromCalculations(
  */
 export function getBillingReceivableInfo(
   order: Order,
-  todayStr: string = SYSTEM_TODAY_STR
+  todayStr: string = todayYmd()
 ): BillingReceivableInfo {
   const totalAmount =
     order.totalAmount ||
@@ -174,8 +176,8 @@ export function getBillingReceivableInfo(
   let daysOverdue = 0;
 
   if (!isPaid && paymentDueDate) {
-    const today = new Date(todayStr + 'T00:00:00+09:00');
-    const dueDate = new Date(paymentDueDate + 'T00:00:00+09:00');
+    const today = (parseYmd(todayStr) || new Date(NaN));
+    const dueDate = (parseYmd(paymentDueDate) || new Date(NaN));
     if (!isNaN(dueDate.getTime())) {
       const diffMs = today.getTime() - dueDate.getTime();
       const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
@@ -292,7 +294,7 @@ export interface ComprehensiveSalesMetrics {
  */
 export function calculateComprehensiveSalesMetrics(
   orders: Order[],
-  todayStr: string = SYSTEM_TODAY_STR,
+  todayStr: string = todayYmd(),
   monthlySalesTargetPerRep: number = 5000000
 ): ComprehensiveSalesMetrics {
   let confirmedSales = 0;
@@ -508,7 +510,7 @@ export function calculateComprehensiveSalesMetrics(
   >();
 
   // 直近4ヶ月の枠組み
-  const months = ['2026-06', '2026-07', '2026-08', '2026-09'];
+  const months = recentYearMonths(4).reverse();
   months.forEach((m) => {
     monthlyMap.set(m, { month: m, confirmedSales: 0, receivableBalance: 0, collectedAmount: 0 });
   });
@@ -517,7 +519,7 @@ export function calculateComprehensiveSalesMetrics(
     const isQuote = isQuoteOrder(ord);
     if (isQuote) return;
 
-    const dateKey = (ord.deliveredDate || ord.orderDate || '').slice(0, 7);
+    const dateKey = (ord.deliveredDate || ord.orderDate || '').replace(/\//g, '-').slice(0, 7);
     if (!dateKey) return;
 
     if (!monthlyMap.has(dateKey)) {

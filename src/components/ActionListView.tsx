@@ -24,7 +24,9 @@ export const ActionListView: React.FC<{
   orders: Order[];
   alerts: AlertItem[];
   onSelectOrder: (order: Order) => void;
-}> = ({ orders, alerts, onSelectOrder }) => {
+  repFilter?: string;
+  onClearRepFilter?: () => void;
+}> = ({ orders, alerts, onSelectOrder, repFilter, onClearRepFilter }) => {
   const [rule, setRule] = useUrlState<string>('rule', 'B1');
   const orderById = useMemo(() => new Map(orders.map((o) => [o.orderId, o])), [orders]);
 
@@ -92,7 +94,18 @@ export const ActionListView: React.FC<{
             対応が必要な伝票を、理由ごとにまとめています（見積・出荷済みの伝票は除く）。行を押すと伝票の詳細が開きます。
             <br />
             受注から{STALE_UNPAID_DAYS}日以上たって未入金の伝票（{excludedCount}件）は対象外にしています。
+            そのため納期超過の件数は、ダッシュボード（楽楽販売「①超過」と同じ数）より少なくなることがあります。
           </p>
+          {repFilter && (
+            <p className="mt-2 inline-flex items-center gap-2 text-xs font-bold text-blue-800 bg-blue-50 border border-blue-200 rounded-lg px-2.5 py-1">
+              担当営業「{repFilter}」の伝票だけを表示中
+              {onClearRepFilter && (
+                <button type="button" onClick={onClearRepFilter} className="underline text-blue-700">
+                  全員を表示
+                </button>
+              )}
+            </p>
+          )}
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           {RULES.map((r) => (

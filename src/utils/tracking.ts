@@ -13,10 +13,14 @@ export function detectCarrier(trackingNo?: string, courierHint?: string): Tracki
   const hint = (courierHint || '').toLowerCase();
   if (!cleanNo) return { carrier: 'その他・不明', carrierCode: 'unknown', trackingUrl: '' };
 
-  if (hint.includes('fedex') || (/^\d+$/.test(cleanNo) && (cleanNo.length === 12 || cleanNo.length === 15))) {
+  // 番号の形が決め手（楽楽販売の配送業者の入力違いがあるため）：12・15桁は FedEx、10桁は DHL。形で決まらないときだけ配送業者を見る
+  const digitsOnly = /^\d+$/.test(cleanNo);
+  const byFormat = digitsOnly && (cleanNo.length === 12 || cleanNo.length === 15) ? 'fedex' : digitsOnly && cleanNo.length === 10 ? 'dhl' : null;
+  const code = byFormat || (hint.includes('fedex') ? 'fedex' : hint.includes('dhl') ? 'dhl' : null);
+  if (code === 'fedex') {
     return { carrier: 'FedEx', carrierCode: 'fedex', trackingUrl: `https://www.fedex.com/fedextrack/?trknbr=${cleanNo}` };
   }
-  if (hint.includes('dhl') || (/^\d+$/.test(cleanNo) && cleanNo.length === 10)) {
+  if (code === 'dhl') {
     return { carrier: 'DHL', carrierCode: 'dhl', trackingUrl: `https://www.dhl.com/jp-ja/home/tracking.html?tracking-id=${cleanNo}` };
   }
   if (hint.includes('ヤマト')) {
@@ -34,4 +38,13 @@ export function detectCarrier(trackingNo?: string, courierHint?: string): Tracki
     };
   }
   return { carrier: 'その他・不明', carrierCode: 'unknown', trackingUrl: '' };
+}
+
+/** 楽楽販売の配送業者と、番号の形から見た配送会社が食い違うか（入力ミスの目印） */
+export function courierMismatch(trackingNo?: string, courierHint?: string): boolean {
+  const hint = (courierHint || '').toLowerCase();
+  const hinted = hint.includes('fedex') ? 'fedex' : hint.includes('dhl') ? 'dhl' : null;
+  if (!hinted) return false;
+  const detected = detectCarrier(trackingNo, '').carrierCode;
+  return (detected === 'fedex' || detected === 'dhl') && detected !== hinted;
 }

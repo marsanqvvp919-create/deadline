@@ -21,12 +21,54 @@ export function formatCurrency(num: number | null | undefined): string {
 export function formatDate(dateString: string | null | undefined): string {
   if (!dateString) return '-';
   // YYYY-MM-DD や ISO文字列をパース
-  const clean = dateString.split('T')[0];
-  const parts = clean.split('-');
-  if (parts.length === 3) {
-    return `${parts[0]}/${parts[1]}/${parts[2]}`;
+  const d = parseYmd(dateString);
+  if (!d) return dateString;
+  return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/**
+ * 日付文字列（2026/09/16・2026-09-16・ISO）を、その日の0時（端末の時刻）の Date にする。
+ * 楽楽販売の日付は「/」区切りで届くため、文字列連結で Date を作らずにこれを使う。
+ */
+export function parseYmd(value: string | null | undefined): Date | null {
+  if (!value) return null;
+  const m = String(value).trim().match(/^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})/);
+  if (!m) return null;
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  return isNaN(d.getTime()) ? null : d;
+}
+
+/** 今日の0時 */
+export function startOfToday(): Date {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+}
+
+/** 今日の日付（YYYY-MM-DD） */
+export function todayYmd(): string {
+  const d = startOfToday();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/** 今月（YYYY-MM） */
+export function currentYearMonth(): string {
+  return todayYmd().slice(0, 7);
+}
+
+/** 今月を含む直近 n か月（新しい順, YYYY-MM） */
+export function recentYearMonths(n: number): string[] {
+  const d = startOfToday();
+  const out: string[] = [];
+  for (let i = 0; i < n; i++) {
+    const x = new Date(d.getFullYear(), d.getMonth() - i, 1);
+    out.push(`${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}`);
   }
-  return dateString;
+  return out;
+}
+
+/** b − a の日数（日付のみで比較） */
+export function daysBetween(a: Date, b: Date): number {
+  return Math.round((b.getTime() - a.getTime()) / (1000 * 60 * 60 * 24));
 }
 
 /**
@@ -51,20 +93,17 @@ export function formatDateTime(isoString: string | null | undefined): string {
 
 /**
  * 納期までの残り日数を計算・表示テキスト生成
- * 基準日: 日本時間の今日 (2026-09-24)
+ * 基準日: 今日
  */
 export function getRemainingDaysInfo(latestDateStr: string | null | undefined) {
   if (!latestDateStr) {
     return { text: '納期未定', isOverdue: false, isUrgent: false, days: null };
   }
-  const clean = latestDateStr.split('T')[0];
-  const target = new Date(clean + 'T00:00:00+09:00');
-  // 今日の午前0時 (日本時間)
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-
-  const diffTime = target.getTime() - today.getTime();
-  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  const target = parseYmd(latestDateStr);
+  if (!target) {
+    return { text: '納期未定', isOverdue: false, isUrgent: false, days: null };
+  }
+  const diffDays = daysBetween(startOfToday(), target);
 
   if (diffDays < 0) {
     return {
@@ -143,11 +182,9 @@ export function getOrderProgress(order: Order) {
  */
 export function isWithinPeriod(dateStr: string | null | undefined, filter: PeriodFilter): boolean {
   if (filter === 'all' || !dateStr) return true;
-  const d = new Date(dateStr.split('T')[0] + 'T00:00:00');
-  if (isNaN(d.getTime())) return true;
-
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const d = parseYmd(dateStr);
+  if (!d) return true;
+  const today = startOfToday();
 
   if (filter === '7d') {
     const past = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
@@ -247,6 +284,8 @@ export function isShippingOrFee(productName?: string, productId?: string): boole
     '相殺',
     '前回分差額',
     '前回差額',
+    '不足分',
+    '輸入消費税',
     // 決済関係
     'カード決済',
     'クレジット決済',

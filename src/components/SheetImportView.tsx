@@ -63,7 +63,8 @@ export const SheetImportView: React.FC = () => {
   const [data, setData] = useState<PreviewResponse | null>(null);
   const [running, setRunning] = useState(false);
   const [tab, setTab] = useUrlState<'changes' | 'held' | 'history'>('section', 'changes');
-  const [ruleFilter, setRuleFilter] = useUrlState<'all' | '確定' | '仮'>('rule', 'all');
+  // 変換ルールは 10/7 にすべて確定したので、項目で絞り込む
+  const [fieldFilter, setFieldFilter] = useUrlState<string>('field', 'all');
 
   const load = () =>
     fetch('/api/sheet-import/preview')
@@ -93,8 +94,8 @@ export const SheetImportView: React.FC = () => {
 
   const latest = data?.latest;
   const changes = useMemo(
-    () => (latest?.changes || []).filter((c) => ruleFilter === 'all' || c.rule === ruleFilter),
-    [latest, ruleFilter]
+    () => (latest?.changes || []).filter((c) => fieldFilter === 'all' || c.field === fieldFilter),
+    [latest, fieldFilter]
   );
   const lastScheduled = (data?.history || []).filter((h) => h.trigger === 'schedule').slice(0, 2);
   const twoDaysClean = lastScheduled.length === 2 && lastScheduled.every((h) => !h.failed);
@@ -223,21 +224,17 @@ export const SheetImportView: React.FC = () => {
           {tab === 'changes' && (
             <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-xs">
               <div className="px-4 py-3 border-b border-slate-100 flex flex-wrap items-center gap-2 text-xs">
-                <span className="text-slate-600">変換ルール：</span>
-                {(['all', '確定', '仮'] as const).map((r) => (
+                <span className="text-slate-600">項目：</span>
+                {['all', ...Array.from(new Set((latest?.changes || []).map((c) => c.field)))].map((f) => (
                   <button
-                    key={r}
+                    key={f}
                     type="button"
-                    onClick={() => setRuleFilter(r)}
-                    className={`px-2 py-1 rounded-lg font-bold ${ruleFilter === r ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'}`}
+                    onClick={() => setFieldFilter(f)}
+                    className={`px-2 py-1 rounded-lg font-bold ${fieldFilter === f ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'}`}
                   >
-                    {r === 'all' ? 'すべて' : r}
+                    {f === 'all' ? 'すべて' : f}
                   </button>
                 ))}
-                <span className="text-slate-500 flex items-center gap-1">
-                  <AlertCircle className="w-3.5 h-3.5" />
-                  「仮」は指示書3章で確定するまでの暫定ルールです
-                </span>
               </div>
               <div className="data-table-wrap overflow-x-auto">
                 <table className="w-full text-xs">
@@ -248,7 +245,7 @@ export const SheetImportView: React.FC = () => {
                       <th className="py-2 px-3">項目</th>
                       <th className="py-2 px-3">いまの楽楽販売</th>
                       <th className="py-2 px-3">取り込み後</th>
-                      <th className="py-2 px-3">ルール</th>
+                      <th className="py-2 px-3">補足</th>
                       <th className="py-2 px-3">シート行</th>
                     </tr>
                   </thead>
@@ -260,14 +257,7 @@ export const SheetImportView: React.FC = () => {
                         <td className="py-2 px-3 font-bold">{c.field}</td>
                         <td className="py-2 px-3 text-slate-500">{c.from || '（空欄）'}</td>
                         <td className="py-2 px-3 font-bold text-blue-700">{c.to}</td>
-                        <td className="py-2 px-3">
-                          <span
-                            className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${c.rule === '確定' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}
-                            title={c.note}
-                          >
-                            {c.rule}
-                          </span>
-                        </td>
+                        <td className="py-2 px-3 text-slate-500">{c.note || ''}</td>
                         <td className="py-2 px-3 font-mono text-slate-500">{c.sheetRow}</td>
                       </tr>
                     ))}

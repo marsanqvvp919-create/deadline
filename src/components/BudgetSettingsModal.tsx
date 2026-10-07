@@ -57,12 +57,12 @@ export const BudgetSettingsModal: React.FC<BudgetSettingsModalProps> = ({
             <input
               type="number"
               step="500000"
-              value={tempBudgets['company'] || 15000000}
+              value={tempBudgets['company'] || ''}
               onChange={(e) => setTempBudgets({ ...tempBudgets, company: Number(e.target.value) })}
               className="w-full px-3.5 py-2.5 bg-white border border-indigo-300 rounded-xl font-mono text-slate-900 font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
             />
             <span className="text-[11px] text-indigo-700 font-mono">
-              (参考: {formatCurrency(tempBudgets['company'] || 15000000)})
+              (参考: {tempBudgets['company'] ? formatCurrency(tempBudgets['company']) : '未設定'})
             </span>
           </div>
 

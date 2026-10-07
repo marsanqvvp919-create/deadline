@@ -102,6 +102,7 @@ export interface ShipmentItem {
   currentLocation: string;         // 現在地
   trackingNo: string;              // 出荷番号
   kantoCustomsPermitted?: string;  // 関東通関可否
+  kantoNgLineCount?: number;       // 関東通関「不可」の明細数
   productId?: string;
   productName?: string;
   quantity?: number;
@@ -253,7 +254,7 @@ export interface ProductItem {
   countryOfOrigin: string;  // 110169 (製造国ID連携)
   minLeadTime: number;      // 110012 (下限納期 日数)
   maxLeadTime: number;      // 110013 (上限納期 日数)
-  status: '取扱中' | '在庫僅少' | '入荷待ち' | '取扱終了';
+  status: '取扱中' | '在庫僅少' | '入荷待ち' | '取扱終了' | '';
   rakurakuSchemaId: string; // '101252'
   source: 'rakuraku_api' | 'rakuraku_csv' | 'synced_master';
   updatedAt: string;
@@ -275,7 +276,8 @@ export interface ClinicItem {
   postalCode: string;
   address: string;
   prefecture: string;
-  status: '取引中' | '新規' | '休眠' | '審査中';
+  status: '取引中' | '新規' | '休眠' | '審査中' | '';
+  paymentMethod?: string;   // 楽楽販売「支払方法」（前払い・後払いなど）
   paymentTerms: string;
   rakurakuSchemaId: string; // '101250'
   source: 'rakuraku_api' | 'rakuraku_csv' | 'synced_master';

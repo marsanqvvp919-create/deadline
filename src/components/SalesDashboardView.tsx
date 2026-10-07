@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Order } from '../types';
-import { formatCurrency, formatDate } from '../utils';
+import { formatCurrency, formatDate, recentYearMonths } from '../utils';
 import { getSalesRepsList } from '../utils/salesRepMapping';
 import {
   TrendingUp,
@@ -59,11 +59,7 @@ export const SalesDashboardView: React.FC<SalesDashboardViewProps> = ({
       if (ym) set.add(ym);
     });
     if (set.size === 0) {
-      set.add('2026-06');
-      set.add('2026-07');
-      set.add('2026-08');
-      set.add('2026-09');
-      set.add('2026-10');
+      recentYearMonths(5).forEach((m) => set.add(m));
     }
     return Array.from(set).sort().reverse();
   }, [orders]);
@@ -122,7 +118,7 @@ export const SalesDashboardView: React.FC<SalesDashboardViewProps> = ({
     return { orderTotal, billingTotal, paymentCollectedTotal };
   }, [monthOrders]);
 
-  const companyBudget = budgets['company'] || 15000000;
+  const companyBudget = budgets['company'] || 0;
   
   const companyTotalSales = useMemo(() => {
     return monthOrders.reduce((sum, o) => sum + getBasisAmount(o, salesBasis), 0);
@@ -228,16 +224,16 @@ export const SalesDashboardView: React.FC<SalesDashboardViewProps> = ({
           </div>
           <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl space-y-1">
             <span className="text-xs font-semibold text-slate-500 block">月間予算目標 (Budget)</span>
-            <span className="text-2xl font-bold text-indigo-600 font-mono">{formatCurrency(companyBudget)}</span>
-            <span className="text-[11px] text-slate-400 block">設定目標値</span>
+            <span className="text-2xl font-bold text-indigo-600 font-mono">{companyBudget > 0 ? formatCurrency(companyBudget) : '未設定'}</span>
+            <span className="text-[11px] text-slate-400 block">{companyBudget > 0 ? '設定目標値' : '「予算設定」から入力してください'}</span>
           </div>
           <div className={`border p-4 rounded-xl space-y-1 ${
             companyAchievementRate >= 100 ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-amber-50 border-amber-200 text-amber-900'
           }`}>
             <span className="text-xs font-semibold block opacity-80">予算達成率 (Achievement)</span>
-            <span className="text-2xl font-bold font-mono">{companyAchievementRate.toFixed(1)}%</span>
+            <span className="text-2xl font-bold font-mono">{companyBudget > 0 ? `${companyAchievementRate.toFixed(1)}%` : '—'}</span>
             <span className="text-[11px] font-medium block">
-              {companyAchievementRate >= 100 ? '🎉 目標達成クリア！' : `あと ${formatCurrency(companyShortfall)} 不足`}
+              {companyBudget <= 0 ? '予算が未設定です' : companyAchievementRate >= 100 ? '🎉 目標達成クリア！' : `あと ${formatCurrency(companyShortfall)} 不足`}
             </span>
           </div>
         </div>
@@ -305,10 +301,10 @@ export const SalesDashboardView: React.FC<SalesDashboardViewProps> = ({
                     <td className="py-3 px-4 font-mono text-emerald-700 font-bold">{formatCurrency(m.paymentCollectedTotal)}</td>
                     <td className="py-3 px-4 font-mono text-blue-700">{formatCurrency(m.billingTotal)}</td>
                     <td className="py-3 px-4 font-mono text-slate-800">{formatCurrency(m.orderTotal)}</td>
-                    <td className="py-3 px-4 font-mono text-slate-600">{formatCurrency(m.target)}</td>
+                    <td className="py-3 px-4 font-mono text-slate-600">{m.target > 0 ? formatCurrency(m.target) : '未設定'}</td>
                     <td className="py-3 px-4 font-mono font-bold">
                       <span className={`px-2 py-0.5 rounded text-[11px] ${isAchieved ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-700'}`}>
-                        {m.achievementRate.toFixed(1)}%
+                        {m.target > 0 ? `${m.achievementRate.toFixed(1)}%` : '—'}
                       </span>
                     </td>
                     <td className="py-3 px-4 text-right">

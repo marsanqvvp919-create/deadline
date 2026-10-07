@@ -41,7 +41,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
   const [newRepName, setNewRepName] = useState<string>('');
   const [settingsTab, setSettingsTab] = useState<'connection' | 'sales_reps' | 'tuning'>('connection');
   const [refreshInterval, setRefreshInterval] = useState<string>(() => localStorage.getItem('nouki_refresh_interval') || '5');
-  const [systemDate, setSystemDate] = useState<string>(() => localStorage.getItem('nouki_system_today') || '2026-09-24');
 
   useEffect(() => {
     fetchServerIp().then((ip) => {
@@ -136,7 +135,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
 
   const handleSave = () => {
     localStorage.setItem('nouki_refresh_interval', refreshInterval);
-    localStorage.setItem('nouki_system_today', systemDate);
     saveConnectionConfig(
       mode,
       dataUrl.trim(),
@@ -330,23 +328,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                   <option value="30">30分毎に自動同期</option>
                   <option value="manual">手動更新のみ（自動同期なし）</option>
                 </select>
-              </div>
-
-              {/* 2. システム基準日シミュレーション */}
-              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2">
-                <label className="block text-xs font-bold text-slate-900">
-                  📅 システム基準日（シミュレーション用）の設定
-                </label>
-                <p className="text-xs text-slate-600">
-                  納期遅延・見積期日超過（1週間超過判定）の計算に使用する「本日の日付」をカスタムでシミュレーション検証できます。
-                </p>
-                <input
-                  type="date"
-                  value={systemDate}
-                  onChange={(e) => setSystemDate(e.target.value)}
-                  className="w-full text-xs px-3 py-2 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 font-mono"
-                />
-                <span className="text-[10px] text-slate-500">※通常はリアルタイム現在時刻が適用されます。検証時に上書き可能です。</span>
               </div>
 
               {/* 3. キャッシュクリア & 強制再同期 */}

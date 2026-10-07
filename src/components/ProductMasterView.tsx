@@ -29,7 +29,7 @@ import {
 } from 'lucide-react';
 import { RakurakuSchemaModal } from './RakurakuSchemaModal';
 import { CsvImportModal } from './CsvImportModal';
-import { isShippingOrFee } from '../utils';
+import { isShippingOrFee, formatDateTime } from '../utils';
 
 interface ProductMasterViewProps {
   orders: Order[];
@@ -43,7 +43,7 @@ export const ProductMasterView: React.FC<ProductMasterViewProps> = ({
   const [products, setProducts] = useState<ProductItem[]>(getLocalProducts());
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [syncError, setSyncError] = useState<string | null>(null);
-  const [lastSyncTime, setLastSyncTime] = useState<string>('2026-09-24 16:30');
+  const [lastSyncTime, setLastSyncTime] = useState<string>('');
   const [syncSource, setSyncSource] = useState<string>('synced_master');
   const [copiedIp, setCopiedIp] = useState<boolean>(false);
   const [serverIp, setServerIp] = useState<string>('34.34.226.64');
@@ -115,10 +115,15 @@ export const ProductMasterView: React.FC<ProductMasterViewProps> = ({
   // 注文管理（101248）との突合計算: 各商品の現在発注状況
   const productOrderStats = useMemo(() => {
     const stats: Record<string, { orderCount: number; totalQty: number; orders: { order: Order; qty: number; stage: string }[] }> = {};
+    const byName: typeof stats = {};
 
     orders.forEach((ord) => {
+      // 「進行中」は、見積と出荷・納品が終わった伝票を除き、まだ出荷されていない明細だけを数える
+      if ((ord.status || '').includes('見積')) return;
+      if (ord.orderState === '納品完了' || ord.orderState === '全明細出荷済') return;
       ord.lines.forEach((line) => {
         if (isShippingOrFee(line.productName, line.productId)) return;
+        if (line.stage === '出荷完了') return;
         // ID一致または商品名一致で結合
         const key = line.productId || line.productName;
         if (!stats[key]) {
@@ -132,15 +137,25 @@ export const ProductMasterView: React.FC<ProductMasterViewProps> = ({
           stage: line.stage,
         });
 
-        // 商品名でも引けるように補助
-        if (line.productName && !stats[line.productName]) {
-          stats[line.productName] = stats[key];
+        // 商品名でも引けるように補助（件数を二重に数えないよう、別の表に持つ）
+        if (line.productName && !byName[line.productName]) {
+          byName[line.productName] = stats[key];
         }
       });
     });
 
-    return stats;
+    return { byId: stats, byName };
   }, [orders]);
+  const statOf = (p: { productId: string; productName: string }) =>
+    productOrderStats.byId[p.productId] || productOrderStats.byName[p.productName];
+  // 粗利率は販売単価と仕入単価が同じ円建てのときだけ出す（KRW・USD などの仕入は換算前なので計算しない）
+  const marginOf = (p: { standardPrice: number; costPrice: number; costCurrency: string }): number | null =>
+    p.standardPrice > 0 && p.costPrice > 0 && p.costCurrency === 'JPY'
+      ? Math.round(((p.standardPrice - p.costPrice) / p.standardPrice) * 100)
+      : null;
+  const jpyMargins = products.map(marginOf).filter((m): m is number => m !== null);
+  const leadTimeText = (p: { minLeadTime: number; maxLeadTime: number }) =>
+    p.minLeadTime || p.maxLeadTime ? `${p.minLeadTime}〜${p.maxLeadTime}日` : '—';
 
   // カテゴリ一覧
   const categories = useMemo(() => {
@@ -307,7 +322,7 @@ export const ProductMasterView: React.FC<ProductMasterViewProps> = ({
               <span>データ反映元: <b>{syncSource === 'rakuraku_api' ? '楽楽販売 API直接連携' : syncSource === 'rakuraku_csv' ? '楽楽販売 CSVインポート' : '楽楽販売 同期マスタ'}</b></span>
             </span>
             <span className="text-slate-300">|</span>
-            <span className="text-slate-500">最終更新: {lastSyncTime}</span>
+            <span className="text-slate-500">最終更新: {lastSyncTime ? formatDateTime(lastSyncTime) : '—'}</span>
             <span className="text-slate-300">|</span>
             <span className="font-semibold text-slate-700">登録品目数: {products.length} 品目</span>
           </div>
@@ -341,32 +356,29 @@ export const ProductMasterView: React.FC<ProductMasterViewProps> = ({
           <span className="text-xs font-medium text-slate-500 block">ご注文管理で受注進行中</span>
           <div className="mt-1 flex items-baseline gap-2">
             <span className="text-2xl font-bold text-blue-600 font-mono">
-              {Object.keys(productOrderStats).length}
+              {Object.keys(productOrderStats.byId).length}
             </span>
             <span className="text-xs text-slate-500">品目稼働中</span>
           </div>
         </div>
 
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs">
-          <span className="text-xs font-medium text-slate-500 block">平均標準粗利率</span>
+          <span className="text-xs font-medium text-slate-500 block">平均粗利率（円建て仕入のみ）</span>
           <div className="mt-1 flex items-baseline gap-2">
             <span className="text-2xl font-bold text-emerald-600 font-mono">
-              {Math.round(
-                products.reduce((acc, p) => acc + (p.standardPrice > 0 ? ((p.standardPrice - p.costPrice) / p.standardPrice) * 100 : 0), 0) /
-                  (products.length || 1)
-              )}%
+              {jpyMargins.length > 0 ? `${Math.round(jpyMargins.reduce((a, b) => a + b, 0) / jpyMargins.length)}%` : '—'}
             </span>
-            <span className="text-xs text-slate-500">平均</span>
+            <span className="text-xs text-slate-500">{jpyMargins.length}品目で計算</span>
           </div>
         </div>
 
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs">
-          <span className="text-xs font-medium text-slate-500 block">入荷待ち / 在庫僅少</span>
+          <span className="text-xs font-medium text-slate-500 block">仕入先が未入力</span>
           <div className="mt-1 flex items-baseline gap-2">
             <span className="text-2xl font-bold text-amber-600 font-mono">
-              {products.filter((p) => p.status === '入荷待ち' || p.status === '在庫僅少').length}
+              {products.filter((p) => !p.supplierName).length}
             </span>
-            <span className="text-xs text-slate-500">品目注意</span>
+            <span className="text-xs text-slate-500">品目（楽楽販売で入力すると発注先がわかります）</span>
           </div>
         </div>
       </div>
@@ -446,8 +458,8 @@ export const ProductMasterView: React.FC<ProductMasterViewProps> = ({
             </thead>
             <tbody className="divide-y divide-slate-100 text-slate-800">
               {filteredProducts.map((p, idx) => {
-                const stat = productOrderStats[p.productId] || productOrderStats[p.productName];
-                const marginRate = p.standardPrice > 0 ? Math.round(((p.standardPrice - p.costPrice) / p.standardPrice) * 100) : 0;
+                const stat = statOf(p);
+                const marginRate = marginOf(p);
 
                 return (
                   <tr
@@ -467,25 +479,27 @@ export const ProductMasterView: React.FC<ProductMasterViewProps> = ({
                       </div>
                     </td>
                     <td className="py-3 px-3.5 whitespace-nowrap text-slate-600">
-                      {p.category}
+                      {p.category || '—'}
                     </td>
                     <td className="py-3 px-3.5 text-right font-mono font-bold text-slate-900 whitespace-nowrap">
                       ¥{p.standardPrice.toLocaleString()}
                     </td>
                     <td className="py-3 px-3.5 text-right font-mono text-slate-600 whitespace-nowrap">
-                      ¥{p.costPrice.toLocaleString()}
+                      {p.costCurrency && p.costCurrency !== 'JPY'
+                        ? `${p.costPrice.toLocaleString()} ${p.costCurrency}`
+                        : `¥${p.costPrice.toLocaleString()}`}
                     </td>
                     <td className="py-3 px-3.5 text-right font-mono font-semibold text-emerald-700 whitespace-nowrap">
-                      {marginRate}%
+                      {marginRate !== null ? `${marginRate}%` : <span className="text-slate-400 font-normal">—</span>}
                     </td>
                     <td className="py-3 px-3.5 whitespace-nowrap text-slate-700">
-                      {p.supplierName}
+                      {p.supplierName || <span className="text-amber-700">未入力</span>}
                     </td>
                     <td className="py-3 px-3.5 whitespace-nowrap text-slate-600">
-                      {p.countryOfOrigin}
+                      {p.countryOfOrigin || '—'}
                     </td>
                     <td className="py-3 px-3.5 whitespace-nowrap text-slate-600 font-mono text-[11px]">
-                      {p.minLeadTime}〜{p.maxLeadTime}日
+                      {leadTimeText(p)}
                     </td>
                     <td className="py-3 px-3.5 text-center whitespace-nowrap">
                       {stat && stat.orderCount > 0 ? (
@@ -509,7 +523,7 @@ export const ProductMasterView: React.FC<ProductMasterViewProps> = ({
                             : 'bg-slate-100 text-slate-600'
                         }`}
                       >
-                        {p.status}
+                        {p.status || "—"}
                       </span>
                     </td>
                     <td className="py-3 px-3.5 text-center whitespace-nowrap">
@@ -575,7 +589,7 @@ export const ProductMasterView: React.FC<ProductMasterViewProps> = ({
                 {/* Status & Edit Bar */}
                 <div className="flex items-center justify-between pb-3 border-b border-slate-200 flex-wrap gap-2">
                   <span className="text-xs font-semibold text-slate-500">
-                    取扱ステータス: <b>{selectedProduct.status}</b>
+                    取扱ステータス: <b>{selectedProduct.status || "—"}</b>
                   </span>
                   <div className="flex items-center gap-2">
                   </div>
@@ -614,7 +628,7 @@ export const ProductMasterView: React.FC<ProductMasterViewProps> = ({
                     </div>
                     <div className="flex justify-between py-1 border-b border-slate-200">
                       <span className="text-slate-500">110007: 仕入単価 (110124: 通貨)</span>
-                      <span className="font-mono text-slate-800">¥{selectedProduct.costPrice.toLocaleString()} ({selectedProduct.costCurrency})</span>
+                      <span className="font-mono text-slate-800">{selectedProduct.costPrice.toLocaleString()} {selectedProduct.costCurrency || ''}</span>
                     </div>
                     <div className="flex justify-between py-1 border-b border-slate-200">
                       <span className="text-slate-500">110006: 仕入先名 (110005: ID)</span>
@@ -622,11 +636,11 @@ export const ProductMasterView: React.FC<ProductMasterViewProps> = ({
                     </div>
                     <div className="flex justify-between py-1 border-b border-slate-200">
                       <span className="text-slate-500">110169: 製造国ID (製造国マスタ)</span>
-                      <span className="text-slate-800">{selectedProduct.countryOfOrigin}</span>
+                      <span className="text-slate-800">{selectedProduct.countryOfOrigin || '—'}</span>
                     </div>
                     <div className="flex justify-between py-1">
                       <span className="text-slate-500">110012〜110013: 標準納期（日）</span>
-                      <span className="font-mono text-slate-800">{selectedProduct.minLeadTime}〜{selectedProduct.maxLeadTime} 日</span>
+                      <span className="font-mono text-slate-800">{leadTimeText(selectedProduct)}</span>
                     </div>
                   </div>
                 </div>
@@ -639,7 +653,7 @@ export const ProductMasterView: React.FC<ProductMasterViewProps> = ({
                   </h4>
 
                   {(() => {
-                    const stat = productOrderStats[selectedProduct.productId] || productOrderStats[selectedProduct.productName];
+                    const stat = statOf(selectedProduct);
                     if (!stat || stat.orders.length === 0) {
                       return (
                         <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-500 text-center">

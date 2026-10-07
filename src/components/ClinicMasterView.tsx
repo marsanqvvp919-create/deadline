@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { ClinicItem, Order } from '../types';
 import { fetchClinicsMaster, saveLocalClinics, getLocalClinics } from '../api';
+import { formatDateTime } from '../utils';
 import {
   Building2,
   Search,
@@ -47,7 +48,7 @@ export const ClinicMasterView: React.FC<ClinicMasterViewProps> = ({
   const [clinics, setClinics] = useState<ClinicItem[]>(getLocalClinics());
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [syncError, setSyncError] = useState<string | null>(null);
-  const [lastSyncTime, setLastSyncTime] = useState<string>('2026-09-24 16:30');
+  const [lastSyncTime, setLastSyncTime] = useState<string>('');
   const [syncSource, setSyncSource] = useState<string>('synced_master');
   const [copiedIp, setCopiedIp] = useState<boolean>(false);
   const [serverIp, setServerIp] = useState<string>('34.34.226.64');
@@ -370,7 +371,7 @@ export const ClinicMasterView: React.FC<ClinicMasterViewProps> = ({
               <span>データ反映元: <b>{syncSource === 'rakuraku_api' ? '楽楽販売 API直接連携' : syncSource === 'rakuraku_csv' ? '楽楽販売 CSVインポート' : '楽楽販売 同期マスタ'}</b></span>
             </span>
             <span className="text-slate-300">|</span>
-            <span className="text-slate-500">最終更新: {lastSyncTime}</span>
+            <span className="text-slate-500">最終更新: {lastSyncTime ? formatDateTime(lastSyncTime) : '—'}</span>
             <span className="text-slate-300">|</span>
             <span className="font-semibold text-slate-700">登録医院数: {clinics.length} 院</span>
           </div>
@@ -411,12 +412,12 @@ export const ClinicMasterView: React.FC<ClinicMasterViewProps> = ({
         </div>
 
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs">
-          <span className="text-xs font-medium text-slate-500 block">アクティブ取引率</span>
+          <span className="text-xs font-medium text-slate-500 block">担当営業が未設定</span>
           <div className="mt-1 flex items-baseline gap-2">
-            <span className="text-2xl font-bold text-emerald-600 font-mono">
-              {Math.round((clinics.filter(c => c.status === '取引中').length / (clinics.length || 1)) * 100)}%
+            <span className="text-2xl font-bold text-amber-600 font-mono">
+              {clinics.filter((c) => !c.salesRep || c.salesRep === '未設定' || c.salesRep === '未割当').length}
             </span>
-            <span className="text-xs text-slate-500">取引中</span>
+            <span className="text-xs text-slate-500">院</span>
           </div>
         </div>
 
@@ -499,7 +500,7 @@ export const ClinicMasterView: React.FC<ClinicMasterViewProps> = ({
                 <th className="py-3 px-3.5">地域 / 所在地</th>
                 <th className="py-3 px-3.5">電話番号</th>
                 <th className="py-3 px-3.5 text-center">商品ステータス進捗</th>
-                <th className="py-3 px-3.5">取引状態</th>
+                <th className="py-3 px-3.5">支払方法</th>
                 <th className="py-3 px-3.5 text-center">操作</th>
               </tr>
             </thead>
@@ -535,7 +536,7 @@ export const ClinicMasterView: React.FC<ClinicMasterViewProps> = ({
                       </div>
                     </td>
                     <td className="py-3 px-3.5 whitespace-nowrap text-slate-700 font-medium">
-                      {c.directorName}
+                      {c.directorName || '—'}
                     </td>
                     <td className="py-3 px-3.5 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                       {!c.salesRep || c.salesRep === '未設定' || c.salesRep === '未割当' ? (
@@ -605,7 +606,7 @@ export const ClinicMasterView: React.FC<ClinicMasterViewProps> = ({
                             : 'bg-slate-100 text-slate-600'
                         }`}
                       >
-                        {c.status}
+                        {c.paymentMethod || c.status || '—'}
                       </span>
                     </td>
                     <td className="py-3 px-3.5 text-center whitespace-nowrap">

@@ -495,7 +495,7 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
       })
       .join('\n\n');
 
-    return `件名: 【大切なお知らせ】ご注文商品の納品遅延に関するお詫びと進捗のご報告\n\n${clinic.clinicName}\n${clinic.directorName ? clinic.directorName + ' 様' : '院長先生・ご担当者様'}\n\n平素は格別のお引き立てを賜り、心より御礼申し上げます。\n担当営業の${clinic.salesRep}でございます。\n\nこの度は、${clinic.clinicName}様にご注文いただいております下記のお品物につきまして、当初予定しておりました納期を大幅に超過し、多大なご不便・ご迷惑をおかけしておりますことを深くお詫び申し上げます。\n\n【対象のご注文および遅延状況】\n${ordersText}\n\n現在、メーカーおよび製造元に対して優先出荷の緊急督促を実施しております。\n確定の入荷日および発送日時が判明次第、直ちに私よりお電話またはメールにてご連絡申し上げます。\n\n代替ロットや緊急分納などのご要望がございましたら、いつでも迅速に対応させていただきますので、ご指示いただけますと幸いです。\n多大なるご迷惑をおかけしておりますこと、重ねてお詫び申し上げます。\n\n--------------------------------\n担当営業: ${clinic.salesRep}\n電話: ${clinic.phone || '03-XXXX-XXXX'}\nメール: ${clinic.email || 'support@example.com'}\n--------------------------------`;
+    return `件名: 【大切なお知らせ】ご注文商品の納品遅延に関するお詫びと進捗のご報告\n\n${clinic.clinicName}\n${clinic.directorName ? clinic.directorName + ' 様' : '院長先生・ご担当者様'}\n\n平素は格別のお引き立てを賜り、心より御礼申し上げます。\n担当営業の${clinic.salesRep}でございます。\n\nこの度は、${clinic.clinicName}様にご注文いただいております下記のお品物につきまして、当初予定しておりました納期を大幅に超過し、多大なご不便・ご迷惑をおかけしておりますことを深くお詫び申し上げます。\n\n【対象のご注文および遅延状況】\n${ordersText}\n\n現在、メーカーおよび製造元に対して優先出荷の緊急督促を実施しております。\n確定の入荷日および発送日時が判明次第、直ちに私よりお電話またはメールにてご連絡申し上げます。\n\n代替ロットや緊急分納などのご要望がございましたら、いつでも迅速に対応させていただきますので、ご指示いただけますと幸いです。\n多大なるご迷惑をおかけしておりますこと、重ねてお詫び申し上げます。\n\n--------------------------------\n担当営業: ${clinic.salesRep}\n--------------------------------`;
   };
 
   // CSV Export handler
@@ -728,7 +728,7 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
           </div>
 
           <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl">
-            <span className="text-[11px] font-semibold text-rose-700 block">発注漏れ（受注済み・未発注）</span>
+            <span className="text-[11px] font-semibold text-rose-700 block">未発注（受注済みのまま）</span>
             <div className="mt-1 flex items-baseline gap-1.5">
               <span className="text-2xl font-bold text-rose-600 font-mono">{kpis.unorderedCount}</span>
               <span className="text-[10px] text-slate-500 font-medium">件</span>
@@ -858,7 +858,7 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
                 className="w-full px-3 py-1.8 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition cursor-pointer"
               >
                 <option value="all">原因: すべて</option>
-                <option value="未発注">未発注 (発注漏れ)</option>
+                <option value="未発注">未発注（受注済みのまま）</option>
                 <option value="入荷遅延">発注済・入荷待ち (仕入遅延)</option>
               </select>
             </div>
@@ -1012,7 +1012,7 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
                             {item.cause === '未発注' ? (
                               <span className="px-2 py-0.5 rounded-md text-[11px] font-bold bg-rose-600 text-white flex items-center gap-1 w-fit">
                                 <AlertCircle className="w-3 h-3" />
-                                <span>発注漏れ（受注済み）</span>
+                                <span>未発注（受注済み）</span>
                               </span>
                             ) : item.cause === '出荷手配中' ? (
                               <span className="px-2 py-0.5 rounded-md text-[11px] font-bold bg-slate-100 text-slate-700 border border-slate-200 w-fit block">

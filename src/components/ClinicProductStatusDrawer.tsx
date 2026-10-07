@@ -1353,7 +1353,7 @@ export const ClinicProductStatusDrawer: React.FC<ClinicProductStatusDrawerProps>
                           </div>
                           <div className="flex justify-between py-1.5 border-b border-slate-100">
                             <span className="text-slate-500">院長・代表者名</span>
-                            <span className="font-semibold text-slate-800">{clinicInfo.directorName}</span>
+                            <span className="font-semibold text-slate-800">{clinicInfo.directorName || "—"}</span>
                           </div>
                           <div className="flex justify-between py-1.5 border-b border-slate-100">
                             <span className="text-slate-500">109978 (担当営業)</span>
@@ -1384,7 +1384,7 @@ export const ClinicProductStatusDrawer: React.FC<ClinicProductStatusDrawerProps>
                           </div>
                           <div className="flex justify-between py-1.5 border-b border-slate-100">
                             <span className="text-slate-500">支払条件</span>
-                            <span className="text-slate-800">{clinicInfo.paymentTerms}</span>
+                            <span className="text-slate-800">{clinicInfo.paymentMethod || clinicInfo.paymentTerms || "—"}</span>
                           </div>
                           <div className="flex justify-between py-1.5 border-b border-slate-100">
                             <span className="text-slate-500">最終更新日時</span>

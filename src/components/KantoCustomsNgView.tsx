@@ -187,6 +187,11 @@ export const KantoCustomsNgView: React.FC<KantoCustomsNgViewProps> = ({
     document.body.removeChild(link);
   };
 
+  // 判定に使う項目が楽楽販売から1件も届いていないか
+  const hasKantoData = shipments.some(
+    (s) => (s.kantoCustomsPermitted && s.kantoCustomsPermitted !== '—') || (s.kantoNgLineCount || 0) > 0
+  );
+
   return (
     <div className="space-y-6 animate-in fade-in duration-150">
       {/* Header Banner */}
@@ -206,6 +211,12 @@ export const KantoCustomsNgView: React.FC<KantoCustomsNgViewProps> = ({
               <p className="text-xs text-rose-200 mt-2 font-medium bg-rose-950/70 border border-rose-600/40 px-3 py-1.5 rounded-xl">
                 ※ 通関NG件数（{kantoNgShipments.length}件）：到着空港がNRT（成田空港）で、明細に関東通関可否「不可」の商品を含む出荷の件数です。更新・調整は楽楽販売にて行ってください。
               </p>
+              {!hasKantoData && shipments.length > 0 && (
+                <p className="text-xs text-amber-100 mt-2 font-bold bg-amber-900/60 border border-amber-500/50 px-3 py-1.5 rounded-xl">
+                  ※ 楽楽販売の出荷管理で「関東通関可否（明細）」「関東不可の明細数」がすべて空欄のため、いまは判定できません（0件は「NGなし」という意味ではありません）。
+                  楽楽販売の商品マスタで関東通関可否を入力すると、ここに反映されます。
+                </p>
+              )}
             </div>
           </div>
 

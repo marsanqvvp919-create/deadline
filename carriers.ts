@@ -34,12 +34,15 @@ export const NORMALIZED_LABEL: Record<NormalizedStatus, string> = {
 
 /** 追跡番号から配送会社を推定（明示されていればそれを使う） */
 export function detectCarrier(trackingNo: string, courierHint?: string): CarrierId | null {
+  // 番号の形を優先（楽楽販売の配送業者に入力違いがあるため）。形で決まらないときだけ配送業者を見る
+  const clean = trackingNo.replace(/[\s-]/g, '');
+  if (/^\d+$/.test(clean)) {
+    if (clean.length === 12 || clean.length === 15) return 'fedex';
+    if (clean.length === 10) return 'dhl';
+  }
   const hint = (courierHint || '').toLowerCase();
   if (hint.includes('fedex')) return 'fedex';
   if (hint.includes('dhl')) return 'dhl';
-  const digits = trackingNo.replace(/\D/g, '');
-  if (digits.length === 12 || digits.length === 15) return 'fedex';
-  if (digits.length === 10) return 'dhl';
   return null;
 }
 

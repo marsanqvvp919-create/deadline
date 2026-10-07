@@ -3,6 +3,7 @@ import { useUrlState } from '../utils/listState';
 import { Order, OrderLine, ViewTab, ClinicItem } from '../types';
 import { formatDate, getRemainingDaysInfo, getOrderBorderColor, buildRakurakuUrl, isShippingOrFee } from '../utils';
 import { getConfiguredUrls, getLocalClinics } from '../api';
+import { isLineDelayed } from '../utils/delayCalculation';
 import {
   Building2,
   Package,
@@ -155,11 +156,12 @@ export const UnshippedClinicsView: React.FC<UnshippedClinicsViewProps> = ({
       entry.orders.push(ord);
 
       unshippedLines.forEach((l) => {
-        const remaining = getRemainingDaysInfo(ord.requestedDate || l.latestDate);
+        // 遅延の判定は納期超過一覧と同じ（最長納品予定日が過ぎて出荷日が空欄）
+        const remaining = getRemainingDaysInfo(l.latestDate);
         entry.lines.push({
           line: l,
           parentOrder: ord,
-          isOverdue: remaining.isOverdue,
+          isOverdue: isLineDelayed(l, ord),
           isUrgent: remaining.isUrgent,
           daysRemaining: remaining.days,
         });

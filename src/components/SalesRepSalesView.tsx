@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Order } from '../types';
-import { formatCurrency, formatDate } from '../utils';
+import { formatCurrency, formatDate, recentYearMonths } from '../utils';
 import { getSalesRepsList } from '../utils/salesRepMapping';
 import {
   Users,
@@ -64,11 +64,7 @@ export const SalesRepSalesView: React.FC<SalesRepSalesViewProps> = ({
       if (ym) set.add(ym);
     });
     if (set.size === 0) {
-      set.add('2026-06');
-      set.add('2026-07');
-      set.add('2026-08');
-      set.add('2026-09');
-      set.add('2026-10');
+      recentYearMonths(5).forEach((m) => set.add(m));
     }
     return Array.from(set).sort().reverse();
   }, [orders]);
@@ -153,7 +149,7 @@ export const SalesRepSalesView: React.FC<SalesRepSalesViewProps> = ({
     });
 
     return Array.from(map.values()).map((item) => {
-      const target = budgets[item.repName] || 5000000;
+      const target = budgets[item.repName] || 0;
       const rate = target > 0 ? (item.totalSales / target) * 100 : 0;
       const shortfall = Math.max(0, target - item.totalSales);
       return {
@@ -311,17 +307,17 @@ export const SalesRepSalesView: React.FC<SalesRepSalesViewProps> = ({
                       {formatCurrency(rep.orderSales)}
                     </td>
                     <td className="py-3.5 px-4 font-mono text-slate-600">
-                      {formatCurrency(rep.target)}
+                      {rep.target > 0 ? formatCurrency(rep.target) : '未設定'}
                     </td>
                     <td className="py-3.5 px-4 font-mono font-bold">
                       <span className={`px-2 py-1 rounded-md text-xs ${
                         isAchieved ? 'bg-emerald-100 text-emerald-800' : isGood ? 'bg-amber-100 text-amber-800' : 'bg-rose-100 text-rose-800'
                       }`}>
-                        {rep.achievementRate.toFixed(1)}%
+                        {rep.target > 0 ? `${rep.achievementRate.toFixed(1)}%` : '—'}
                       </span>
                     </td>
                     <td className="py-3.5 px-4 font-mono text-slate-600">
-                      {rep.shortfall > 0 ? formatCurrency(rep.shortfall) : '達成済 🎉'}
+                      {rep.target <= 0 ? '—' : rep.shortfall > 0 ? formatCurrency(rep.shortfall) : '達成済 🎉'}
                     </td>
                     <td className="py-3.5 px-4 text-right">
                       <button

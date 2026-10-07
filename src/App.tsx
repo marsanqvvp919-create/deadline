@@ -11,14 +11,12 @@ import {
 } from './types';
 import { fetchData, getConfiguredUrls, saveConnectionConfig, saveCachedDeliveryData } from './api';
 import { syncAndDiffOrders } from './utils/syncEngine';
-import { isWithinPeriod } from './utils';
+import { isWithinPeriod, parseYmd, startOfToday, currentYearMonth } from './utils';
 import { isCoolMissingShipment, isCustomsNgShipment, isOpenShipment } from './utils/customsUtils';
 import { Navbar } from './components/Navbar';
 import { SettingsModal } from './components/SettingsModal';
 import { DetailDrawer } from './components/DetailDrawer';
 import { DashboardView } from './components/DashboardView';
-import { DeliveryDashboardView } from './components/DeliveryDashboardView';
-import { RepView } from './components/RepView';
 import { CompletedView } from './components/CompletedView';
 import { SalesDashboardView } from './components/SalesDashboardView';
 import { SalesRepSalesView } from './components/SalesRepSalesView';
@@ -79,13 +77,21 @@ import {
   FileWarning
 } from 'lucide-react';
 
+const KNOWN_TABS: ViewTab[] = [
+  'dashboard', 'alerts', 'procurement', 'unshipped_clinics', 'partial_shipment', 'overdue', 'completed',
+  'customs_management', 'cool_missing', 'kanto_customs_ng', 'unmatched_sheets', 'inventory_management',
+  'sheet_import', 'arrival_tracking', 'products', 'clinics', 'carrier_settings',
+  'sales_dashboard', 'sales_rep_sales', 'sales_clinic_master', 'reorder_prediction', 'rep_ranking',
+];
+
 export default function App() {
   // 1. URLクエリパラメータから初期状態を復元（フェーズ3要件）
   const getInitialParams = () => {
     try {
       const params = new URLSearchParams(window.location.search);
       return {
-        tab: (params.get('tab') as ViewTab) || 'dashboard',
+        // 画面のない旧タブ（rep・delivery_dashboard など）はダッシュボードを開く
+        tab: (KNOWN_TABS.includes(params.get('tab') as ViewTab) ? params.get('tab') : 'dashboard') as ViewTab,
         rep: params.get('rep') || '',
         supplier: params.get('supplier') || '',
         period: (params.get('period') as PeriodFilter) || 'all',
@@ -238,10 +244,11 @@ export default function App() {
       const raw = localStorage.getItem(STORAGE_BUDGET_KEY);
       if (raw) return JSON.parse(raw);
     } catch {}
-    return { company: 15000000, 大谷: 5000000, 高桑: 5000000, 大津: 5000000 };
+    // 予算は「予算設定」で入力するまで未設定（以前は 1,500万円などの仮の値を入れていた）
+    return {};
   });
   const [salesBasis, setSalesBasis] = useState<'order' | 'billing' | 'payment_collected'>('payment_collected');
-  const [selectedMonth, setSelectedMonth] = useState<string>('2026-09');
+  const [selectedMonth, setSelectedMonth] = useState<string>(() => currentYearMonth());
   const [isBudgetModalOpen, setIsBudgetModalOpen] = useState<boolean>(false);
 
   // Detail Drawer State
@@ -512,15 +519,15 @@ export default function App() {
   const overdueUnpaidClinicsCount = useMemo(() => {
     if (!deliveryData) return 0;
     const clinicSet = new Set<string>();
-    const today = new Date('2026-09-24T00:00:00+09:00');
+    const today = startOfToday();
 
     filteredOrders.forEach((o) => {
       const payStatus = o.paymentStatus || '入金済';
       if (payStatus === '入金済') return;
       if (!o.paymentDueDate) return;
 
-      const dueDate = new Date(o.paymentDueDate + 'T00:00:00+09:00');
-      if (!isNaN(dueDate.getTime()) && dueDate < today && o.customerName) {
+      const dueDate = parseYmd(o.paymentDueDate);
+      if (dueDate && dueDate < today && o.customerName) {
         clinicSet.add(o.customerName);
       }
     });
@@ -553,24 +560,11 @@ export default function App() {
 
   // ダッシュボードから営業別ビューへの遷移
   const handleSelectRepFromDashboard = (repName: string) => {
+    // 担当営業で絞り込んだ要対応リストを開く（以前は表示先の画面がなく真っ白になっていた）
     setSelectedRep(repName);
-    setActiveTab('rep');
+    setActiveTab('alerts');
   };
 
-  const handleUpdateOrderStatus = (orderIds: string[], updates: Partial<Order>) => {
-    setDeliveryData((prev) => {
-      if (!prev) return prev;
-      const newOrders = prev.orders.map((o) => {
-        if (orderIds.includes(o.orderId)) {
-          return { ...o, ...updates };
-        }
-        return o;
-      });
-      const updatedData = { ...prev, orders: newOrders };
-      saveCachedDeliveryData(updatedData);
-      return updatedData;
-    });
-  };
 
   if (!deliveryData) {
     return (
@@ -1032,7 +1026,6 @@ export default function App() {
             <CompletedView
               orders={filteredOrders}
               onSelectOrder={handleOpenDetail}
-              onUpdateOrderStatus={handleUpdateOrderStatus}
             />
           )}
 
@@ -1144,7 +1137,7 @@ export default function App() {
           {activeTab === 'carrier_settings' && <CarrierSettingsView />}
 
           {activeTab === 'alerts' && (
-            <ActionListView orders={filteredOrders} alerts={filteredAlerts} onSelectOrder={handleOpenDetail} />
+            <ActionListView orders={filteredOrders} alerts={filteredAlerts} onSelectOrder={handleOpenDetail} repFilter={selectedRep} onClearRepFilter={() => setSelectedRep('')} />
           )}
 
           {activeTab === 'inventory_management' && (
@@ -1170,7 +1163,6 @@ export default function App() {
         isOpen={isDrawerOpen}
         onClose={() => setIsDrawerOpen(false)}
         onOpenClinicStatus={handleOpenClinicStatus}
-        onUpdateOrderStatus={handleUpdateOrderStatus}
       />
 
       {/* Global Clinic Product Status Slideover Drawer */}
