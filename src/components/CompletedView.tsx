@@ -56,7 +56,7 @@ export const CompletedView: React.FC<CompletedViewProps> = ({ orders, onSelectOr
             <span>出荷伝票一覧（納品・配送完了管理）</span>
           </h1>
           <p className="text-xs text-slate-500 mt-0.5">
-            配送・出荷が完了した出荷伝票の履歴、および納品確認待ち案件のチェック・ステータス移行を行います
+            全明細の出荷が終わった伝票の一覧です（納品完了かどうかは楽楽販売の「納品完了日」で決まります）
           </p>
         </div>
 
