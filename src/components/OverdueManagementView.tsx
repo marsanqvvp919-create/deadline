@@ -121,6 +121,21 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
     return map;
   }, []);
 
+  // 楽楽販売の「お約束納期」（伝票内で最も早いもの）と「納期危険」（値が入っている明細があれば表示）
+  const promisedDateOf = (item: OverdueOrderInfo): string | null => {
+    const dates = item.order.lines
+      .map((l) => l.promisedDate)
+      .filter((d): d is string => !!d)
+      .sort((a, b) => a.replace(/\//g, '-').localeCompare(b.replace(/\//g, '-')));
+    return dates[0] || null;
+  };
+  const deliveryRiskOf = (item: OverdueOrderInfo): string | null => {
+    const v = item.order.lines
+      .map((l) => (l.deliveryRisk || '').trim())
+      .find((x) => x && !['0', 'FALSE', 'false', 'なし', '-', '—'].includes(x));
+    return v || null;
+  };
+
   // 対応状況を更新（チームで共有）
   const updateFollowup = (orderId: string, status: OverdueFollowupStatus, note?: string, nextActionDate?: string) => {
     const current = followups[orderId] || {
@@ -977,7 +992,17 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
                               <span className="text-slate-500 font-mono text-[11px] block">
                                 予定: {item.earliestDueDate}
                               </span>
+                              {promisedDateOf(item) && (
+                                <span className="text-slate-700 font-mono text-[11px] block">
+                                  お約束: {promisedDateOf(item)}
+                                </span>
+                              )}
                               {getSeverityBadge(item.maxDaysOver)}
+                              {deliveryRiskOf(item) && (
+                                <span className="px-1.5 py-0.5 rounded bg-rose-100 text-rose-800 text-[10px] font-bold inline-block">
+                                  納期危険: {deliveryRiskOf(item)}
+                                </span>
+                              )}
                             </div>
                           </td>
 

@@ -35,9 +35,10 @@ interface UnshippedClinicsViewProps {
   onSelectOrderLine: (order: Order, lineKey?: string) => void;
   onOpenClinicStatus?: (clinicName: string) => void;
   onNavigateToTab?: (tab: ViewTab) => void;
+  initialFilter?: 'all' | 'partial';
 }
 
-type ClinicFilter = 'all' | 'has_overdue' | 'has_unordered' | 'waiting_arrival' | 'severe';
+type ClinicFilter = 'all' | 'has_overdue' | 'has_unordered' | 'waiting_arrival' | 'severe' | 'partial';
 
 interface UnshippedLineInfo {
   line: OrderLine;
@@ -75,12 +76,13 @@ export const UnshippedClinicsView: React.FC<UnshippedClinicsViewProps> = ({
   onSelectOrderLine,
   onOpenClinicStatus,
   onNavigateToTab,
+  initialFilter = 'all',
 }) => {
   const { rakurakuBaseUrl } = getConfiguredUrls();
   const clinicsMaster: ClinicItem[] = useMemo(() => getLocalClinics(), []);
 
   // UI States
-  const [activeFilter, setActiveFilter] = useState<ClinicFilter>('all');
+  const [activeFilter, setActiveFilter] = useState<ClinicFilter>(initialFilter);
   const [localSearch, setLocalSearch] = useState<string>('');
   const [selectedSalesRep, setSelectedSalesRep] = useState<string>('all');
   const [expandedClinics, setExpandedClinics] = useState<Set<string>>(new Set());
@@ -97,6 +99,23 @@ export const UnshippedClinicsView: React.FC<UnshippedClinicsViewProps> = ({
   const showNotice = (msg: string) => {
     setActionNotice(msg);
     setTimeout(() => setActionNotice(null), 3500);
+  };
+
+  // 伝票の中に出荷済みの明細と未出荷の明細が混ざっているか
+  const hasPartialOrder = (g: UnshippedClinicGroup) =>
+    g.orders.some(
+      (o) => o.lines.some((l) => l.stage === '出荷完了' || l.stage === '一部出荷') && o.lines.some((l) => l.stage !== '出荷完了')
+    );
+
+  // 未出荷明細の段階別の数（クリニックごとの進み具合のバー用）
+  const stageCounts = (g: UnshippedClinicGroup) => {
+    const c = { unordered: 0, waiting: 0, partial: 0 };
+    g.lines.forEach(({ line }) => {
+      if (line.stage === '未発注') c.unordered++;
+      else if (line.stage === '一部出荷') c.partial++;
+      else c.waiting++;
+    });
+    return c;
   };
 
   // 1. 出荷未完了のクリニックグループを集計
@@ -262,6 +281,8 @@ export const UnshippedClinicsView: React.FC<UnshippedClinicsViewProps> = ({
       if (activeFilter === 'has_overdue' && !g.hasOverdue) return false;
       if (activeFilter === 'severe' && g.severityRank !== 'S') return false;
       if (activeFilter === 'has_unordered' && !g.hasUnordered) return false;
+      // 一部出荷あり：出荷済みの明細と未出荷の明細が混ざっている伝票がある（旧「一部未出荷・残あり伝票」）
+      if (activeFilter === 'partial' && !hasPartialOrder(g)) return false;
       if (activeFilter === 'waiting_arrival' && (g.hasUnordered || g.waitingArrivalCount === 0)) return false;
 
       // 担当営業判定
@@ -664,6 +685,18 @@ ${linesDetail}
               <span>入荷待ちのみ</span>
               <span className="font-mono text-[10px]">({stats.waitingOnlyClinicsCount})</span>
             </button>
+
+            <button
+              onClick={() => setActiveFilter('partial')}
+              className={`px-3 py-1.5 rounded-xl font-bold transition shrink-0 cursor-pointer flex items-center gap-1.5 ${
+                activeFilter === 'partial'
+                  ? 'bg-violet-600 text-white shadow-xs'
+                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+              }`}
+            >
+              <span>一部出荷あり</span>
+              <span className="font-mono text-[10px]">({clinicGroups.filter((g) => hasPartialOrder(g)).length})</span>
+            </button>
           </div>
 
           {/* Sales Rep Selector */}
@@ -770,9 +803,29 @@ ${linesDetail}
                         )}
 
                         <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-slate-100 text-slate-700">
-                          未出荷 {clinic.totalOrdersCount}伝票 / {clinic.totalUnshippedLinesCount}品目 ({clinic.totalUnshippedQty}点)
+                          未出荷 {clinic.totalOrdersCount}件（{clinic.totalUnshippedLinesCount}明細・{clinic.totalUnshippedQty}点）
                         </span>
                       </div>
+
+                      {/* 未出荷明細の進み具合：未発注 → 入荷待ち → 一部出荷 */}
+                      {(() => {
+                        const c = stageCounts(clinic);
+                        const total = c.unordered + c.waiting + c.partial || 1;
+                        return (
+                          <div className="w-full max-w-md">
+                            <div className="flex h-2 rounded-full overflow-hidden bg-slate-100">
+                              <div className="bg-rose-500" style={{ width: `${(c.unordered / total) * 100}%` }} />
+                              <div className="bg-blue-500" style={{ width: `${(c.waiting / total) * 100}%` }} />
+                              <div className="bg-violet-500" style={{ width: `${(c.partial / total) * 100}%` }} />
+                            </div>
+                            <div className="flex gap-3 text-[10px] text-slate-500 mt-1">
+                              <span><span className="inline-block w-2 h-2 rounded-full bg-rose-500 mr-1" />未発注 {c.unordered}</span>
+                              <span><span className="inline-block w-2 h-2 rounded-full bg-blue-500 mr-1" />入荷待ち {c.waiting}</span>
+                              <span><span className="inline-block w-2 h-2 rounded-full bg-violet-500 mr-1" />一部出荷 {c.partial}</span>
+                            </div>
+                          </div>
+                        );
+                      })()}
 
                       <div className="flex items-center gap-4 text-xs text-slate-500 flex-wrap">
                         <span className="flex items-center gap-1">

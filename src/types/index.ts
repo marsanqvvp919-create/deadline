@@ -21,6 +21,10 @@ export interface OrderLine {
   shippedDate: string | null;  // YYYY-MM-DD
   rawShippedDate?: string | null; // 楽楽販売の明細「出荷日」そのまま（出荷番号の有無で補正しない）
   warehouseShippedDate?: string | null; // 出荷管理の「倉庫出荷日」（倉庫から出た日。あれば出荷日より優先）
+  promisedDate?: string | null;     // 楽楽販売「お約束納期」
+  deliveryRisk?: string;            // 楽楽販売「納期危険」
+  deliveryCompliance?: string;      // 楽楽販売「納期遵守」
+  rakurakuMissedOrder?: string;     // 楽楽販売「発注漏れ」
   shippedQty: number;
   remainingQty: number;
   trackingNo: string;

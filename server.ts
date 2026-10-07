@@ -62,6 +62,11 @@ const FIELD_MAP: Record<string, string[]> = {
   latestDate: ['110016', '最長納品予定日', 'latestDate'],
   shippedDate: ['110017', '出荷日', 'shippedDate'],
   trackingNo: ['110071', '出荷番号', '送り状番号', 'trackingNo'],
+  // 楽楽販売側で管理している納期の項目（明細）
+  promisedDate: ['お約束納期'],
+  deliveryRisk: ['納期危険'],
+  deliveryCompliance: ['納期遵守'],
+  rakurakuMissedOrder: ['発注漏れ'],
 };
 
 // 精算の行。納期超過には数えない
@@ -822,6 +827,10 @@ function parseOrdersFromCsv(csvText: string): any[] | null {
       poDate,
       shippedDate: finalShippedDate,
       rawShippedDate: shippedDate,
+      promisedDate: getVal(row, 'promisedDate') || null,
+      deliveryRisk: getVal(row, 'deliveryRisk') || '',
+      deliveryCompliance: getVal(row, 'deliveryCompliance') || '',
+      rakurakuMissedOrder: getVal(row, 'rakurakuMissedOrder') || '',
       shippedQty,
       remainingQty,
       trackingNo: finalTrackingNo,

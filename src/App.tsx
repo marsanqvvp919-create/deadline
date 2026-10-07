@@ -28,7 +28,6 @@ import { RepRankingView } from './components/RepRankingView';
 import { OverdueManagementView } from './components/OverdueManagementView';
 import { ProcurementView } from './components/ProcurementView';
 import { UnshippedClinicsView } from './components/UnshippedClinicsView';
-import { PartialShipmentView } from './components/PartialShipmentView';
 import { ProductMasterView } from './components/ProductMasterView';
 import { ClinicMasterView } from './components/ClinicMasterView';
 import { InventoryManagementView } from './components/InventoryManagementView';
@@ -629,14 +628,6 @@ export default function App() {
       badgeColor: 'bg-indigo-600 text-white font-bold',
     },
     {
-      id: 'partial_shipment' as ViewTab,
-      group: 'progress',
-      label: '一部未出荷・残あり伝票',
-      icon: Layers,
-      badge: partialShipmentCount > 0 ? `${partialShipmentCount}` : null,
-      badgeColor: 'bg-indigo-600 text-white font-bold',
-    },
-    {
       id: 'overdue' as ViewTab,
       group: 'today',
       label: '納期超過一覧',
@@ -967,12 +958,16 @@ export default function App() {
             />
           )}
 
+          {/* 旧「一部未出荷・残あり伝票」は、未出荷クリニックの「一部出荷あり」で表示する */}
           {activeTab === 'partial_shipment' && (
-            <PartialShipmentView
+            <UnshippedClinicsView
+              key="partial"
               orders={filteredOrders}
               searchQuery={searchQuery}
-              onSelectOrder={handleOpenDetail}
+              onSelectOrderLine={handleOpenDetail}
               onOpenClinicStatus={handleOpenClinicStatus}
+              onNavigateToTab={setActiveTab}
+              initialFilter="partial"
             />
           )}
 
