@@ -127,15 +127,33 @@ export const ArrivalTrackingView: React.FC<{ orders: Order[]; shipments: Shipmen
   const { rakurakuBaseUrl } = getConfiguredUrls();
 
   // 画面を開いたら、サーバーが自動取得した最新状況を読み込む（配送会社には問い合わせない）
+  // 開いたまま置いておいても新しい結果が出るよう、5分ごとと、画面に戻ってきたときにも読み直す
   useEffect(() => {
-    fetchSavedCarrierStatuses().then((snap) => {
-      if (!snap) return;
-      const map: Record<string, CarrierStatus> = {};
-      snap.statuses.forEach((r) => (map[r.trackingNo] = r));
-      setCarrierStatus((prev) => ({ ...map, ...prev }));
-      setDhlInfo(snap.dhl);
-      setFedexInfo(snap.fedex || null);
-    });
+    const load = () =>
+      fetchSavedCarrierStatuses().then((snap) => {
+        if (!snap) return;
+        const map: Record<string, CarrierStatus> = {};
+        snap.statuses.forEach((r) => (map[r.trackingNo] = r));
+        // 取得日時の新しいほうを使う
+        setCarrierStatus((prev) => {
+          const next = { ...prev };
+          Object.values(map).forEach((r) => {
+            const old = next[r.trackingNo];
+            if (!old || new Date(r.fetchedAt) >= new Date(old.fetchedAt)) next[r.trackingNo] = r;
+          });
+          return next;
+        });
+        setDhlInfo(snap.dhl);
+        setFedexInfo(snap.fedex || null);
+      });
+    load();
+    const timer = setInterval(load, 5 * 60 * 1000);
+    const onVisible = () => document.visibilityState === 'visible' && load();
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, []);
 
   const clinicById = useMemo(() => {
