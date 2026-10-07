@@ -76,7 +76,7 @@ export const DeliveryDashboardView: React.FC<DeliveryDashboardViewProps> = ({
   const completedThisMonth = useMemo(() => {
     return allLines.filter((l) => {
       if (l.stage !== '出荷完了' || !l.shippedDate) return false;
-      return l.shippedDate.startsWith(thisYearMonth);
+      return l.shippedDate.replace(/\//g, '-').startsWith(thisYearMonth);
     });
   }, [allLines, thisYearMonth]);
 

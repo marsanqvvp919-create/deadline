@@ -162,14 +162,43 @@ function seriesKey(clinicName: string): string {
   return (n.split(/\s+/)[0] || n).toLowerCase();
 }
 
+/** 追跡番号は照合できたが確認が必要な行 */
+export interface MatchedIssue extends SheetShipmentRow {
+  issue: 'registered_elsewhere' | 'ship_date_mismatch';
+  shipments: ShipmentLike[];
+  rakurakuShipDate?: string;
+}
+
+function formatYmd(d: Date): string {
+  return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
+}
+
 export function findUnmatched(
   sheetRows: SheetShipmentRow[],
   shipments: ShipmentLike[],
   clinics: ClinicLike[],
   today: Date = new Date()
-): { rows: UnmatchedRow[]; targetCount: number; matchedCount: number; noTrackingCount: number } {
-  const knownTracking = new Set<string>();
-  shipments.forEach((s) => trackingDigits(s.trackingNo || '').forEach((d) => knownTracking.add(d)));
+): {
+  rows: UnmatchedRow[];
+  issues: MatchedIssue[];
+  targetCount: number;
+  matchedCount: number;
+  noTrackingCount: number;
+} {
+  const shipmentsByTracking = new Map<string, ShipmentLike[]>();
+  shipments.forEach((s) =>
+    trackingDigits(s.trackingNo || '').forEach((d) => {
+      if (!shipmentsByTracking.has(d)) shipmentsByTracking.set(d, []);
+      shipmentsByTracking.get(d)!.push(s);
+    })
+  );
+  const issues: MatchedIssue[] = [];
+
+  // シートのクリニック名から、顧客マスタ（顧客名・英語表記）で確認できる名前の一覧
+  const resolveClinicNames = (sheetName: string) =>
+    clinics
+      .filter((c) => namesMatch(sheetName, c.clinicName) || (c.clinicNameEn && namesMatch(sheetName, c.clinicNameEn)))
+      .map((c) => c.clinicName);
 
   const shipmentsByInvoice = new Map<string, ShipmentLike[]>();
   shipments.forEach((s) => {
@@ -190,8 +219,23 @@ export function findUnmatched(
       noTrackingCount++;
       continue;
     }
-    if (digits.some((d) => knownTracking.has(d))) {
+    const hits = Array.from(new Set(digits.flatMap((d) => shipmentsByTracking.get(d) || [])));
+    if (hits.length > 0) {
       matchedCount++;
+      // 別のクリニックの受注に登録済み：シートのクリニック名を顧客マスタで確認でき、どの出荷とも一致しない場合
+      const resolved = resolveClinicNames(row.clinicName);
+      const names = [row.clinicName, ...resolved];
+      const sameClinic = hits.some((s) => names.some((n) => namesMatch(n, s.customerName || '')));
+      if (!sameClinic && resolved.length > 0) {
+        issues.push({ ...row, issue: 'registered_elsewhere', shipments: hits });
+        continue;
+      }
+      // 出荷日のずれ：シートの出荷日と楽楽販売の出荷日が違う
+      const sheetDate = parseDate(row.shipDate);
+      const rakurakuDates = hits.map((s) => parseDate(s.shippedDate || '')).filter((d): d is Date => !!d);
+      if (sheetDate && rakurakuDates.length > 0 && rakurakuDates.every((d) => daysBetween(d, sheetDate) !== 0)) {
+        issues.push({ ...row, issue: 'ship_date_mismatch', shipments: hits, rakurakuShipDate: formatYmd(rakurakuDates[0]) });
+      }
       continue;
     }
 
@@ -249,5 +293,5 @@ export function findUnmatched(
   });
 
   unmatched.sort((a, b) => (parseDate(b.shipDate)?.getTime() || 0) - (parseDate(a.shipDate)?.getTime() || 0));
-  return { rows: unmatched, targetCount: targets.length, matchedCount, noTrackingCount };
+  return { rows: unmatched, issues, targetCount: targets.length, matchedCount, noTrackingCount };
 }

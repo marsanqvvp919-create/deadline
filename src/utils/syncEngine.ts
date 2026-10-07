@@ -221,7 +221,12 @@ export function syncAndDiffOrders(newOrders: Order[]): {
   const finalInvoicesList = Object.values(invoicesMap);
 
   try {
-    localStorage.setItem(STORAGE_STORED_ORDERS_KEY, JSON.stringify(updatedOrders));
+    // 変更履歴の比較に使う項目だけを保存する（全項目だと約7MBになり、保存に時間がかかる）
+    const compact: Record<string, Partial<Order>> = {};
+    Object.entries(updatedOrders).forEach(([k, o]) => {
+      compact[k] = { status: o.status, salesRep: o.salesRep, totalAmount: o.totalAmount, billingDate: o.billingDate };
+    });
+    localStorage.setItem(STORAGE_STORED_ORDERS_KEY, JSON.stringify(compact));
     localStorage.setItem(STORAGE_CHANGE_HISTORY_KEY, JSON.stringify(finalHistory));
     localStorage.setItem(STORAGE_INVOICES_KEY, JSON.stringify(invoicesMap));
     localStorage.setItem(STORAGE_SYNC_STATE_KEY, JSON.stringify({ lastSyncedAt: nowIso, count: finalOrdersList.length }));

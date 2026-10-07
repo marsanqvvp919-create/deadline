@@ -121,9 +121,11 @@ export function getCachedDeliveryData(): DeliveryData | null {
   }
 }
 
-export function saveCachedDeliveryData(data: DeliveryData) {
+// 以前は注文データ全体（約7MB）をブラウザに保存していたが、保存に時間がかかり容量も超えるため保存しない。
+// 取得データはサーバー側（Cloud Storage）で保持している。古い保存分はここで消す。
+export function saveCachedDeliveryData(_data: DeliveryData) {
   try {
-    localStorage.setItem(STORAGE_CACHE_KEY, JSON.stringify(data));
+    localStorage.removeItem(STORAGE_CACHE_KEY);
   } catch {}
 }
 
@@ -429,24 +431,7 @@ export function normalizeDeliveryData(data: DeliveryData): DeliveryData {
         order.paymentStatus = '入金待ち';
       }
     }
-    if (!order.paymentMethod) {
-      order.paymentMethod = order.paymentStatus === '売掛・締日決済' ? '月末締め翌月末払い' : '銀行振込 (事前入金)';
-    }
-
-    if (!order.paymentDueDate && order.orderDate) {
-      const oD = new Date(order.orderDate + 'T00:00:00+09:00');
-      if (!isNaN(oD.getTime())) {
-        if (order.paymentStatus === '売掛・締日決済') {
-          // 翌月末日
-          const nextMonthLast = new Date(oD.getFullYear(), oD.getMonth() + 2, 0);
-          order.paymentDueDate = nextMonthLast.toISOString().slice(0, 10);
-        } else {
-          // 受注日 + 7日
-          const dueD = new Date(oD.getTime() + 7 * 24 * 60 * 60 * 1000);
-          order.paymentDueDate = dueD.toISOString().slice(0, 10);
-        }
-      }
-    }
+    // 支払方法・入金予定日は楽楽販売の値だけを使う（以前はここで推定値を入れていた）
 
     if (!Array.isArray(order.lines)) return;
 

@@ -39,7 +39,15 @@ function lineShippedDate(line: OrderLine): string | null {
 /**
  * 明細が納期超過しているかを判定（単一の真実）
  */
+// 精算の行（割引・不足分・前回分差額）は納期超過に数えない
+const SETTLEMENT_LINE_KEYWORDS = ['割引', '不足分', '前回分差額'];
+
+export function isSettlementLine(line: OrderLine): boolean {
+  return SETTLEMENT_LINE_KEYWORDS.some((kw) => (line.productName || '').includes(kw));
+}
+
 export function isLineDelayed(line: OrderLine, order?: Order, referenceDate?: Date): boolean {
+  if (isSettlementLine(line)) return false;
   if (order && isOverdueExcludedStatus(order.status)) return false;
   if (lineShippedDate(line)) return false;
   return isBeforeToday(line.latestDate, referenceDate);
@@ -89,10 +97,14 @@ export function getOverdueBreakdown(orders: Order[], referenceDate?: Date): Over
   return result;
 }
 
+/** 納期間近の日数。楽楽販売の「納期：②注意」（5日以内）に合わせる */
+export const APPROACHING_DAYS = 5;
+
 /**
- * 納期間近（10日以内）の明細判定（納期超過と合算しない別指標）
+ * 納期間近（5日以内）の明細判定（納期超過と合算しない別指標）
  */
-export function isLineApproaching(line: OrderLine, order?: Order, referenceDate?: Date, days: number = 10): boolean {
+export function isLineApproaching(line: OrderLine, order?: Order, referenceDate?: Date, days: number = APPROACHING_DAYS): boolean {
+  if (isSettlementLine(line)) return false;
   if (isShippingOrFee(line.productName, line.productId)) return false;
   if (order && isOverdueExcludedStatus(order.status)) return false;
   if (lineShippedDate(line)) return false;
@@ -106,15 +118,15 @@ export function isLineApproaching(line: OrderLine, order?: Order, referenceDate?
   const refStartOfDay = new Date(ref.getFullYear(), ref.getMonth(), ref.getDate()).getTime();
   const targetStartOfDay = new Date(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate()).getTime();
 
-  // 今日以降 かつ 10日以内（超過しているものは含めない）
+  // 今日以降 かつ 5日以内（超過しているものは含めない）
   const maxApproachingMs = refStartOfDay + days * 24 * 60 * 60 * 1000;
   return targetStartOfDay >= refStartOfDay && targetStartOfDay <= maxApproachingMs;
 }
 
 /**
- * 伝票が納期間近（10日以内）かを判定（納期超過伝票は除外）
+ * 伝票が納期間近（5日以内）かを判定（納期超過伝票は除外）
  */
-export function isOrderApproaching(order: Order, referenceDate?: Date, days: number = 10): boolean {
+export function isOrderApproaching(order: Order, referenceDate?: Date, days: number = APPROACHING_DAYS): boolean {
   if (isOverdueExcludedStatus(order.status)) return false;
   // 納期超過伝票とは合算しない
   if (isOrderDelayed(order, referenceDate)) return false;
@@ -174,9 +186,9 @@ export function getDelayCounts(orders: Order[], referenceDate?: Date): DelayCoun
 }
 
 /**
- * 納期間近（10日以内）の集計（超過とは合算しない）
+ * 納期間近（5日以内）の集計（超過とは合算しない）
  */
-export function getApproachingCounts(orders: Order[], referenceDate?: Date, days: number = 10): DelayCounts {
+export function getApproachingCounts(orders: Order[], referenceDate?: Date, days: number = APPROACHING_DAYS): DelayCounts {
   let ordersCount = 0;
   let linesCount = 0;
 

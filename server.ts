@@ -1,4 +1,5 @@
 import express from 'express';
+import compression from 'compression';
 import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import fs from 'fs';
@@ -23,6 +24,8 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = Number(process.env.PORT) || 8080;
 
+// 応答を圧縮する（注文・出荷データは約10MBあり、圧縮しないと読み込みに時間がかかる）
+app.use(compression());
 app.use(express.json());
 
 // 楽楽販売 項目マッピング定義（dbSchemaId: 101248 ご注文管理）
@@ -60,6 +63,9 @@ const FIELD_MAP: Record<string, string[]> = {
   shippedDate: ['110017', '出荷日', 'shippedDate'],
   trackingNo: ['110071', '出荷番号', '送り状番号', 'trackingNo'],
 };
+
+// 精算の行。納期超過には数えない
+const SETTLEMENT_LINE_KEYWORDS = ['割引', '不足分', '前回分差額'];
 
 // 送料・代行手数料等の除外判定（商品としてカウントせず取引明細にも出さない）
 function isShippingOrFee(productName?: string, productId?: string): boolean {
@@ -700,10 +706,14 @@ function parseOrdersFromCsv(csvText: string): any[] | null {
     }
 
     const order = ordersMap.get(orderId)!;
-    order.overdueBasis.push({
-      latestDate: getVal(row, 'latestDate') || null,
-      shippedDate: getVal(row, 'shippedDate') || null,
-    });
+    // 精算の行（割引・不足分・前回分差額）は納期超過の判定に含めない
+    const rowProductName = getVal(row, 'productName');
+    if (!SETTLEMENT_LINE_KEYWORDS.some((kw) => rowProductName.includes(kw))) {
+      order.overdueBasis.push({
+        latestDate: getVal(row, 'latestDate') || null,
+        shippedDate: getVal(row, 'shippedDate') || null,
+      });
+    }
     const productId = getVal(row, 'productId') || `PRD-${order.lines.length + 1}`;
     const productName = getVal(row, 'productName') || '商品';
 
@@ -839,8 +849,8 @@ function finalizeDeliveryData(orders: any[]): any {
                 daysOver: diffDays,
                 message: `最長納品予定日(${line.latestDate})を${diffDays}日超過していますが、未出荷です。`,
               });
-            } else if (diffDays >= -10 && diffDays <= 0) {
-              // A3: 納期間近・未出荷 (あと10日以内)
+            } else if (diffDays >= -5 && diffDays <= 0) {
+              // A3: 納期間近・未出荷 (あと5日以内。楽楽販売「②注意」に合わせる)
               alerts.push({
                 ruleId: 'A3',
                 type: '間近',
@@ -936,6 +946,17 @@ async function getOutboundIp(): Promise<string> {
   if (cachedOutboundIp && now - lastIpFetchTime < 60000) {
     return cachedOutboundIp;
   }
+  // 固定IPなので、一度分かっていれば応答を待たせずに返し、裏で確認し直す
+  if (cachedOutboundIp) {
+    lastIpFetchTime = now;
+    refreshOutboundIp().catch(() => {});
+    return cachedOutboundIp;
+  }
+  return refreshOutboundIp();
+}
+
+async function refreshOutboundIp(): Promise<string> {
+  const now = Date.now();
   try {
     const res = await fetch('https://api.ipify.org?format=json', { signal: AbortSignal.timeout(3000) });
     const data = await res.json();
@@ -947,7 +968,7 @@ async function getOutboundIp(): Promise<string> {
   } catch (e) {
     console.warn('[IP Detection] Failed to fetch public IP:', e);
   }
-  return cachedOutboundIp || '34.34.226.81';
+  return cachedOutboundIp || '';
 }
 
 // 楽楽販売 API CSVエクスポートヘルパー（最大200件上限を安全に処理、複数ページ取得対応）
@@ -1059,6 +1080,8 @@ interface RakurakuServerStore {
   sourceHeaders: Record<string, string[]>;
   lastFullSyncTime: number | null;
   masterStatus: Record<string, { ok: boolean; count: number; error?: string; at: string }>;
+  // 日ごとの納期超過伝票数（遅延の推移グラフ用。日本時間の日付ごとに最新の値）
+  delayHistory: Record<string, number>;
   lastError: {
     type: 'rate_limit' | 'ip_blocked' | 'auth_error' | 'network_error';
     message: string;
@@ -1084,8 +1107,45 @@ const serverRakurakuStore: RakurakuServerStore = {
   sourceHeaders: {},
   lastFullSyncTime: null,
   masterStatus: {},
+  delayHistory: {},
   lastError: null,
 };
+
+// 楽楽販売「納期：①超過」と同じ条件で伝票数を数える（画面側 delayCalculation と同じ判定）
+function countOverdueOrders(orders: any[]): number {
+  const jstToday = new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const excluded = ['見積作成中', '見積済み', '出荷済み'];
+  return orders.filter((o) => {
+    if (excluded.includes((o.status || '').trim())) return false;
+    return (o.overdueBasis || []).some((b: any) => {
+      if (b.shippedDate || !b.latestDate) return false;
+      const d = String(b.latestDate).replace(/\//g, '-').slice(0, 10);
+      return /^\d{4}-\d{2}-\d{2}$/.test(d) && d < jstToday;
+    });
+  }).length;
+}
+
+function recordDelayHistory() {
+  const orders = serverRakurakuStore.orders?.orders;
+  if (!orders) return;
+  const jstToday = new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  serverRakurakuStore.delayHistory[jstToday] = countOverdueOrders(orders);
+}
+
+// 週ごと（各週の最後に記録した日の値）に直して、直近12週を返す
+function weeklyDelayHistory(): { weekEnd: string; delayed: number }[] {
+  const byWeek = new Map<string, { date: string; delayed: number }>();
+  Object.entries(serverRakurakuStore.delayHistory)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .forEach(([date, delayed]) => {
+      const d = new Date(date + 'T00:00:00Z');
+      const sunday = new Date(d.getTime() + (6 - d.getUTCDay()) * 86400000).toISOString().slice(0, 10);
+      byWeek.set(sunday, { date, delayed });
+    });
+  return Array.from(byWeek.values())
+    .slice(-12)
+    .map((v) => ({ weekEnd: v.date, delayed: v.delayed }));
+}
 
 function recordMasterStatus(schemaId: string, count: number, err?: any) {
   serverRakurakuStore.masterStatus[schemaId] = {
@@ -1168,6 +1228,7 @@ async function saveStoreSnapshot(): Promise<void> {
       lastSuccessTime: serverRakurakuStore.lastSuccessTime,
       lastMastersTime: serverRakurakuStore.lastMastersTime,
       lastFullSyncTime: serverRakurakuStore.lastFullSyncTime,
+      delayHistory: serverRakurakuStore.delayHistory,
     };
     await new Storage().bucket(CACHE_BUCKET).file(CACHE_OBJECT).save(JSON.stringify(snapshot), {
       contentType: 'application/json',
@@ -1191,6 +1252,7 @@ async function loadStoreSnapshot(): Promise<boolean> {
     serverRakurakuStore.lastSuccessTime = snap.lastSuccessTime ?? null;
     serverRakurakuStore.lastMastersTime = snap.lastMastersTime ?? null;
     serverRakurakuStore.lastFullSyncTime = snap.lastFullSyncTime ?? null;
+    serverRakurakuStore.delayHistory = snap.delayHistory ?? {};
     // 次回の自動同期は前回成功時刻から数えて間隔があいたときに行う
     serverRakurakuStore.lastAttemptTime = snap.lastSuccessTime ?? null;
     console.log(`[Rakuraku Cache] Restored snapshot saved at ${snap.savedAt}`);
@@ -1365,6 +1427,7 @@ async function syncAllRakurakuData(isManual = false): Promise<boolean> {
     serverRakurakuStore.rateLimitUntil = null;
     serverRakurakuStore.rateLimitBackoffMs = 5 * 60 * 1000; // バックオフを初期値にリセット
     console.log(`[Rakuraku Sync Complete] Success at ${serverRakurakuStore.lastSuccessTime}`);
+    recordDelayHistory();
     await saveStoreSnapshot();
     return true;
   } catch (err: any) {
@@ -1422,7 +1485,9 @@ app.get('/api/rakuraku/all-data', async (_req, res) => {
 
   res.json({
     success: true,
-    orders: serverRakurakuStore.orders,
+    orders: serverRakurakuStore.orders
+      ? { ...serverRakurakuStore.orders, weeklyDelayHistory: weeklyDelayHistory() }
+      : null,
     shipments: serverRakurakuStore.shipments,
     suppliers: serverRakurakuStore.suppliers,
     products: serverRakurakuStore.products,

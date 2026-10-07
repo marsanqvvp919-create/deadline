@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Order, AlertItem, WeeklyHistoryItem, ViewTab } from '../types';
 import { formatDate, formatDateTime, isShippingOrFee, getElapsedTimeInfo, ElapsedTimeInfo } from '../utils';
 import { calculateComprehensiveSalesMetrics, isEligibleForOverdue } from '../utils/salesCalculations';
-import { isOrderDelayed, isLineDelayed, getLineDelayDays, getOverdueBreakdown, RAKURAKU_OVERDUE_LIST_URL } from '../utils/delayCalculation';
+import { isOrderDelayed, isLineDelayed, getLineDelayDays, getOverdueBreakdown, getApproachingCounts, APPROACHING_DAYS, RAKURAKU_OVERDUE_LIST_URL } from '../utils/delayCalculation';
 import {
   AlertCircle,
   Clock,
@@ -70,6 +70,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     return d;
   }, []);
   const thisYearMonth = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+  // 楽楽販売の日付は 2026/10/05 形式なので、比較の前に 2026-10-05 にそろえる
+  const isoDate = (d?: string | null) => (d || '').replace(/\//g, '-').slice(0, 10);
 
   // 売上・請求残・見積メトリクス（見積期日1週間超過は除外）
   const salesMetrics = useMemo(() => {
@@ -106,15 +108,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     });
   }, [allLines, orders]);
 
-  // 10日以内に期限の明細（今日 <= latestDate <= 10日後）
-  const tenDaysLater = new Date(today.getTime() + 10 * 24 * 60 * 60 * 1000);
-  const urgentLines = incompleteLines.filter((l) => {
-    if (!l.latestDate) return false;
-    const target = new Date(l.latestDate);
-    return target.getTime() >= today.getTime() && target.getTime() <= tenDaysLater.getTime();
-  });
+  // 納期間近（5日以内）：納期超過一覧のタブと同じ判定・同じ数え方（伝票数と明細数）
+  const approachingCounts = useMemo(() => getApproachingCounts(orders), [orders]);
+  const tenDaysLater = new Date(today.getTime() + APPROACHING_DAYS * 24 * 60 * 60 * 1000);
 
-  // 同日+1日 〜 10日後までの納品予定クリニック数（ユニーククリニック件数）
+  // 同日+1日 〜 5日後までの納品予定クリニック数（ユニーククリニック件数）
   const upcomingClinicsCount = useMemo(() => {
     const set = new Set<string>();
     incompleteLines.forEach((l) => {
@@ -131,6 +129,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const leakageAlertsCount = alerts.filter((a) => a.type === '漏れ').length;
   const missedOrderLinesCount = alerts.filter((a) => a.ruleId === 'B1').length;
   const missingDueDateLinesCount = alerts.filter((a) => a.ruleId === 'B2').length;
+  // 朝会では伝票単位で見るため、伝票数を主に出す
+  const leakageOrdersCount = new Set(alerts.filter((a) => a.type === '漏れ').map((a) => a.orderId)).size;
+  const missedOrdersCount = new Set(alerts.filter((a) => a.ruleId === 'B1').map((a) => a.orderId)).size;
+  const missingDueDateOrdersCount = new Set(alerts.filter((a) => a.ruleId === 'B2').map((a) => a.orderId)).size;
 
   // 入金済みの未発注品目 (送料・手数料は除外)
   const paidUnorderedLines = incompleteLines.filter((l) => {
@@ -178,18 +180,19 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   // （今月出荷完了した明細のうち shippedDate <= latestDate の割合）
   const completedThisMonth = allLines.filter((l) => {
     if (l.stage !== '出荷完了' || !l.shippedDate) return false;
-    return l.shippedDate.startsWith(thisYearMonth);
+    return isoDate(l.shippedDate).startsWith(thisYearMonth);
   });
 
   const onTimeShippedCount = completedThisMonth.filter((l) => {
     if (!l.latestDate || !l.shippedDate) return false;
-    return l.shippedDate <= l.latestDate;
+    return isoDate(l.shippedDate) <= isoDate(l.latestDate);
   }).length;
 
-  const onTimeRate =
+  // 今月の出荷が無ければ「データなし」（カードと表の合計で同じ値を使う）
+  const onTimeRate: number | null =
     completedThisMonth.length > 0
       ? Math.round((onTimeShippedCount / completedThisMonth.length) * 100)
-      : 100;
+      : null;
 
   // 2. 担当営業別の集計
   const salesRepMap = new Map<
@@ -240,9 +243,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
     if (l.stage !== '出荷完了') {
       entry.incomplete++;
-    } else if (l.shippedDate && l.shippedDate.startsWith(thisYearMonth)) {
+    } else if (l.shippedDate && isoDate(l.shippedDate).startsWith(thisYearMonth)) {
       entry.completedThisMonth++;
-      if (l.latestDate && l.shippedDate <= l.latestDate) {
+      if (l.latestDate && isoDate(l.shippedDate) <= isoDate(l.latestDate)) {
         entry.onTimeThisMonth++;
       }
     }
@@ -262,6 +265,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   );
 
   // 3. 仕入先別の集計
+  const UNASSIGNED_SUPPLIER = '仕入先未設定';
   const supplierMap = new Map<
     string,
     {
@@ -274,7 +278,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   >();
 
   incompleteLines.forEach((l) => {
-    const sup = l.supplierName || '未指定';
+    // 仕入先が空の明細（古いデータの仮名「仕入先」を含む）は「仕入先未設定」にまとめ、評価の対象から外す
+    const rawSup = (l.supplierName || '').trim();
+    const sup = !rawSup || rawSup === '仕入先' ? UNASSIGNED_SUPPLIER : rawSup;
     if (!supplierMap.has(sup)) {
       supplierMap.set(sup, {
         supplier: sup,
@@ -297,7 +303,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   });
 
   const supplierSummaryList = Array.from(supplierMap.values()).sort(
-    (a, b) => b.delayedLines - a.delayedLines || b.incomplete - a.incomplete
+    (a, b) =>
+      Number(a.supplier === UNASSIGNED_SUPPLIER) - Number(b.supplier === UNASSIGNED_SUPPLIER) ||
+      b.delayedLines - a.delayedLines ||
+      b.incomplete - a.incomplete
   );
 
   // 4. 週次遅延推移グラフ用のSVG計算（過去12週）
@@ -477,7 +486,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
         </div>
 
-        {/* 3. 納期間近（10日以内） */}
+        {/* 3. 納期間近（5日以内） */}
         <div
           onClick={() => onNavigateToTab('unshipped_clinics')}
           className="bg-white p-4 rounded-xl border-2 border-amber-200 hover:border-amber-400 bg-amber-50/20 shadow-xs hover:shadow-md active:translate-y-0.5 active:scale-[0.99] transition-all cursor-pointer group flex flex-col justify-between"
@@ -488,18 +497,18 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 <div className="p-1 rounded-md bg-amber-100 text-amber-600 group-hover:bg-amber-600 group-hover:text-white transition">
                   <Clock className="w-3.5 h-3.5" />
                 </div>
-                <span className="text-xs font-bold text-amber-900">納期間近（10日以内）</span>
+                <span className="text-xs font-bold text-amber-900">納期間近（{APPROACHING_DAYS}日以内）</span>
               </div>
               <FreshnessBadge info={freshness} />
             </div>
             <div className="mt-1 flex items-baseline gap-1.5">
               <span className="text-2xl font-extrabold font-mono text-amber-600">
-                {urgentLines.length}
+                {approachingCounts.ordersCount}
               </span>
-              <span className="text-xs text-amber-600 font-bold">品目</span>
+              <span className="text-xs text-amber-600 font-bold">件（{approachingCounts.linesCount}明細）</span>
             </div>
-            <span className="text-[11px] text-slate-400 mt-1 block leading-tight">
-              10日以内に納品予定の未出荷品
+            <span className="text-[11px] text-slate-500 mt-1 block leading-tight">
+              最長納品予定日まで{APPROACHING_DAYS}日以内で、出荷日が空欄の明細がある伝票（楽楽販売「②注意」と同じ）
             </span>
           </div>
           <div className="mt-3 pt-2.5 border-t border-amber-100 flex items-center justify-between">
@@ -530,13 +539,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
             <div className="mt-1 flex items-baseline gap-1.5">
               <span className="text-2xl font-extrabold font-mono text-orange-600">
-                {leakageAlertsCount}
+                {leakageOrdersCount}
               </span>
-              <span className="text-xs text-orange-600 font-bold">明細</span>
+              <span className="text-xs text-orange-600 font-bold">件（{leakageAlertsCount}明細）</span>
             </div>
             <div className="mt-1 flex flex-wrap gap-1 text-[10px] font-bold text-orange-800">
-              <span className="px-1.5 py-0.5 rounded bg-orange-100">発注漏れ {missedOrderLinesCount}</span>
-              <span className="px-1.5 py-0.5 rounded bg-orange-100">納期未設定 {missingDueDateLinesCount}</span>
+              <span className="px-1.5 py-0.5 rounded bg-orange-100">
+                発注漏れ {missedOrdersCount}件（{missedOrderLinesCount}明細）
+              </span>
+              <span className="px-1.5 py-0.5 rounded bg-orange-100">
+                納期未設定 {missingDueDateOrdersCount}件（{missingDueDateLinesCount}明細）
+              </span>
             </div>
             <span className="text-[11px] text-slate-500 mt-1 block leading-tight">
               受注日から3日以上たっても未発注の明細と、納品予定日が未入力の明細（見積・出荷済みの伝票は除く）
@@ -890,14 +903,19 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <div className="flex items-center gap-2">
                 <h2 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
                   <TrendingDown className="w-4 h-4 text-blue-600" />
-                  遅延明細数の推移（過去12週）
+                  納期超過の推移（過去12週）
                 </h2>
                 <FreshnessBadge info={freshness} />
               </div>
               <span className="text-[11px] text-slate-400">各週末時点</span>
             </div>
 
-            {/* SVG Trend Line Chart */}
+            {/* SVG Trend Line Chart（履歴が2週分たまるまでは表示しない） */}
+            {historyData.length < 2 ? (
+              <div className="w-full bg-slate-50 rounded-lg p-6 border border-dashed border-slate-300 text-center text-xs text-slate-500">
+                履歴を記録中です（{historyData[0]?.weekEnd || '本日'}から）。2週分たまるとグラフを表示します。
+              </div>
+            ) : (
             <div className="w-full overflow-hidden bg-slate-50 rounded-lg p-2 border border-slate-200">
               <svg
                 viewBox={`0 0 ${chartWidth} ${chartHeight}`}
@@ -991,10 +1009,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 ))}
               </svg>
             </div>
+            )}
           </div>
 
           <div className="mt-3 pt-3 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
-            <span>今週の遅延数: <strong>{delayedLines.length}件</strong></span>
+            <span>現在の納期超過: <strong>{delayedOrders.length}件（{delayedLines.length}明細）</strong></span>
           </div>
         </div>
 
@@ -1050,7 +1069,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       {item.delayedLines > 0 ? `${avgDays} 日` : '-'}
                     </td>
                     <td className="py-3 px-4 text-[11px] text-slate-500">
-                      {item.delayedLines >= 3 ? (
+                      {item.supplier === UNASSIGNED_SUPPLIER ? (
+                        <span className="text-slate-500">評価対象外（楽楽販売で仕入先を入力してください）</span>
+                      ) : item.delayedLines >= 3 ? (
                         <span className="text-rose-600 font-semibold">遅延頻発・要注意</span>
                       ) : item.delayedLines > 0 ? (
                         <span className="text-amber-600">一部納品遅れあり</span>

@@ -120,10 +120,32 @@ export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [isDailyDigestOpen, setIsDailyDigestOpen] = useState<boolean>(false);
 
+  // 最終取得成功時刻が古いときの警告（止まったデータを、それと分からないまま表示しない）
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNowTick(Date.now()), 60 * 1000);
+    return () => clearInterval(t);
+  }, []);
+
   // 最終取得成功時刻（要件3）
   const [lastSuccessTime, setLastSuccessTime] = useState<string | null>(() => {
     return localStorage.getItem('nouki_last_success_time') || null;
   });
+  // 平日日中は15分、それ以外は60分ごとに同期するので、その2回分を過ぎたら「止まっている」とみなす
+  const staleInfo = useMemo(() => {
+    if (!lastSuccessTime) return null;
+    const last = new Date(lastSuccessTime).getTime();
+    if (isNaN(last)) return null;
+    const jst = new Date(nowTick + 9 * 60 * 60 * 1000);
+    const businessHours = jst.getUTCDay() >= 1 && jst.getUTCDay() <= 5 && jst.getUTCHours() >= 8 && jst.getUTCHours() < 20;
+    const limitMin = businessHours ? 40 : 130;
+    const minutes = Math.floor((nowTick - last) / 60000);
+    if (minutes < limitMin) return null;
+    return {
+      minutes,
+      time: new Date(last).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
+    };
+  }, [lastSuccessTime, nowTick]);
 
   // エラー帯の非表示管理: 閉じたあとは5分たつか状態が変わったときだけ再表示（要件5）
   const [dismissedErrorRecord, setDismissedErrorRecord] = useState<{ error: string; time: number } | null>(() => {
@@ -901,6 +923,14 @@ export default function App() {
 
         {/* Main View Container */}
         <main className="flex-1 p-4 sm:p-6 max-w-7xl w-full mx-auto">
+          {staleInfo && (
+            <div className="mb-4 px-4 py-2.5 rounded-xl border border-amber-300 bg-amber-50 text-amber-900 text-xs font-bold flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+              <span>
+                楽楽販売のデータが {staleInfo.time} のまま更新されていません（{staleInfo.minutes}分前）。表示中の件数は最新ではありません。
+              </span>
+            </div>
+          )}
           {activeTab === 'dashboard' && (
             <DashboardView
               orders={filteredOrders}

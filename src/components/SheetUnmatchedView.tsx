@@ -31,6 +31,19 @@ interface UnmatchedRow {
   bulkGroupKey: string | null;
 }
 
+interface MatchedIssue {
+  rowNumber: number;
+  origin: string;
+  shipDate: string;
+  courier: string;
+  invoiceNo: string;
+  clinicName: string;
+  trackingNo: string;
+  issue: 'registered_elsewhere' | 'ship_date_mismatch';
+  shipments: Candidate[];
+  rakurakuShipDate?: string;
+}
+
 interface UnmatchedResponse {
   success: boolean;
   pending?: boolean;
@@ -39,6 +52,7 @@ interface UnmatchedResponse {
   rakurakuLastSuccessTime?: string | null;
   clinicsLoaded?: boolean;
   rows?: UnmatchedRow[];
+  issues?: MatchedIssue[];
   targetCount?: number;
   matchedCount?: number;
   noTrackingCount?: number;
@@ -72,6 +86,7 @@ export const SheetUnmatchedView: React.FC<{ onCountChange?: (count: number | nul
   const [data, setData] = useState<UnmatchedResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [kindFilter, setKindFilter] = useState<'all' | UnmatchedRow['kind']>('all');
+  const [view, setView] = useState<'unmatched' | MatchedIssue['issue']>('unmatched');
   const [query, setQuery] = useState('');
   const [copied, setCopied] = useState<string | null>(null);
 
@@ -95,6 +110,9 @@ export const SheetUnmatchedView: React.FC<{ onCountChange?: (count: number | nul
   }, []);
 
   const rows = data?.rows || [];
+  const issues = data?.issues || [];
+  const elsewhereIssues = issues.filter((i) => i.issue === 'registered_elsewhere');
+  const dateIssues = issues.filter((i) => i.issue === 'ship_date_mismatch');
   const counts = useMemo(
     () => ({
       single: rows.filter((r) => r.kind === 'single').length,
@@ -180,6 +198,32 @@ export const SheetUnmatchedView: React.FC<{ onCountChange?: (count: number | nul
             ))}
           </div>
         )}
+
+        {data?.success && (
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <button
+              type="button"
+              onClick={() => setView('unmatched')}
+              className={`text-left px-3 py-2 rounded-xl border text-xs font-bold ${view === 'unmatched' ? 'border-slate-900 bg-slate-50' : 'border-slate-200'}`}
+            >
+              未照合の一覧（{rows.length}件）
+            </button>
+            <button
+              type="button"
+              onClick={() => setView('registered_elsewhere')}
+              className={`text-left px-3 py-2 rounded-xl border text-xs font-bold ${view === 'registered_elsewhere' ? 'border-rose-600 bg-rose-50 text-rose-800' : 'border-slate-200 text-slate-700'}`}
+            >
+              要確認：別の受注に登録済み（{elsewhereIssues.length}件）
+            </button>
+            <button
+              type="button"
+              onClick={() => setView('ship_date_mismatch')}
+              className={`text-left px-3 py-2 rounded-xl border text-xs font-bold ${view === 'ship_date_mismatch' ? 'border-amber-600 bg-amber-50 text-amber-800' : 'border-slate-200 text-slate-700'}`}
+            >
+              要確認：出荷日ずれ（{dateIssues.length}件）
+            </button>
+          </div>
+        )}
       </div>
 
       {loading && !data && (
@@ -201,7 +245,70 @@ export const SheetUnmatchedView: React.FC<{ onCountChange?: (count: number | nul
         </div>
       )}
 
-      {data?.success && rows.length === 0 && (
+      {data?.success && view !== 'unmatched' && (
+        <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-xs">
+          <div className="px-4 py-3 border-b border-slate-100 text-xs text-slate-600">
+            {view === 'registered_elsewhere'
+              ? 'シートの追跡番号が、楽楽販売ですでに別のクリニックの受注の出荷として登録されています。登録先が正しいか確認してください。'
+              : 'シートの出荷日と、楽楽販売に入っている出荷日が違います。入力した日を出荷日にすると遵守率が実際より悪く出るため、出荷日を確認してください。'}
+          </div>
+          {(view === 'registered_elsewhere' ? elsewhereIssues : dateIssues).length === 0 ? (
+            <p className="p-5 text-sm font-bold text-emerald-700">該当する行はありません</p>
+          ) : (
+            <div className="divide-y divide-slate-100">
+              {(view === 'registered_elsewhere' ? elsewhereIssues : dateIssues).map((i) => (
+                <div key={i.rowNumber} className="p-4 flex flex-wrap items-start justify-between gap-3">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span
+                        className={`px-2 py-0.5 rounded-md border text-[11px] font-bold ${
+                          i.issue === 'registered_elsewhere'
+                            ? 'bg-rose-100 text-rose-800 border-rose-200'
+                            : 'bg-amber-100 text-amber-800 border-amber-200'
+                        }`}
+                      >
+                        {i.issue === 'registered_elsewhere'
+                          ? `登録済み：受注${i.shipments.map((sh) => sh.orderId).join('・')}`
+                          : '出荷日ずれ'}
+                      </span>
+                      <span className="font-bold text-sm text-slate-900">{i.clinicName}</span>
+                    </div>
+                    <div className="text-[11px] text-slate-500 flex flex-wrap gap-x-3">
+                      <span>シート出荷日 {i.shipDate || '—'}</span>
+                      {i.issue === 'ship_date_mismatch' && (
+                        <span className="text-amber-700 font-bold">楽楽販売の出荷日 {i.rakurakuShipDate}</span>
+                      )}
+                      <span>出荷元 {i.origin || '—'}</span>
+                      <span>{i.courier}</span>
+                      <span>シート{i.rowNumber}行目</span>
+                    </div>
+                    <div className="font-mono text-xs text-slate-800">追跡番号 {i.trackingNo}</div>
+                  </div>
+                  <div className="space-y-1 text-[11px] text-slate-700">
+                    {i.shipments.map((sh) => (
+                      <div key={sh.shipmentId} className="flex items-center gap-2">
+                        <span className="font-mono font-bold">{sh.shipmentId}</span>
+                        <span>受注 {sh.orderId}</span>
+                        <span>{sh.customerName}</span>
+                        <button
+                          type="button"
+                          onClick={() => copyShipmentId(sh.shipmentId)}
+                          className="px-2 py-0.5 rounded bg-white border border-slate-300 font-bold flex items-center gap-1"
+                        >
+                          <Copy className="w-3 h-3" />
+                          {copied === sh.shipmentId ? 'コピー済み' : '出荷IDをコピー'}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {data?.success && view === 'unmatched' && rows.length === 0 && (
         <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-5 flex items-center gap-3">
           <CheckCircle2 className="w-5 h-5 text-emerald-600" />
           <p className="text-sm font-bold text-emerald-800">
@@ -210,7 +317,7 @@ export const SheetUnmatchedView: React.FC<{ onCountChange?: (count: number | nul
         </div>
       )}
 
-      {data?.success && rows.length > 0 && (
+      {data?.success && view === 'unmatched' && rows.length > 0 && (
         <div className="space-y-3">
           <div className="relative max-w-sm">
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
