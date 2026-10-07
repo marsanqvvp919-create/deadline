@@ -67,6 +67,9 @@ interface OverdueManagementViewProps {
   onRetry?: () => void;
 }
 
+// 納期間近として拾う日数（10日先まで。5日以内は楽楽販売「②注意」と同じ）
+const NEAR_DAYS_WIDE = 10;
+
 export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
   orders,
   alerts,
@@ -79,6 +82,8 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
 }) => {
   // Scope: 'overdue' (納期超過のみ - isLineDelayed統一) | 'approaching' (納期間近（5日以内） - 別指標として分離)
   const [activeScope, setActiveScope] = useUrlState<'overdue' | 'approaching'>('scope', 'overdue');
+  // 納期間近は10日先まで拾い、「5日以内」「10日以内」で絞り込む
+  const [nearWindow, setNearWindow] = useUrlState<'10' | '5'>('near', '10');
 
   // View mode: 'orders' (伝票・明細別) | 'clinics' (取引先別)
   const [viewMode, setViewMode] = useUrlState<'orders' | 'clinics'>('view', 'orders');
@@ -158,12 +163,13 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
   };
 
   // 1. Calculate all overdue orders (isLineDelayed統一) and approaching orders (5日以内分離)
-  const { currentOrders, currentClinics, delayCounts, approachingCounts, kpis } = useMemo(() => {
+  const { currentOrders, currentClinics, delayCounts, approachingCounts, approaching5Counts, kpis } = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
     const delayCounts = getDelayCounts(orders);
-    const approachingCounts = getApproachingCounts(orders);
+    const approachingCounts = getApproachingCounts(orders, undefined, NEAR_DAYS_WIDE);
+    const approaching5Counts = getApproachingCounts(orders);
 
     const overdueList: OverdueOrderInfo[] = [];
     const approachingList: OverdueOrderInfo[] = [];
@@ -238,7 +244,7 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
       }
 
       // 2. 納期間近明細（5日以内・納期超過とは合算しない）
-      const approachingLines = ord.lines.filter((l) => isLineApproaching(l, ord));
+      const approachingLines = ord.lines.filter((l) => isLineApproaching(l, ord, undefined, NEAR_DAYS_WIDE));
       if (approachingLines.length > 0 && !orderIsDelayed) {
         let minDaysRemaining = 999;
         let earliestDueDate = approachingLines[0]?.latestDate || '';
@@ -324,7 +330,8 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
     };
 
     overdueList.sort((a, b) => b.maxDaysOver - a.maxDaysOver);
-    approachingList.sort((a, b) => a.maxDaysOver - b.maxDaysOver);
+    // 期限の近い順（今日 → 10日後）
+    approachingList.sort((a, b) => b.maxDaysOver - a.maxDaysOver);
 
     const sortedOverdueClinics = finalizeClinics(overdueClinicsMap);
     const sortedApproachingClinics = finalizeClinics(approachingClinicsMap);
@@ -347,6 +354,7 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
       currentClinics: activeClinicsList,
       delayCounts,
       approachingCounts,
+      approaching5Counts,
       kpis: {
         totalOrders,
         totalLines,
@@ -366,6 +374,8 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
       // 営業担当
       if (selectedRep !== 'all' && item.salesRep !== selectedRep) return false;
 
+      // 納期間近：5日以内だけに絞る
+      if (activeScope === 'approaching' && nearWindow === '5' && item.maxDaysOver < -5) return false;
       // 超過日数 / 納期間近フィルター
       if (selectedDaysFilter === 'overdue' && item.maxDaysOver <= 0) return false;
       if (selectedDaysFilter === 'nearDue' && (item.maxDaysOver > 0 || item.maxDaysOver < -10)) return false;
@@ -394,7 +404,7 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
 
       return true;
     });
-  }, [currentOrders, selectedRep, selectedDaysFilter, selectedCauseFilter, selectedStatusFilter, searchQuery]);
+  }, [currentOrders, selectedRep, selectedDaysFilter, selectedCauseFilter, selectedStatusFilter, searchQuery, activeScope, nearWindow]);
 
   // Filtered list of clinics
   const filteredOverdueClinics = useMemo(() => {
@@ -402,6 +412,8 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
       // 営業担当
       if (selectedRep !== 'all' && clinic.salesRep !== selectedRep) return false;
 
+      // 納期間近：5日以内の伝票があるクリニックだけ
+      if (activeScope === 'approaching' && nearWindow === '5' && !clinic.orders.some((o) => o.maxDaysOver >= -5)) return false;
       // 超過日数
       if (selectedDaysFilter === '30' && clinic.maxDaysOver < 30) return false;
       if (selectedDaysFilter === '14' && clinic.maxDaysOver < 14) return false;
@@ -421,7 +433,7 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
 
       return true;
     });
-  }, [currentClinics, selectedRep, selectedDaysFilter, searchQuery]);
+  }, [currentClinics, selectedRep, selectedDaysFilter, searchQuery, activeScope, nearWindow]);
 
   // List of sales reps for dropdown
   const repList = useMemo(() => {
@@ -624,12 +636,12 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
             <div>
               <div className="flex items-center gap-2.5 flex-wrap">
                 <h1 className="text-xl font-bold text-slate-900 tracking-tight">
-                  {activeScope === 'overdue' ? '最長納期超過 一覧' : '納期間近（5日以内） 一覧'}
+                  {activeScope === 'overdue' ? '最長納期超過 一覧' : `納期間近（${nearWindow}日以内） 一覧`}
                 </h1>
                 <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-200 font-mono">
                   {activeScope === 'overdue'
                     ? formatDelayString(delayCounts)
-                    : formatDelayString(approachingCounts)}
+                    : formatDelayString(nearWindow === '5' ? approaching5Counts : approachingCounts)}
                 </span>
                 <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200">
                   影響取引先: {kpis.totalClinics} 院
@@ -641,11 +653,11 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
               <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
                 {activeScope === 'overdue'
                   ? '納品予定日が今日より前で未出荷の明細（納期超過）を厳密に抽出しています。仕入先への督促、顧客への遅延報告、対応履歴を一元管理します。'
-                  : '納品予定日が本日以降かつ5日以内の明細を抽出しています。納期超過とは合算せず、直近の手配確認に役立てます。'}
+                  : '最長納品予定日が今日から10日以内で、まだ出荷していない明細です（5日以内は楽楽販売「②注意」と同じ）。納期超過とは合算しません。期限の近い順に並べています。'}
               </p>
 
               {/* ユーザー要件: 納期超過と納期間近（5日以内）を別指標として分けるタブ */}
-              <div className="flex items-center gap-2 mt-3 pt-2 border-t border-slate-100">
+              <div className="flex flex-wrap items-center gap-2 mt-3 pt-2 border-t border-slate-100">
                 <span className="text-xs font-bold text-slate-500">指標切替:</span>
                 <div className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-xl">
                   <button
@@ -670,9 +682,26 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
                     }`}
                   >
                     <Clock className="w-3.5 h-3.5" />
-                    <span>納期間近・5日以内（{formatDelayString(approachingCounts)}）</span>
+                    <span>納期間近・10日以内（{formatDelayString(approachingCounts)}）</span>
                   </button>
                 </div>
+                {activeScope === 'approaching' && (
+                  <div className="flex items-center gap-1.5 p-1 bg-amber-50 border border-amber-200 rounded-xl">
+                    {([
+                      ['10', `10日以内（${formatDelayString(approachingCounts)}）`],
+                      ['5', `5日以内（${formatDelayString(approaching5Counts)}）`],
+                    ] as const).map(([k, label]) => (
+                      <button
+                        key={k}
+                        type="button"
+                        onClick={() => setNearWindow(k)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold ${nearWindow === k ? 'bg-amber-600 text-white' : 'text-amber-800 hover:bg-amber-100'}`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -823,9 +852,9 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
               onChange={(e) => setSelectedDaysFilter(e.target.value)}
               className="w-full px-3 py-1.8 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition cursor-pointer"
             >
-              <option value="all">対象期間: すべて (超過＋5日前)</option>
+              <option value="all">対象期間: すべて</option>
               <option value="overdue">納期超過のみ (遅延発生中)</option>
-              <option value="nearDue">納期間近のみ (あと1〜5日)</option>
+              <option value="nearDue">納期間近のみ (あと0〜10日)</option>
               <option value="30">30日以上超過</option>
               <option value="14">14日〜29日超過</option>
               <option value="7">7日〜13日超過</option>
@@ -931,7 +960,7 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
                       lastSuccessTime={lastSuccessTime}
                       onRetry={onRetry}
                       colSpan={8}
-                      emptyMessage={activeScope === 'overdue' ? '納期超過している伝票はありません' : '納期間近（5日以内）の伝票はありません'}
+                      emptyMessage={activeScope === 'overdue' ? '納期超過している伝票はありません' : `納期間近（${nearWindow}日以内）の伝票はありません`}
                     />
                   ) : (
                     filteredOverdueOrders.map((item, idx) => {
