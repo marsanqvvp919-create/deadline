@@ -1369,6 +1369,7 @@ async function saveStoreSnapshot(): Promise<void> {
       clinics: serverRakurakuStore.clinics,
       lastSuccessTime: serverRakurakuStore.lastSuccessTime,
       lastMastersTime: serverRakurakuStore.lastMastersTime,
+      sourceHeaders: serverRakurakuStore.sourceHeaders,
       lastFullSyncTime: serverRakurakuStore.lastFullSyncTime,
       delayHistory: serverRakurakuStore.delayHistory,
     };
@@ -1393,6 +1394,7 @@ async function loadStoreSnapshot(): Promise<boolean> {
     serverRakurakuStore.clinics = snap.clinics ?? null;
     serverRakurakuStore.lastSuccessTime = snap.lastSuccessTime ?? null;
     serverRakurakuStore.lastMastersTime = snap.lastMastersTime ?? null;
+    if (snap.sourceHeaders) serverRakurakuStore.sourceHeaders = snap.sourceHeaders;
     serverRakurakuStore.lastFullSyncTime = snap.lastFullSyncTime ?? null;
     serverRakurakuStore.delayHistory = snap.delayHistory ?? {};
     // 次回の自動同期は前回成功時刻から数えて間隔があいたときに行う
@@ -2661,6 +2663,7 @@ app.get('/api/tracking/coverage', async (_req, res) => {
     let notFetched = 0;
     let untracked = 0;
     let noNumber = 0;
+    let outOfScope = 0;
     for (const r of rows) {
       const digits = parseTrackingNumbers(r.trackingNo);
       if (digits.length === 0) {
@@ -2675,9 +2678,21 @@ app.get('/api/tracking/coverage', async (_req, res) => {
       const inRakuraku = digits.some((d) => known.has(d));
       if (!inRakuraku) untracked++;
       else if (found.length > 0) tracked++;
+      // 国内配送・両社とも該当なし・桁数違いは、待っても状況が取れないので別に数える
+      else if (digits.map(resolveDigits).every((x) => x.state !== 'pending')) outOfScope++;
       else notFetched++;
     }
-    return res.json({ success: true, sheetReadAt: sheet.readAt, denominator: tracked + notFetched + untracked, tracked, notFetched, untracked, delivered, noNumber });
+    return res.json({
+      success: true,
+      sheetReadAt: sheet.readAt,
+      denominator: tracked + notFetched + outOfScope + untracked,
+      tracked,
+      notFetched,
+      outOfScope,
+      untracked,
+      delivered,
+      noNumber,
+    });
   } catch (e: any) {
     return res.json({ success: false, error: e?.message || String(e) });
   }

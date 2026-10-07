@@ -67,7 +67,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   }, [generatedAt, ticker]);
 
   // 追跡のカバー率（サーバーがシートと楽楽販売・配送会社の状況から計算）
-  const [coverage, setCoverage] = useState<{ denominator: number; tracked: number; notFetched: number; untracked: number } | null>(null);
+  const [coverage, setCoverage] = useState<{ denominator: number; tracked: number; notFetched: number; outOfScope?: number; untracked: number } | null>(null);
   useEffect(() => {
     fetch('/api/tracking/coverage')
       .then((r) => r.json())
@@ -627,7 +627,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               直近30日の「◆出荷ステータス」の出荷のうち、まだ配達完了でない {coverage.denominator}件が対象
             </span>
           </div>
-          <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
             <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
               <span className="text-xs font-bold text-emerald-800">追跡できている</span>
               <div className="flex items-baseline gap-1.5">
@@ -644,7 +644,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 <span className="text-2xl font-extrabold font-mono text-slate-700">{coverage.notFetched}</span>
                 <span className="text-xs font-bold text-slate-600">件</span>
               </div>
-              <span className="text-[11px] text-slate-500">楽楽販売に追跡番号はあるが、まだ状況を取得していない（自動取得の順番待ち・未連携の配送会社）</span>
+              <span className="text-[11px] text-slate-500">楽楽販売に追跡番号はあり、まだ状況を取得していない（2時間ごとの自動取得の順番待ち）</span>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-white p-3">
+              <span className="text-xs font-bold text-slate-700">API対象外・番号の誤り</span>
+              <div className="flex items-baseline gap-1.5">
+                <span className="text-2xl font-extrabold font-mono text-slate-700">{coverage.outOfScope ?? 0}</span>
+                <span className="text-xs font-bold text-slate-600">件</span>
+              </div>
+              <span className="text-[11px] text-slate-500">国内配送（佐川・ヤマトなど）の番号や、DHL・FedEx とも該当がない番号。APIでは追えない</span>
             </div>
             <button
               type="button"
