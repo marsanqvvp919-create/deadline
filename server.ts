@@ -309,6 +309,9 @@ const SHIPMENT_FIELD_MAP: Record<string, string[]> = {
   lastScanAt: ['最終スキャン日時'],
   lastScanPlace: ['最終スキャン場所'],
   carrierException: ['キャリア例外'],
+  // 楽楽販売に追加した追跡番号の欄（国際便と、国内の佐川の番号）
+  internationalTrackingNo: ['国際追跡番号'],
+  sagawaTrackingNo: ['国内追跡番号（佐川）'],
   // 明細の受注ID・商品ID（ご注文管理の明細と結びつけるため）
   lineOrderId: ['受注ID（明細）'],
   lineProductId: ['商品ID'],
@@ -390,6 +393,8 @@ function transformCsvToShipments(csvText: string): any[] {
     const lastScanAt = getVal(row, 'lastScanAt') || '';
     const lastScanPlace = getVal(row, 'lastScanPlace') || '';
     const carrierException = getVal(row, 'carrierException') || '';
+    const internationalTrackingNo = getVal(row, 'internationalTrackingNo') || '';
+    const sagawaTrackingNo = getVal(row, 'sagawaTrackingNo') || '';
     // 複数口の出荷：対応メモに並べた残りの箱の追跡番号（10桁以上の数字。4桁区切りも読む）
     const extraTrackingNos = extractTrackingNumbers(handlingMemo).filter((n) => n !== trackingNo.replace(/\D/g, ''));
     const lineRef = {
@@ -443,6 +448,8 @@ function transformCsvToShipments(csvText: string): any[] {
       lastScanAt,
       lastScanPlace,
       carrierException,
+      internationalTrackingNo,
+      sagawaTrackingNo,
       extraTrackingNos,
       lineRef,
       isKantoNg,
@@ -1410,8 +1417,18 @@ async function loadStoreSnapshot(): Promise<boolean> {
 // サーバー側 一括データ取得同期関数
 let startupRestoreDone = false;
 
+// 同期が途中で止まったまま（応答が返らない等）になると、以後ずっと「取得中」で更新されなくなる。
+// 15分を超えた同期は止まったものとみなし、次の同期を始められるようにする。
+const SYNC_STUCK_MS = 15 * 60 * 1000;
+let syncGeneration = 0;
+
 async function syncAllRakurakuData(isManual = false): Promise<boolean> {
-  if (serverRakurakuStore.isFetching) return false;
+  if (serverRakurakuStore.isFetching) {
+    const startedAt = serverRakurakuStore.lastAttemptTime ? new Date(serverRakurakuStore.lastAttemptTime).getTime() : 0;
+    if (Date.now() - startedAt < SYNC_STUCK_MS) return false;
+    console.warn(`[Rakuraku Sync] Previous sync started at ${serverRakurakuStore.lastAttemptTime} looks stuck; starting a new one`);
+  }
+  const myGeneration = ++syncGeneration;
   // 起動直後は保存データの読み込みが終わるまで自動同期しない
   if (!isManual && !startupRestoreDone) return false;
 
@@ -1594,7 +1611,8 @@ async function syncAllRakurakuData(isManual = false): Promise<boolean> {
     console.error(`[Rakuraku Sync Failed] ${errorInfo.type}: ${errorInfo.message}`);
     return false;
   } finally {
-    serverRakurakuStore.isFetching = false;
+    // 止まっていた古い同期があとから終わっても、新しい同期の「取得中」を消さない
+    if (myGeneration === syncGeneration) serverRakurakuStore.isFetching = false;
   }
 }
 

@@ -523,7 +523,7 @@ const SHIPMENT_DASH_DEFAULTS = [
 const SHIPMENT_EMPTY_DEFAULTS = [
   'customerId', 'shipStatus', 'courier', 'warehouseShippedDate', 'deliveredDate', 'customsClearedDate', 'deliveryEta',
   'customsEta', 'nextDeadline', 'vendorShipDate', 'handlingMemo', 'carrierLatestStatus', 'lastScanAt', 'lastScanPlace',
-  'carrierException',
+  'carrierException', 'internationalTrackingNo', 'sagawaTrackingNo',
 ];
 const ORDER_NULL_DEFAULTS = ['requestedDate', 'deliveredDate', 'paymentDate', 'paymentDueDate', 'quoteDate', 'quoteValidUntil', 'billingDate'];
 const LINE_DEFAULTS: Record<string, any> = {
