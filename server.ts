@@ -2031,6 +2031,30 @@ async function importCsvToRakuraku(
   }
   return { processId, succeedCount: 0, failureCount: 0, status: '確認中（3分以内に完了しませんでした）' };
 }
+// 取り込みの結果を楽楽販売にそのまま問い合わせる（読み取りのみ。失敗した行の理由を調べるため）
+app.get('/api/rakuraku/import-status/:processId', async (req, res) => {
+  const processId = String(req.params.processId || '').replace(/\D/g, '');
+  if (!processId) return res.status(400).json({ error: 'processId が必要です' });
+  const token = process.env.VITE_DATA_KEY || '';
+  const baseUrl = (process.env.VITE_RAKURAKU_BASE_URL || 'https://hnsibot.rakurakuhanbai.jp/ykbxg2a/').replace(/\/+$/, '');
+  try {
+    const chk = await fetch(`${baseUrl}/api/checkcsvimportprocess/version/v1`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json; charset=utf-8', 'X-HD-apitoken': token.trim() },
+      body: JSON.stringify({ processId }),
+      signal: AbortSignal.timeout(30000),
+    });
+    const text = await chk.text();
+    let json: any = null;
+    try {
+      json = JSON.parse(text);
+    } catch {}
+    return res.json({ status: chk.status, json, text: json ? undefined : text.slice(0, 3000) });
+  } catch (e: any) {
+    return res.status(500).json({ error: e?.message || String(e) });
+  }
+});
+
 const IMPORT_PREVIEW_OBJECT = 'sheet-import-preview.json';
 let importPreviewState: { latest: any | null; history: any[] } = { latest: null, history: [] };
 let importPreviewLoaded = false;
@@ -2848,6 +2872,7 @@ async function runCarrierWriteback(): Promise<{ rows: number; succeedCount?: num
     let succeed = 0;
     let failure = 0;
     let error: string | undefined;
+    const processIds: string[] = [];
     // 1回の取り込みは500行まで
     for (let i = 0; i < rows.length; i += 500) {
       const chunk = rows.slice(i, i + 500);
@@ -2855,6 +2880,7 @@ async function runCarrierWriteback(): Promise<{ rows: number; succeedCount?: num
         const result = await importCsvToRakuraku(toCsv(CARRIER_WRITEBACK_COLUMNS, chunk), CARRIER_WRITEBACK_IMPORT_ID, 'carrier_status_import.csv');
         succeed += result.succeedCount || 0;
         failure += result.failureCount || 0;
+        processIds.push(result.processId);
         if (result.failureCount === 0) chunk.forEach((r) => (carrierWritten[r[0]] = r.slice(1).join('|')));
       } catch (e: any) {
         // 楽楽販売の応答（status・json・text）をそのまま残す
@@ -2868,8 +2894,9 @@ async function runCarrierWriteback(): Promise<{ rows: number; succeedCount?: num
       succeedCount: succeed,
       failureCount: failure,
       error,
+      processIds,
       sample: rows.slice(0, 3).map((r) => r.join(' | ')),
-    });
+    } as any);
     carrierWritebackLog = carrierWritebackLog.slice(0, 30);
     scheduleCarrierStatusSave();
     console.log(`[Carriers] Write-back: ${rows.length} rows, ok ${succeed}, failed ${failure}${error ? `, error: ${error}` : ''}`);
