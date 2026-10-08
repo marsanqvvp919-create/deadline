@@ -309,9 +309,9 @@ const SHIPMENT_FIELD_MAP: Record<string, string[]> = {
   lastScanAt: ['最終スキャン日時'],
   lastScanPlace: ['最終スキャン場所'],
   carrierException: ['キャリア例外'],
-  // 楽楽販売に追加した追跡番号の欄（国際便と、国内の佐川の番号）
+  // 楽楽販売に追加した追跡番号の欄（国際便と、国内の佐川・ヤマト・日本郵便の番号）
   internationalTrackingNo: ['国際追跡番号'],
-  sagawaTrackingNo: ['国内追跡番号（佐川）'],
+  domesticTrackingNo: ['国内追跡番号', '国内追跡番号（佐川）'],
   // 明細の受注ID・商品ID（ご注文管理の明細と結びつけるため）
   lineOrderId: ['受注ID（明細）'],
   lineProductId: ['商品ID'],
@@ -394,13 +394,13 @@ function transformCsvToShipments(csvText: string): any[] {
     const lastScanPlace = getVal(row, 'lastScanPlace') || '';
     const carrierException = getVal(row, 'carrierException') || '';
     const internationalTrackingNo = getVal(row, 'internationalTrackingNo') || '';
-    const sagawaTrackingNo = getVal(row, 'sagawaTrackingNo') || '';
+    const domesticTrackingNo = getVal(row, 'domesticTrackingNo') || '';
     // 複数口の出荷：対応メモに並べた残りの箱の追跡番号（10桁以上の数字。4桁区切りも読む）
-    // ＋楽楽販売の「国際追跡番号」「国内追跡番号（佐川）」の欄の番号も同じ出荷の箱として追跡する
+    // ＋楽楽販売の「国際追跡番号」「国内追跡番号」の欄の番号も同じ出荷の箱として追跡する
     const mainNos = new Set(parseTrackingNumbers(trackingNo));
-    const sagawaTrackingNos = parseTrackingNumbers(sagawaTrackingNo);
+    const domesticTrackingNos = parseTrackingNumbers(domesticTrackingNo);
     const extraTrackingNos = Array.from(
-      new Set([...extractTrackingNumbers(handlingMemo), ...parseTrackingNumbers(internationalTrackingNo), ...sagawaTrackingNos])
+      new Set([...extractTrackingNumbers(handlingMemo), ...parseTrackingNumbers(internationalTrackingNo), ...domesticTrackingNos])
     ).filter((n) => n !== trackingNo.replace(/\D/g, '') && !mainNos.has(n));
     const lineRef = {
       // 明細の受注IDは「000002950-1」のように行番号が付くので外す
@@ -454,8 +454,8 @@ function transformCsvToShipments(csvText: string): any[] {
       lastScanPlace,
       carrierException,
       internationalTrackingNo,
-      sagawaTrackingNo,
-      sagawaTrackingNos,
+      domesticTrackingNo,
+      domesticTrackingNos,
       extraTrackingNos,
       lineRef,
       isKantoNg,
@@ -2112,6 +2112,97 @@ async function importCsvToRakuraku(
   }
   return { processId, succeedCount: 0, failureCount: 0, status: '確認中（3分以内に完了しませんでした）' };
 }
+// ----------------------------------------------------------------------
+// 追跡番号の振り分け：「出荷番号」に入っている番号を、国際便（DHL・FedEx）は「国際追跡番号」、
+// 国内配送（佐川・ヤマト・日本郵便の12桁）は「国内追跡番号」に書く（インポート 100758）。
+// 出荷番号そのものは変えない。2つの欄のどちらかに既に何か入っている出荷は書き換えない。
+// 桁数の合わない番号が混ざっている出荷は自動では振り分けず、一覧で返す。
+// ----------------------------------------------------------------------
+const TRACKING_SPLIT_IMPORT_ID = process.env.TRACKING_SPLIT_IMPORT_ID || '100758';
+const TRACKING_SPLIT_COLUMNS = ['出荷ID', '国際追跡番号', '国内追跡番号'];
+let trackingSplitLog: any[] = [];
+
+function planTrackingSplit() {
+  const rows: string[][] = [];
+  const irregular: { shipmentId: string; trackingNo: string }[] = [];
+  const counts = { shipments: 0, alreadyFilled: 0, noNumber: 0, irregular: 0, international: 0, domestic: 0, both: 0 };
+  const seen = new Set<string>();
+  for (const s of serverRakurakuStore.shipments || []) {
+    if (!s.shipmentId || seen.has(s.shipmentId)) continue;
+    seen.add(s.shipmentId);
+    counts.shipments++;
+    if (String(s.internationalTrackingNo || '').trim() || String(s.domesticTrackingNo || '').trim()) {
+      counts.alreadyFilled++;
+      continue;
+    }
+    const raw = String(s.trackingNo || '').trim();
+    const nums = parseTrackingNumbers(raw);
+    if (nums.length === 0) {
+      counts.noNumber++;
+      continue;
+    }
+    if (nums.some((d) => classifyNumber(d).invalid)) {
+      counts.irregular++;
+      irregular.push({ shipmentId: s.shipmentId, trackingNo: raw });
+      continue;
+    }
+    const domestic = nums.filter((d) => classifyNumber(d).domesticCandidate);
+    const intl = nums.filter((d) => !classifyNumber(d).domesticCandidate);
+    // 番号と区切りだけの欄は、書き方（ハイフンなど）をそのまま使う。説明文が混ざっていれば番号だけにする
+    const cleanRaw = /^[\d\s\-‐－、,，/／・]+$/.test(raw);
+    const value = (list: string[], onlyKind: boolean) => (list.length === 0 ? '' : onlyKind && cleanRaw ? raw : list.join(' '));
+    const intlVal = value(intl, domestic.length === 0);
+    const domVal = value(domestic, intl.length === 0);
+    if (intlVal && domVal) counts.both++;
+    else if (intlVal) counts.international++;
+    else counts.domestic++;
+    rows.push([s.shipmentId, intlVal, domVal]);
+  }
+  return { rows, irregular, counts };
+}
+
+// 振り分けの予定（書き込みはしない）
+app.get('/api/rakuraku/split-tracking', (_req, res) => {
+  const { rows, irregular, counts } = planTrackingSplit();
+  return res.json({ counts, toWrite: rows.length, sample: rows.slice(0, 20), irregular, log: trackingSplitLog.slice(0, 10) });
+});
+
+// 振り分けを楽楽販売に書き込む（limit で件数を絞れる。ids で出荷IDを指定もできる）
+app.post('/api/rakuraku/split-tracking', async (req, res) => {
+  let { rows } = planTrackingSplit();
+  const ids: string[] = Array.isArray(req.body?.ids) ? req.body.ids.map(String) : [];
+  if (ids.length > 0) rows = rows.filter((r) => ids.includes(r[0]));
+  const limit = Number(req.body?.limit) || 0;
+  if (limit > 0) rows = rows.slice(0, limit);
+  if (rows.length === 0) return res.json({ success: true, rows: 0, results: [] });
+  const results: any[] = [];
+  for (let i = 0; i < rows.length; i += 500) {
+    const chunk = rows.slice(i, i + 500);
+    try {
+      const r = await importCsvToRakuraku(toCsv(TRACKING_SPLIT_COLUMNS, chunk), TRACKING_SPLIT_IMPORT_ID, 'tracking_split_import.csv');
+      results.push({ rows: chunk.length, ...r, firstId: chunk[0][0], lastId: chunk[chunk.length - 1][0] });
+      if (r.failureCount === 0) {
+        // 次の同期を待たずに、書いた出荷は「入力済み」として扱う（同じ出荷を二重に送らない）
+        const byId = new Map(chunk.map((c) => [c[0], c]));
+        for (const s of serverRakurakuStore.shipments || []) {
+          const c = byId.get(s.shipmentId);
+          if (c) {
+            s.internationalTrackingNo = c[1];
+            s.domesticTrackingNo = c[2];
+          }
+        }
+      }
+    } catch (e: any) {
+      results.push({ rows: chunk.length, error: e?.message || JSON.stringify(e?.json || e).slice(0, 300) });
+      break;
+    }
+  }
+  trackingSplitLog.unshift({ at: new Date().toISOString(), rows: rows.length, results });
+  trackingSplitLog = trackingSplitLog.slice(0, 20);
+  console.log('[Tracking Split]', JSON.stringify(trackingSplitLog[0]));
+  return res.json({ success: results.every((r) => !r.error && !r.failureCount), rows: rows.length, results, sample: rows.slice(0, 10) });
+});
+
 // 取り込みの結果を楽楽販売にそのまま問い合わせる（読み取りのみ。失敗した行の理由を調べるため）
 app.get('/api/rakuraku/import-status/:processId', async (req, res) => {
   const processId = String(req.params.processId || '').replace(/\D/g, '');
@@ -2665,20 +2756,20 @@ const ageMs = (c?: CarrierStatus) => (c ? Date.now() - new Date(c.fetchedAt).get
 
 // 照会の順番：番号の形で決めた運送会社 → 該当なしならもう一方。
 // 国内配送の可能性がある12桁（7・8始まりでない）は、FedEx の次に 佐川 → ヤマト → 日本郵便（荷物追跡API）
-// 「国内追跡番号（佐川）」の欄に入っている番号（佐川から先に照会する）
-let sagawaNosSource: any[] | null = null;
-let sagawaNosSet = new Set<string>();
-function isSagawaDesignated(d: string): boolean {
+// 「国内追跡番号」の欄に入っている番号（FedEx などには照会せず、佐川 → ヤマト → 日本郵便の順に照会する）
+let domesticNosSource: any[] | null = null;
+let domesticNosSet = new Set<string>();
+function isDomesticDesignated(d: string): boolean {
   const list = serverRakurakuStore.shipments;
-  if (list !== sagawaNosSource) {
-    sagawaNosSource = list;
-    sagawaNosSet = new Set((list || []).flatMap((s: any) => (s.sagawaTrackingNos as string[]) || []));
+  if (list !== domesticNosSource) {
+    domesticNosSource = list;
+    domesticNosSet = new Set((list || []).flatMap((s: any) => (s.domesticTrackingNos as string[]) || []));
   }
-  return sagawaNosSet.has(d);
+  return domesticNosSet.has(d);
 }
 
 function chainFor(d: string): CarrierId[] {
-  if (domesticEnabled && isSagawaDesignated(d)) return ['sagawa', ...DOMESTIC_CARRIERS.filter((c) => c !== 'sagawa')];
+  if (domesticEnabled && isDomesticDesignated(d)) return [...DOMESTIC_CARRIERS];
   const cls = classifyNumber(d);
   if (cls.invalid || !cls.primary) return [];
   const chain: CarrierId[] = [cls.primary as CarrierId];
