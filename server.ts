@@ -2906,9 +2906,11 @@ async function runCarrierWriteback(): Promise<{ rows: number; succeedCount?: num
   }
 }
 
-app.get('/api/carriers/writeback', async (_req, res) => {
+app.get('/api/carriers/writeback', async (req, res) => {
   await loadCarrierStatusCache();
   const rows = buildCarrierWritebackRows();
+  // ?all=1 で送る予定の全行を返す（失敗する行の調査用）
+  if (req.query.all === '1') return res.json({ columns: CARRIER_WRITEBACK_COLUMNS, rows });
   return res.json({
     enabled: !!CARRIER_WRITEBACK_IMPORT_ID,
     importId: CARRIER_WRITEBACK_IMPORT_ID || null,
