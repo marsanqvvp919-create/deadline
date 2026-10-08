@@ -2164,7 +2164,7 @@ function planTrackingSplit() {
 // 振り分けの予定（書き込みはしない）
 app.get('/api/rakuraku/split-tracking', (_req, res) => {
   const { rows, irregular, counts } = planTrackingSplit();
-  return res.json({ counts, toWrite: rows.length, sample: rows.slice(0, 20), irregular, log: trackingSplitLog.slice(0, 10) });
+  return res.json({ version: 3, counts, toWrite: rows.length, sample: rows.slice(0, 20), irregular, log: trackingSplitLog.slice(0, 10) });
 });
 
 async function writeTrackingSplit(rows: string[][], source: string) {
@@ -2223,8 +2223,12 @@ app.post('/api/rakuraku/split-tracking', async (req, res) => {
 
 // 自動：新しく「出荷番号」に入った番号を、20分ごとに2つの欄へ振り分ける（失敗したら6時間あける）
 let trackingSplitRetryAfter = 0;
+const SERVER_STARTED_AT = Date.now();
 async function runTrackingSplitAuto() {
   if (Date.now() < trackingSplitRetryAfter || !serverRakurakuStore.shipments?.length) return;
+  // 起動直後は保存してあった古いデータなので、楽楽販売から取り直すまで振り分けない（同じ内容を送り直さない）
+  const synced = serverRakurakuStore.lastSuccessTime ? new Date(serverRakurakuStore.lastSuccessTime).getTime() : 0;
+  if (synced < SERVER_STARTED_AT) return;
   const rows = planTrackingSplit().rows.slice(0, 500);
   if (rows.length === 0) return;
   const results = await writeTrackingSplit(rows, 'auto');
