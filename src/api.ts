@@ -30,7 +30,11 @@ const STORAGE_CLINICS_SYNC_KEY = 'nouki_master_clinics_sync_info';
 const STORAGE_SHIPMENTS_KEY = 'nouki_master_shipments_v1';
 const STORAGE_SUPPLIERS_KEY = 'nouki_master_suppliers_v1';
 
+// 最新の出荷管理データ（ブラウザの保存容量に入らないため、画面を開いている間だけメモリに持つ）
+let memoryShipments: ShipmentItem[] | null = null;
+
 export function getLocalShipments(): ShipmentItem[] {
+  if (memoryShipments) return memoryShipments;
   try {
     const raw = localStorage.getItem(STORAGE_SHIPMENTS_KEY);
     if (raw) {
@@ -609,6 +613,8 @@ export async function fetchData(): Promise<FetchResult> {
       // 出荷管理 (101270)：約5MBありブラウザの保存容量を超えるため、ブラウザには保存しない（毎回失敗していた）
       if (Array.isArray(json.shipments) && json.shipments.length > 0) {
         fetchedShipments = json.shipments;
+        // 伝票に出荷ID・通関の情報をつなぐ処理（normalizeDeliveryData）が最新の出荷を使うように
+        memoryShipments = json.shipments;
         try {
           localStorage.removeItem(STORAGE_SHIPMENTS_KEY);
         } catch {}
