@@ -2783,6 +2783,10 @@ interface Resolved {
 
 // 「不明」（見つからない・エラー）は見つかったとみなさない
 const isFoundStatus = (c?: CarrierStatus) => !!c && !c.notFound && c.status !== 'unknown';
+// 見つからない、ではなく運送会社側のエラーで状況が取れなかったもの
+const isTransientError = (c?: CarrierStatus) => !!c && !c.notFound && c.status === 'unknown' && !!c.error;
+// 国内（荷物追跡API）は無料枠を守るため12時間、FedEx・DHL は1時間あけて取り直す
+const transientRetryMs = (carrier: CarrierId) => (DOMESTIC_CARRIERS.includes(carrier) ? 12 : 1) * 60 * 60 * 1000;
 const cacheGet = (carrier: CarrierId, d: string) => carrierCache.get(`${carrier}:${d}`);
 const ageMs = (c?: CarrierStatus) => (c ? Date.now() - new Date(c.fetchedAt).getTime() : Infinity);
 
@@ -2814,12 +2818,21 @@ function resolveDigits(d: string): Resolved {
   const chain = chainFor(d);
   if (chain.length === 0) return { digits: d, state: 'invalid' };
   let first: CarrierStatus | undefined;
+  let transientSeen = false;
   for (const carrier of chain) {
     const c = cacheGet(carrier, d);
     if (!c) return { digits: d, state: 'pending', next: carrier };
     if (isFoundStatus(c)) return { digits: d, state: 'found', carrier, status: c };
+    // 運送会社側の一時的なエラー（「後ほどもう一度」・メンテナンス中など）は「見つからない」と区別し、時間をおいて取り直す
+    if (isTransientError(c)) {
+      if (ageMs(c) > transientRetryMs(carrier)) return { digits: d, state: 'pending', next: carrier };
+      transientSeen = true;
+      continue;
+    }
     first = first || c;
   }
+  // どこかで一時的なエラーがあった番号は「番号の誤り」にしない（取り直すまで未取得のまま）
+  if (transientSeen) return { digits: d, state: 'pending' };
   const cls = classifyNumber(d);
   return { digits: d, state: cls.domesticCandidate ? 'out_of_scope' : 'not_found', carrier: chain[0], status: first };
 }

@@ -124,7 +124,7 @@ function normalizeFedex(trackingNo: string, r: any): CarrierStatus {
     code === 'OD' ||
     (arrivedJapan && customsCleared) ||
     (arrivedJapan && DOMESTIC_PATTERN.test(`${latest.description || ''} ${latest.statusByLocale || ''} ${scan?.eventDescription || ''}`));
-  const notFound = !!r?.error && /notfound|not found|見つけることができません/i.test(`${r.error.code || ''} ${r.error.message || ''}`);
+  const notFound = !!r?.error && /notfound|not found|invalid|見つけることができません/i.test(`${r.error.code || ''} ${r.error.message || ''}`);
   return {
     carrier: 'fedex',
     trackingNo,
