@@ -392,3 +392,19 @@ export async function testDomestic(cred: CarrierCredentials['domestic']): Promis
   if (q) domesticQuota = q;
   return q ? `認証に成功しました（今月 ${q.used ?? '?'}/${q.limit ?? '?'}件使用、残り${q.remaining ?? '?'}件）` : '認証に成功しました';
 }
+
+/** 接続テスト用：各運送会社の応答をそのまま（状況コード・エラーコード）返す */
+export async function traceDomesticRaw(cred: NonNullable<CarrierCredentials['domestic']>, carrier: CarrierId, no: string): Promise<string> {
+  const courierCode = TRACKINGAPI_CODE[carrier];
+  const res = await fetch(`${TRACKINGAPI_BASE}/v1/tracking/trace`, {
+    method: 'POST',
+    headers: domesticAuth(cred),
+    body: JSON.stringify({ items: [{ courierCode, trackingNumber: no }] }),
+    signal: AbortSignal.timeout(30000),
+  });
+  const json: any = await res.json().catch(() => ({}));
+  const r = json?.data?.results?.[0];
+  if (!res.ok) return `HTTP ${res.status} ${json?.error?.code || ''} ${json?.error?.message || ''}`.trim();
+  if (r?.success) return `${r.data?.deliveryStatus}（${r.data?.deliveryStatusText}）`;
+  return `${r?.error?.code || '?'} ${r?.error?.message || ''}`.trim();
+}

@@ -9,7 +9,7 @@ import { Storage } from '@google-cloud/storage';
 import { GoogleAuth } from 'google-auth-library';
 import { parseSheetRows, findUnmatched, isTargetRow, trackingDigits } from './unmatchedShipments';
 import { buildImportPreview } from './sheetImport';
-import { CarrierCredentials, CarrierId, CarrierStatus, trackFedex, trackDhl, testCarrier, trackDomestic, testDomestic, domesticQuota, DOMESTIC_CARRIERS } from './carriers';
+import { CarrierCredentials, CarrierId, CarrierStatus, trackFedex, trackDhl, testCarrier, trackDomestic, testDomestic, traceDomesticRaw, domesticQuota, DOMESTIC_CARRIERS } from './carriers';
 import { parseTrackingNumbers, classifyNumber, hintedCarrier, carrierName } from './src/utils/trackingNumbers';
 
 dotenv.config();
@@ -2605,15 +2605,10 @@ app.post('/api/carriers/test', async (req, res) => {
       // テスト用の番号があれば、佐川 → ヤマト → 日本郵便の順に1件だけ照会する
       const no = String(req.body?.trackingNo || '').replace(/\D/g, '');
       if (no) {
-        for (const c of DOMESTIC_CARRIERS) {
-          const [r] = await trackDomestic(creds.domestic!, c, [no]);
-          if (r && !r.notFound && r.status !== 'unknown') {
-            carrierCache.set(`${c}:${no}`, r);
-            message += `。${no}：${carrierName(c)}・${r.statusText}`;
-            break;
-          }
-          if (c === DOMESTIC_CARRIERS[DOMESTIC_CARRIERS.length - 1]) message += `。${no}：佐川・ヤマト・日本郵便とも該当なし`;
-        }
+        // 各運送会社の応答をそのまま並べる（該当なし・一時エラーなどの区別がつくように）
+        const parts: string[] = [];
+        for (const c of DOMESTIC_CARRIERS) parts.push(`${carrierName(c)}：${await traceDomesticRaw(creds.domestic!, c, no)}`);
+        message += `。${no} → ${parts.join(' ／ ')}`;
       }
     } else {
       message = await testCarrier(carrier, creds, req.body?.trackingNo ? String(req.body.trackingNo) : undefined);
