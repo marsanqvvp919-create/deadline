@@ -37,7 +37,8 @@ import { SheetImportView } from './components/SheetImportView';
 import { ActionListView } from './components/ActionListView';
 import { CarrierSettingsView } from './components/CarrierSettingsView';
 import { MorningMeetingView } from './components/MorningMeetingView';
-import { fetchSavedCarrierStatuses } from './utils/carriers';
+import { CarrierStatus, fetchSavedCarrierStatuses } from './utils/carriers';
+import { attentionCounts } from './utils/meeting';
 import { boxesOf } from './utils/shipmentTracking';
 import { BudgetSettingsModal } from './components/BudgetSettingsModal';
 import { DailyDigestModal } from './components/DailyDigestModal';
@@ -78,6 +79,7 @@ import {
   Thermometer,
   FileWarning,
   CalendarCheck,
+  ListChecks,
 } from 'lucide-react';
 
 const KNOWN_TABS: ViewTab[] = [
@@ -451,20 +453,6 @@ export default function App() {
 
   // アラート総数および高重要度数
   const totalAlertsCount = filteredAlerts.length;
-  // 要対応＝納期超過・発注漏れ・納期未設定のアラートがある伝票の数（明細の数ではなく伝票の数）
-  // 受注から60日以上たって未入金の伝票は要対応から外す（要対応リストと同じ数え方）
-  const highSeverityCount = useMemo(() => {
-    const stale = new Set(filteredOrders.filter((o) => isStaleUnpaid(o)).map((o) => o.orderId));
-    const ids = new Set<string>();
-    filteredAlerts.forEach((a) => {
-      if ((a.ruleId === 'B1' || a.ruleId === 'B2') && !stale.has(a.orderId)) ids.add(a.orderId);
-    });
-    filteredOrders.forEach((o) => {
-      if (isOrderDelayed(o) && !stale.has(o.orderId)) ids.add(o.orderId);
-    });
-    return ids.size;
-  }, [filteredAlerts, filteredOrders]);
-
   // 最長納期超過 伝票・明細数の計算（isLineDelayed統一: ○件○明細）
   const overdueCounts = useMemo(() => {
     if (!deliveryData) return { ordersCount: 0, linesCount: 0 };
@@ -480,10 +468,14 @@ export default function App() {
   );
   // 配送会社が通関で止めている出荷（通関NGのページにも出す）
   const [carrierHoldNos, setCarrierHoldNos] = useState<Set<string>>(new Set());
+  const [carrierStatusMap, setCarrierStatusMap] = useState<Record<string, CarrierStatus>>({});
   useEffect(() => {
     const load = () =>
       fetchSavedCarrierStatuses().then((snap) => {
         if (!snap) return;
+        const map: Record<string, CarrierStatus> = {};
+        snap.statuses.forEach((r) => (map[r.trackingNo] = r));
+        setCarrierStatusMap(map);
         setCarrierHoldNos(
           new Set(
             snap.statuses
@@ -502,6 +494,12 @@ export default function App() {
         (s) => isCustomsNgShipment(s, filteredOrders) || boxesOf(s).some((d) => carrierHoldNos.has(d))
       ).length,
     [shipments, filteredOrders, carrierHoldNos]
+  );
+
+  // 要対応＝納期超過の伝票＋配送で問題が起きている出荷（朝の納期会議と同じ数え方）
+  const highSeverityCount = useMemo(
+    () => (deliveryData ? attentionCounts(deliveryData.orders, shipments, carrierStatusMap).total : 0),
+    [deliveryData, shipments, carrierStatusMap]
   );
 
   // 入金済・未発注 品目数の計算 (送料・各種手数料は除外)
@@ -658,7 +656,13 @@ export default function App() {
       icon: CalendarCheck,
       badge: highSeverityCount > 0 ? `${highSeverityCount}` : null,
       badgeColor: 'bg-rose-600 text-white font-bold',
-      match: ['morning_meeting', 'alerts'],
+    },
+    {
+      id: 'alerts',
+      group: 'today',
+      label: 'やることリスト',
+      icon: ListChecks,
+      badge: null,
     },
     {
       id: 'procurement',
@@ -1130,7 +1134,7 @@ export default function App() {
           )}
 
           {activeTab === 'alerts' && (
-            <ActionListView orders={filteredOrders} alerts={filteredAlerts} onSelectOrder={handleOpenDetail} repFilter={selectedRep} onClearRepFilter={() => setSelectedRep('')} />
+            <ActionListView orders={filteredOrders} alerts={filteredAlerts} shipments={shipments} onSelectOrder={handleOpenDetail} repFilter={selectedRep} onClearRepFilter={() => setSelectedRep('')} />
           )}
 
           {activeTab === 'inventory_management' && (
@@ -1179,6 +1183,7 @@ export default function App() {
         alerts={filteredAlerts}
         overdueCount={overdueOrdersCount}
         paidUnorderedCount={paidUnorderedCount}
+        attentionCount={highSeverityCount}
         onNavigate={setActiveTab}
       />
 

@@ -774,7 +774,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </span>
             </div>
             <span className="text-[11px] text-slate-500 mt-1 block leading-tight">
-              受注日から3日以上たっても未発注の明細と、納品予定日が未入力の明細（見積・出荷済みの伝票と、受注から{STALE_UNPAID_DAYS}日以上たって未入金の伝票は除く。要対応リストと同じ数）
+              受注日から3日以上たっても未発注の明細と、納品予定日が未入力の明細（見積・出荷済みの伝票と、受注から{STALE_UNPAID_DAYS}日以上たって未入金の伝票は除く。やることリストの「未発注」「納期未設定」と同じ数）
             </span>
           </div>
           <div className="mt-3 pt-2.5 border-t border-orange-100 flex items-center justify-between">

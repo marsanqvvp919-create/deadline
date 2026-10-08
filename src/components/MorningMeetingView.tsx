@@ -13,22 +13,22 @@ import {
   RAKURAKU_OVERDUE_LIST_URL,
 } from '../utils/delayCalculation';
 import { CarrierStatus, fetchSavedCarrierStatuses } from '../utils/carriers';
-import { boxSummaryText, daysSinceLastScan, summarizeBoxes } from '../utils/shipmentTracking';
+import { boxSummaryText, summarizeBoxes } from '../utils/shipmentTracking';
+import { attentionCounts, stallOf } from '../utils/meeting';
 
-// 朝8:30の納期会議の画面。上から 発注漏れ → 配送で止まっている → 納期超過 → 5日以内に期限 → 追跡番号なし。
+// 朝8:30の納期会議の画面。上から 発注漏れ → 配送の問題 → 送り状だけで動いていない → 納期超過 → 5日以内に期限 → 追跡番号なし。
 // 会議で決めた「誰が・いつまでに・何をする」は楽楽販売の「対応メモ」に入れてもらい、ここには最新の内容を出す（アプリからは書き込まない）。
 
-type SectionId = 'missed' | 'stalled' | 'overdue' | 'approaching' | 'untracked';
+type SectionId = 'missed' | 'stalled' | 'labelOnly' | 'overdue' | 'approaching' | 'untracked';
 
 const SECTIONS: { id: SectionId; label: string; rule: string; tone: string }[] = [
   { id: 'missed', label: '発注漏れ', rule: '受注済みのまま未発注で、最長納品予定日を過ぎている', tone: 'rose' },
-  { id: 'stalled', label: '配送で止まっている', rule: '配送会社が例外（通関保留・住所不明・不在・配達遅延・返送など）を返しているか、最後のスキャンから3日以上動きがない', tone: 'orange' },
+  { id: 'stalled', label: '配送の問題', rule: '配送会社が例外（通関保留・住所不明・不在・配達遅延・返送など）を返しているか、輸送中のまま最後のスキャンから3日以上動きがない', tone: 'orange' },
+  { id: 'labelOnly', label: '送り状だけで動いていない', rule: '送り状（ラベル）を作ってから3日以上、配送会社が荷物を受け取っていない', tone: 'slate' },
   { id: 'overdue', label: '納期超過', rule: '楽楽販売「納期：①超過」と同じ条件', tone: 'rose' },
   { id: 'approaching', label: '5日以内に期限', rule: '楽楽販売「納期：②注意」と同じ条件', tone: 'amber' },
   { id: 'untracked', label: '追跡番号なし', rule: '「◆出荷ステータス」の追跡番号が楽楽販売の出荷管理にない（未照合）', tone: 'slate' },
 ];
-
-const STALL_DAYS = 3;
 
 interface Row {
   key: string;
@@ -151,19 +151,17 @@ export const MorningMeetingView: React.FC<{
     const overdue = overdueOrders.map((o) => ({ ...rowFromOrder(o), alsoIn: missedIds.has(o.orderId) ? '発注漏れ' : undefined }));
     const approaching = orders.filter((o) => isOrderApproaching(o)).map((o) => rowFromOrder(o, { approaching: true }));
 
-    // 配送で止まっている：出荷済みでまだ届いていない出荷のうち、例外か、最後のスキャンから3日以上動きがないもの
+    // 配送で止まっている出荷を「配送の問題」と「送り状だけで動いていない」に分ける
     const stalled: Row[] = [];
+    const labelOnly: Row[] = [];
     shipments.forEach((s) => {
-      if (!(s.shipStatus || '').includes('出荷済')) return;
-      const sum = summarizeBoxes(s, carrierStatus);
-      const c = sum.rep;
-      if (!c || c.status === 'delivered') return;
-      const idle = daysSinceLastScan(c);
-      const isException = c.status === 'exception';
-      if (!isException && !(idle !== null && idle >= STALL_DAYS)) return;
+      const st = stallOf(s, carrierStatus);
+      if (!st) return;
+      const c = st.sum.rep!;
+      const idle = st.idle;
       const o = orderById.get(s.orderId);
       const base = o ? rowFromOrder(o) : null;
-      stalled.push({
+      (st.kind === 'problem' ? stalled : labelOnly).push({
         key: s.shipmentId,
         orderId: s.orderId && s.orderId !== '—' ? s.orderId : '',
         order: o,
@@ -172,8 +170,8 @@ export const MorningMeetingView: React.FC<{
         suppliers: base?.suppliers || '—',
         latestDate: base?.latestDate || null,
         daysOver: o && isOrderDelayed(o) ? getOrderMaxDelayDays(o) : 0,
-        carrier: `${boxSummaryText(sum)}${idle !== null ? `（最終スキャン ${idle}日前${c.lastLocation ? `・${c.lastLocation}` : ''}）` : ''}`,
-        carrierAlert: true,
+        carrier: `${boxSummaryText(st.sum)}${idle !== null ? `（最終スキャン ${idle}日前${c.lastLocation ? `・${c.lastLocation}` : ''}）` : ''}`,
+        carrierAlert: st.kind === 'problem',
         memo: (o?.handlingMemo || '').trim() || (s.handlingMemo && s.handlingMemo !== '—' ? s.handlingMemo : ''),
         shipmentId: s.shipmentId,
       });
@@ -184,6 +182,7 @@ export const MorningMeetingView: React.FC<{
     return {
       missed: missed.sort(byDays),
       stalled: stalled.sort(byDays),
+      labelOnly: labelOnly.sort(byDays),
       overdue: overdue.sort(byDays),
       approaching: approaching.sort(byDate),
     };
@@ -193,10 +192,13 @@ export const MorningMeetingView: React.FC<{
   const counts: Record<SectionId, number | null> = {
     missed: sections.missed.length,
     stalled: carrierLoaded ? sections.stalled.length : null,
+    labelOnly: carrierLoaded ? sections.labelOnly.length : null,
     overdue: sections.overdue.length,
     approaching: sections.approaching.length,
     untracked: sheetUnmatchedCount,
   };
+
+  const attention = useMemo(() => attentionCounts(orders, shipments, carrierStatus), [orders, shipments, carrierStatus]);
 
   // 今日の件数をサーバーに残し、前回（ふつうは前日）の件数と比べる
   const countsKey = JSON.stringify(counts);
@@ -330,7 +332,13 @@ export const MorningMeetingView: React.FC<{
         <p className="text-xs text-slate-500">
           会議で決めた「誰が・いつまでに・何をする」は、楽楽販売の「対応メモ」に入力してください（このアプリからは書き込みません）。入力した内容は次の更新でこの画面に出ます。
         </p>
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+        {carrierLoaded && (
+          <p className="text-sm text-slate-800">
+            要対応（納期超過＋配送の問題。同じ伝票は1件）：<b className="font-mono text-lg text-rose-700">{attention.total}</b>件
+            <span className="text-[11px] text-slate-500 ml-2">左のメニューの数字と同じです</span>
+          </p>
+        )}
+        <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-2">
           {SECTIONS.map((sec) => (
             <a key={sec.id} href={`#meeting-${sec.id}`} className="rounded-xl border border-slate-200 p-3 hover:bg-slate-50 block">
               <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
@@ -369,6 +377,8 @@ export const MorningMeetingView: React.FC<{
           {sec.id === 'missed' && <Table rows={sections.missed} />}
           {sec.id === 'stalled' &&
             (carrierLoaded ? <Table rows={sections.stalled} /> : <p className="text-xs text-slate-500 px-4 py-3">配送会社の状況を読み込み中…</p>)}
+          {sec.id === 'labelOnly' &&
+            (carrierLoaded ? <Table rows={sections.labelOnly} /> : <p className="text-xs text-slate-500 px-4 py-3">配送会社の状況を読み込み中…</p>)}
           {sec.id === 'overdue' && <Table rows={sections.overdue} />}
           {sec.id === 'approaching' && <Table rows={sections.approaching} showDays={false} />}
           {sec.id === 'untracked' && (

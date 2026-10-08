@@ -46,7 +46,8 @@ type ProcurementFilter =
   | 'all_unordered'      // 全未発注（入金待ち含む）
   | 'waiting_payment'    // 入金待ち
   | 'credit_cleared'     // 売掛・締日決済
-  | 'recently_ordered';  // 直近発注済
+  | 'recently_ordered'   // 直近発注済
+  | 'po_stale';          // 発注から14日以上たっても入荷していない
 
 type ViewMode = 'by_supplier' | 'by_order' | 'all_lines';
 
@@ -62,7 +63,13 @@ interface FlatProcurementItem {
   paymentMethod?: string;
   daysSincePayment: number | null;
   isAgingAlert: boolean;
+  /** 発注日からの日数（発注済・入荷待ちの明細だけ） */
+  daysSincePo: number | null;
+  isPoStale: boolean;
 }
+
+// 発注してからこの日数を過ぎても入荷していない明細は「発注後に止まっている」として目立たせる
+const PO_STALE_DAYS = 14;
 
 export const ProcurementView: React.FC<ProcurementViewProps> = ({
   orders,
@@ -133,6 +140,8 @@ export const ProcurementView: React.FC<ProcurementViewProps> = ({
         if (isShippingOrFee(l.productName, l.productId)) {
           return;
         }
+        const po = l.stage === '発注済・入荷待ち' && l.poDate ? parseYmd(l.poDate) : null;
+        const poDays = po ? Math.floor((today.getTime() - po.getTime()) / 86400000) : null;
 
         list.push({
           line: l,
@@ -146,6 +155,8 @@ export const ProcurementView: React.FC<ProcurementViewProps> = ({
           paymentMethod: ord.paymentMethod,
           daysSincePayment: daysSincePay,
           isAgingAlert: isAging && l.stage === '未発注',
+          daysSincePo: poDays,
+          isPoStale: poDays !== null && poDays >= PO_STALE_DAYS,
         });
       });
     });
@@ -168,6 +179,7 @@ export const ProcurementView: React.FC<ProcurementViewProps> = ({
       (it) => it.line.stage === '未発注' && it.paymentStatus === '売掛・締日決済'
     );
     const allUnordered = flatItems.filter((it) => it.line.stage === '未発注');
+    const poStale = flatItems.filter((it) => it.isPoStale);
 
     // 直近7日以内発注
     const recentlyOrdered = flatItems.filter((it) => {
@@ -198,6 +210,7 @@ export const ProcurementView: React.FC<ProcurementViewProps> = ({
       creditClearedCount: creditCleared.length,
       allUnorderedCount: allUnordered.length,
       recentlyOrderedCount: recentlyOrdered.length,
+      poStaleCount: poStale.length,
       supplierCount: supplierSet.size,
     };
   }, [flatItems]);
@@ -220,6 +233,8 @@ export const ProcurementView: React.FC<ProcurementViewProps> = ({
         if (it.line.stage !== '未発注' || it.paymentStatus !== '売掛・締日決済') return false;
       } else if (activeFilter === 'recently_ordered') {
         if (it.line.stage !== '発注済・入荷待ち') return false;
+      } else if (activeFilter === 'po_stale') {
+        if (!it.isPoStale) return false;
       }
 
       // 仕入先フィルター
@@ -514,6 +529,7 @@ ${linesText}
           {([
             ['paid_unordered', '要発注（入金済み）', stats.paidUnorderedCount, 'bg-amber-500 text-white', 'text-amber-800 bg-amber-50 border border-amber-200'],
             ['waiting_payment', '入金待ち', stats.waitingPaymentCount, 'bg-blue-600 text-white', 'text-blue-800 bg-blue-50 border border-blue-200'],
+            ['po_stale', `発注後に止まっている（${PO_STALE_DAYS}日以上）`, stats.poStaleCount, 'bg-rose-600 text-white', 'text-rose-800 bg-rose-50 border border-rose-200'],
           ] as const).map(([id, label, n, on, off]) => (
             <button
               key={id}
@@ -611,7 +627,7 @@ ${linesText}
             <div className="bg-white p-12 rounded-2xl border border-slate-200 text-center space-y-2">
               <CheckCircle2 className="w-10 h-10 text-emerald-500 mx-auto" />
               <h3 className="text-sm font-bold text-slate-800">
-                該当する未発注商品はありません
+                {activeFilter === 'po_stale' ? `発注から${PO_STALE_DAYS}日以上たって入荷していない明細はありません` : '該当する未発注商品はありません'}
               </h3>
               <p className="text-xs text-slate-500">
                 {localSearch.trim() || selectedSupplier !== 'all'
@@ -682,6 +698,8 @@ ${linesText}
                       <p className="text-xs text-slate-500 self-start md:self-auto max-w-xs">
                         楽楽販売で商品の仕入先を入力すると、発注メールと発注登録が使えるようになります。
                       </p>
+                    ) : activeFilter === 'po_stale' ? (
+                      <p className="text-[11px] text-rose-700 font-bold self-start md:self-auto">発注済みで入荷待ちの明細です。仕入先に出荷予定を確認してください。</p>
                     ) : (
                     <div className="flex items-center gap-2 flex-wrap self-start md:self-auto">
                       <button
@@ -893,12 +911,18 @@ ${linesText}
                                   >
                                     {remaining.text}
                                   </span>
+                                  {it.daysSincePo !== null && (
+                                    <div className={`text-[10px] font-bold ${it.isPoStale ? 'text-rose-600' : 'text-slate-500'}`}>
+                                      発注から{it.daysSincePo}日{it.isPoStale && '・未入荷'}
+                                    </div>
+                                  )}
                                 </div>
                               </td>
 
                               {/* アクション */}
                               <td className="py-3 px-3 text-center whitespace-nowrap">
                                 <div className="flex items-center justify-center gap-1.5">
+                                  {it.line.stage === '未発注' && (
                                   <button
                                     onClick={() => openCompleteModal([it.line])}
                                     className="px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-800 font-bold text-[11px] transition cursor-pointer flex items-center gap-1"
@@ -907,6 +931,7 @@ ${linesText}
                                     <Check className="w-3 h-3 text-emerald-600" />
                                     <span>発注登録</span>
                                   </button>
+                                  )}
 
                                 </div>
                               </td>
@@ -1124,6 +1149,11 @@ ${linesText}
                             }`}
                           >
                             {it.daysSincePayment}日経過
+                          </span>
+                        )}
+                        {it.daysSincePo !== null && (
+                          <span className={`block text-[10px] font-mono mt-0.5 ${it.isPoStale ? 'text-rose-600 font-bold' : 'text-slate-400'}`}>
+                            発注から{it.daysSincePo}日
                           </span>
                         )}
                       </td>

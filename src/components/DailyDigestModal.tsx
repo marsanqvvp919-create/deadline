@@ -10,6 +10,8 @@ interface DailyDigestModalProps {
   overdueCount: number;
   overdueLinesCount?: number;
   paidUnorderedCount: number;
+  /** 要対応（納期超過＋配送の問題。朝の納期会議・メニューと同じ数） */
+  attentionCount: number;
   onNavigate: (tab: ViewTab) => void;
 }
 
@@ -21,11 +23,10 @@ export const DailyDigestModal: React.FC<DailyDigestModalProps> = ({
   overdueCount,
   overdueLinesCount,
   paidUnorderedCount,
+  attentionCount,
   onNavigate,
 }) => {
   if (!isOpen) return null;
-
-  const highAlertsCount = alerts.filter(a => a.severity === '高').length;
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto">
@@ -91,16 +92,16 @@ export const DailyDigestModal: React.FC<DailyDigestModalProps> = ({
               </div>
 
               <div
-                onClick={() => { onClose(); onNavigate('alerts'); }}
+                onClick={() => { onClose(); onNavigate('morning_meeting'); }}
                 className="bg-indigo-50 border border-indigo-200 rounded-xl p-3.5 hover:bg-indigo-100/70 transition cursor-pointer group"
               >
                 <div className="flex items-center justify-between text-indigo-700 mb-1">
-                  <span className="text-xs font-bold">高重要度アラート</span>
+                  <span className="text-xs font-bold">要対応（納期会議）</span>
                   <Bell className="w-4 h-4" />
                 </div>
-                <div className="text-2xl font-black font-mono text-indigo-900">{highAlertsCount} <span className="text-xs font-normal">件</span></div>
+                <div className="text-2xl font-black font-mono text-indigo-900">{attentionCount} <span className="text-xs font-normal">件</span></div>
                 <div className="text-[11px] text-indigo-600 mt-1 flex items-center gap-1 group-hover:underline">
-                  <span>アラート一覧へ</span>
+                  <span>朝の納期会議を開く</span>
                   <ArrowRight className="w-3 h-3" />
                 </div>
               </div>
