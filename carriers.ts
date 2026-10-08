@@ -168,6 +168,40 @@ export async function trackFedex(cred: NonNullable<CarrierCredentials['fedex']>,
   return results;
 }
 
+/** 番号の照合用：出荷日・配達日・発送元と届け先の都市と国だけを返す（名前・住所の番地などは返さない） */
+export async function fedexDetails(cred: NonNullable<CarrierCredentials['fedex']>, trackingNos: string[]) {
+  const token = await getFedexToken(cred);
+  const out: any[] = [];
+  for (let i = 0; i < trackingNos.length; i += 30) {
+    const chunk = trackingNos.slice(i, i + 30);
+    const res = await fetch(`${fedexBase(cred.env)}/track/v1/trackingnumbers`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ includeDetailedScans: false, trackingInfo: chunk.map((n) => ({ trackingNumberInfo: { trackingNumber: n } })) }),
+      signal: AbortSignal.timeout(30000),
+    });
+    const json: any = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(`FedEx 追跡エラー: ${json?.errors?.[0]?.message || res.status}`);
+    for (const c of json?.output?.completeTrackResults || []) {
+      const r = (c.trackResults || [])[0] || {};
+      const place = (a: any) => [a?.city, a?.stateOrProvinceCode, a?.countryCode].filter(Boolean).join(', ');
+      const date = (type: string) => (r.dateAndTimes || []).find((x: any) => x.type === type)?.dateTime || '';
+      out.push({
+        trackingNo: String(c.trackingNumber),
+        found: !r.error,
+        status: r.latestStatusDetail?.description || r.error?.code || '',
+        shipDate: date('SHIP') || date('ACTUAL_PICKUP'),
+        deliveredAt: date('ACTUAL_DELIVERY'),
+        from: place(r.shipperInformation?.address) || place(r.originLocation?.locationContactAndAddress?.address),
+        to: place(r.recipientInformation?.address) || place(r.destinationLocation?.locationContactAndAddress?.address),
+        packages: r.packageDetails?.count || '',
+        weightKg: (r.packageDetails?.weightAndDimensions?.weight || []).find((w: any) => w.unit === 'KG')?.value || '',
+      });
+    }
+  }
+  return out;
+}
+
 // ----------------------------------------------------------------------
 // DHL（Shipment Tracking - Unified。1件ずつ問い合わせる）
 // ----------------------------------------------------------------------

@@ -9,7 +9,7 @@ import { Storage } from '@google-cloud/storage';
 import { GoogleAuth } from 'google-auth-library';
 import { parseSheetRows, findUnmatched, isTargetRow, trackingDigits } from './unmatchedShipments';
 import { buildImportPreview } from './sheetImport';
-import { CarrierCredentials, CarrierId, CarrierStatus, trackFedex, trackDhl, testCarrier, trackDomestic, testDomestic, traceDomesticRaw, domesticQuota, DOMESTIC_CARRIERS } from './carriers';
+import { CarrierCredentials, CarrierId, CarrierStatus, trackFedex, trackDhl, testCarrier, trackDomestic, testDomestic, traceDomesticRaw, domesticQuota, DOMESTIC_CARRIERS, fedexDetails } from './carriers';
 import { parseTrackingNumbers, classifyNumber, hintedCarrier, carrierName } from './src/utils/trackingNumbers';
 
 dotenv.config();
@@ -2912,6 +2912,18 @@ function resolvedStatusForClient(d: string): CarrierStatus | null {
 }
 
 // 追跡番号の一覧を受け取り、解決して返す（画面の「最新状況を取得」とカードの更新ボタン）
+// 崩れた追跡番号の候補を照合するための読み取り専用の照会（FedEx。最大60件）
+app.post('/api/carriers/fedex-details', async (req, res) => {
+  const nos: string[] = Array.isArray(req.body?.numbers) ? req.body.numbers.map((n: any) => String(n).replace(/\D/g, '')).filter(Boolean).slice(0, 60) : [];
+  const { creds } = await effectiveCarrierCreds();
+  if (!creds.fedex) return res.status(400).json({ error: 'FedEx の認証情報が未設定です' });
+  try {
+    return res.json({ results: await fedexDetails(creds.fedex, nos) });
+  } catch (e: any) {
+    return res.status(500).json({ error: e?.message || String(e) });
+  }
+});
+
 app.post('/api/carriers/track', async (req, res) => {
   const items: { trackingNo: string; courier?: string }[] = Array.isArray(req.body?.items) ? req.body.items.slice(0, 120) : [];
   const force = req.body?.force === true && items.length <= 5;
