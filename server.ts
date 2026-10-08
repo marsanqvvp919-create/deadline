@@ -1958,18 +1958,24 @@ const SHARED_NOTES_OBJECT = 'shared-notes.json';
 const SHARED_NOTE_SCOPES = ['overdue_followups', 'overdue_clinic_notes', 'unmatched_done'];
 let sharedNotes: Record<string, Record<string, any>> = {};
 let sharedNotesLoaded = false;
+let sharedNotesLoadedPromise: Promise<void> | null = null;
 let sharedNotesSaveTimer: NodeJS.Timeout | null = null;
 
 async function loadSharedNotes() {
-  if (sharedNotesLoaded) return;
-  sharedNotesLoaded = true;
-  if (!CACHE_BUCKET) return;
-  try {
-    const [buf] = await new Storage().bucket(CACHE_BUCKET).file(SHARED_NOTES_OBJECT).download();
-    sharedNotes = JSON.parse(buf.toString('utf-8')) || {};
-  } catch (e: any) {
-    if (e?.code !== 404) console.warn('[Shared Notes] Load failed:', e?.message || e);
+  // 同時に呼ばれても読み込みは1回だけにし、全員が読み込み完了を待つ（待たずに進むと空のデータで上書き保存してしまう）
+  if (!sharedNotesLoadedPromise) {
+    sharedNotesLoaded = true;
+    sharedNotesLoadedPromise = (async () => {
+      if (!CACHE_BUCKET) return;
+      try {
+        const [buf] = await new Storage().bucket(CACHE_BUCKET).file(SHARED_NOTES_OBJECT).download();
+        sharedNotes = JSON.parse(buf.toString('utf-8')) || {};
+      } catch (e: any) {
+        if (e?.code !== 404) console.warn('[Shared Notes] Load failed:', e?.message || e);
+      }
+    })();
   }
+  return sharedNotesLoadedPromise;
 }
 
 function scheduleSharedNotesSave() {
@@ -2108,18 +2114,24 @@ app.get('/api/rakuraku/import-status/:processId', async (req, res) => {
 const IMPORT_PREVIEW_OBJECT = 'sheet-import-preview.json';
 let importPreviewState: { latest: any | null; history: any[] } = { latest: null, history: [] };
 let importPreviewLoaded = false;
+let importPreviewLoadedPromise: Promise<void> | null = null;
 let importRunning = false;
 
 async function loadImportPreview() {
-  if (importPreviewLoaded) return;
-  importPreviewLoaded = true;
-  if (!CACHE_BUCKET) return;
-  try {
-    const [buf] = await new Storage().bucket(CACHE_BUCKET).file(IMPORT_PREVIEW_OBJECT).download();
-    importPreviewState = JSON.parse(buf.toString('utf-8'));
-  } catch (e: any) {
-    if (e?.code !== 404) console.warn('[Sheet Import] Load failed:', e?.message || e);
+  // 同時に呼ばれても読み込みは1回だけにし、全員が読み込み完了を待つ（待たずに進むと空のデータで上書き保存してしまう）
+  if (!importPreviewLoadedPromise) {
+    importPreviewLoaded = true;
+    importPreviewLoadedPromise = (async () => {
+      if (!CACHE_BUCKET) return;
+      try {
+        const [buf] = await new Storage().bucket(CACHE_BUCKET).file(IMPORT_PREVIEW_OBJECT).download();
+        importPreviewState = JSON.parse(buf.toString('utf-8'));
+      } catch (e: any) {
+        if (e?.code !== 404) console.warn('[Sheet Import] Load failed:', e?.message || e);
+      }
+    })();
   }
+  return importPreviewLoadedPromise;
 }
 
 async function runSheetImportDryRun(trigger: 'schedule' | 'manual', write = false) {
@@ -2363,6 +2375,7 @@ app.get('/api/rakuraku/schemas', (_req, res) => {
 const CARRIER_CRED_OBJECT = 'carrier-credentials.json';
 let savedCarrierCreds: CarrierCredentials = {};
 let carrierCredsLoaded = false;
+let carrierCredsLoadedPromise: Promise<void> | null = null;
 let carrierLastTest: Record<string, { ok: boolean; message: string; at: string }> = {};
 const carrierCache = new Map<string, CarrierStatus>();
 const CARRIER_CACHE_MS = 30 * 60 * 1000;
@@ -2386,6 +2399,7 @@ const jstHour = () => new Date(Date.now() + 9 * 3600 * 1000).getUTCHours();
 let dhlUsage = { date: jstDate(), calls: 0 };
 let dhlLastAutoRunAt: string | null = null;
 let carrierStatusLoaded = false;
+let carrierStatusLoadedPromise: Promise<void> | null = null;
 let carrierStatusSaveTimer: NodeJS.Timeout | null = null;
 
 function dhlUsedToday(): number {
@@ -2399,21 +2413,26 @@ function addDhlUsage(n: number) {
 
 // 取得結果は Cloud Storage に残し、再起動しても配送会社に問い合わせ直さない（回数の節約）
 async function loadCarrierStatusCache() {
-  if (carrierStatusLoaded) return;
-  carrierStatusLoaded = true;
-  if (!CACHE_BUCKET) return;
-  try {
-    const [buf] = await new Storage().bucket(CACHE_BUCKET).file(CARRIER_STATUS_OBJECT).download();
-    const json = JSON.parse(buf.toString('utf-8')) || {};
-    (json.statuses || []).forEach((c: CarrierStatus) => carrierCache.set(`${c.carrier}:${c.trackingNo}`, c));
-    if (json.usage?.date === jstDate()) dhlUsage = json.usage;
-    dhlLastAutoRunAt = json.lastAutoRunAt || null;
-    carrierWritten = json.written || {};
-    carrierWritebackLog = json.writebackLog || [];
-    console.log(`[Carriers] Restored ${carrierCache.size} statuses, DHL used today ${dhlUsage.calls}`);
-  } catch (e: any) {
-    if (e?.code !== 404) console.warn('[Carriers] Status cache load failed:', e?.message || e);
+  // 同時に呼ばれても読み込みは1回だけにし、全員が読み込み完了を待つ（待たずに進むと空のデータで上書き保存してしまう）
+  if (!carrierStatusLoadedPromise) {
+    carrierStatusLoaded = true;
+    carrierStatusLoadedPromise = (async () => {
+      if (!CACHE_BUCKET) return;
+      try {
+        const [buf] = await new Storage().bucket(CACHE_BUCKET).file(CARRIER_STATUS_OBJECT).download();
+        const json = JSON.parse(buf.toString('utf-8')) || {};
+        (json.statuses || []).forEach((c: CarrierStatus) => carrierCache.set(`${c.carrier}:${c.trackingNo}`, c));
+        if (json.usage?.date === jstDate()) dhlUsage = json.usage;
+        dhlLastAutoRunAt = json.lastAutoRunAt || null;
+        carrierWritten = json.written || {};
+        carrierWritebackLog = json.writebackLog || [];
+        console.log(`[Carriers] Restored ${carrierCache.size} statuses, DHL used today ${dhlUsage.calls}`);
+      } catch (e: any) {
+        if (e?.code !== 404) console.warn('[Carriers] Status cache load failed:', e?.message || e);
+      }
+    })();
   }
+  return carrierStatusLoadedPromise;
 }
 
 function scheduleCarrierStatusSave() {
@@ -2454,15 +2473,20 @@ async function runDhlLookup(apiKey: string, nos: string[]): Promise<{ got: Carri
 }
 
 async function loadCarrierCreds() {
-  if (carrierCredsLoaded) return;
-  carrierCredsLoaded = true;
-  if (!CACHE_BUCKET) return;
-  try {
-    const [buf] = await new Storage().bucket(CACHE_BUCKET).file(CARRIER_CRED_OBJECT).download();
-    savedCarrierCreds = JSON.parse(buf.toString('utf-8')) || {};
-  } catch (e: any) {
-    if (e?.code !== 404) console.warn('[Carriers] Load failed:', e?.message || e);
+  // 同時に呼ばれても読み込みは1回だけにし、全員が読み込み完了を待つ（待たずに進むと空のデータで上書き保存してしまう）
+  if (!carrierCredsLoadedPromise) {
+    carrierCredsLoaded = true;
+    carrierCredsLoadedPromise = (async () => {
+      if (!CACHE_BUCKET) return;
+      try {
+        const [buf] = await new Storage().bucket(CACHE_BUCKET).file(CARRIER_CRED_OBJECT).download();
+        savedCarrierCreds = JSON.parse(buf.toString('utf-8')) || {};
+      } catch (e: any) {
+        if (e?.code !== 404) console.warn('[Carriers] Load failed:', e?.message || e);
+      }
+    })();
   }
+  return carrierCredsLoadedPromise;
 }
 
 async function effectiveCarrierCreds(): Promise<{ creds: CarrierCredentials; source: Record<CarrierId, 'env' | 'saved' | null> }> {
@@ -2778,17 +2802,23 @@ app.get('/api/tracking/coverage', async (_req, res) => {
 const MEETING_HISTORY_OBJECT = 'meeting-history.json';
 let meetingHistory: Record<string, Record<string, number>> = {};
 let meetingHistoryLoaded = false;
+let meetingHistoryLoadedPromise: Promise<void> | null = null;
 
 async function loadMeetingHistory() {
-  if (meetingHistoryLoaded) return;
-  meetingHistoryLoaded = true;
-  if (!CACHE_BUCKET) return;
-  try {
-    const [buf] = await new Storage().bucket(CACHE_BUCKET).file(MEETING_HISTORY_OBJECT).download();
-    meetingHistory = JSON.parse(buf.toString('utf-8')) || {};
-  } catch (e: any) {
-    if (e?.code !== 404) console.warn('[Meeting] Load failed:', e?.message || e);
+  // 同時に呼ばれても読み込みは1回だけにし、全員が読み込み完了を待つ（待たずに進むと空のデータで上書き保存してしまう）
+  if (!meetingHistoryLoadedPromise) {
+    meetingHistoryLoaded = true;
+    meetingHistoryLoadedPromise = (async () => {
+      if (!CACHE_BUCKET) return;
+      try {
+        const [buf] = await new Storage().bucket(CACHE_BUCKET).file(MEETING_HISTORY_OBJECT).download();
+        meetingHistory = JSON.parse(buf.toString('utf-8')) || {};
+      } catch (e: any) {
+        if (e?.code !== 404) console.warn('[Meeting] Load failed:', e?.message || e);
+      }
+    })();
   }
+  return meetingHistoryLoadedPromise;
 }
 
 function previousMeetingCounts(today: string) {
