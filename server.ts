@@ -3199,7 +3199,6 @@ function buildCarrierWritebackRows(includeUnchanged = false): string[][] {
   return rows;
 }
 
-const SERVER_STARTED_AT = Date.now();
 async function runCarrierWriteback(): Promise<{ rows: number; succeedCount?: number; failureCount?: number; error?: string }> {
   if (!CARRIER_WRITEBACK_IMPORT_ID || carrierWritebackRunning) return { rows: 0 };
   // 起動直後（10分）は書き込まない（反映のたびに内容を確認できるように）
