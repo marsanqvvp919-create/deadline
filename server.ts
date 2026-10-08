@@ -2167,14 +2167,7 @@ app.get('/api/rakuraku/split-tracking', (_req, res) => {
   return res.json({ counts, toWrite: rows.length, sample: rows.slice(0, 20), irregular, log: trackingSplitLog.slice(0, 10) });
 });
 
-// 振り分けを楽楽販売に書き込む（limit で件数を絞れる。ids で出荷IDを指定もできる）
-app.post('/api/rakuraku/split-tracking', async (req, res) => {
-  let { rows } = planTrackingSplit();
-  const ids: string[] = Array.isArray(req.body?.ids) ? req.body.ids.map(String) : [];
-  if (ids.length > 0) rows = rows.filter((r) => ids.includes(r[0]));
-  const limit = Number(req.body?.limit) || 0;
-  if (limit > 0) rows = rows.slice(0, limit);
-  if (rows.length === 0) return res.json({ success: true, rows: 0, results: [] });
+async function writeTrackingSplit(rows: string[][], source: string) {
   const results: any[] = [];
   for (let i = 0; i < rows.length; i += 500) {
     const chunk = rows.slice(i, i + 500);
@@ -2197,11 +2190,46 @@ app.post('/api/rakuraku/split-tracking', async (req, res) => {
       break;
     }
   }
-  trackingSplitLog.unshift({ at: new Date().toISOString(), rows: rows.length, results });
+  trackingSplitLog.unshift({ at: new Date().toISOString(), source, rows: rows.length, results });
   trackingSplitLog = trackingSplitLog.slice(0, 20);
   console.log('[Tracking Split]', JSON.stringify(trackingSplitLog[0]));
-  return res.json({ success: results.every((r) => !r.error && !r.failureCount), rows: rows.length, results, sample: rows.slice(0, 10) });
+  return results;
+}
+
+// 振り分けを楽楽販売に書き込む（limit で件数を絞れる。ids で出荷IDを指定もできる）。
+// manualRows：崩れた番号を調べて直したもの [出荷ID, 国際追跡番号, 国内追跡番号]（2つの欄が空の出荷だけ書く）
+app.post('/api/rakuraku/split-tracking', async (req, res) => {
+  let rows: string[][];
+  if (Array.isArray(req.body?.manualRows)) {
+    const empty = new Set(
+      (serverRakurakuStore.shipments || [])
+        .filter((s: any) => !String(s.internationalTrackingNo || '').trim() && !String(s.domesticTrackingNo || '').trim())
+        .map((s: any) => s.shipmentId)
+    );
+    rows = req.body.manualRows
+      .map((r: any[]) => [String(r?.[0] || ''), String(r?.[1] || '').trim(), String(r?.[2] || '').trim()])
+      .filter((r: string[]) => empty.has(r[0]) && (r[1] || r[2]));
+  } else {
+    rows = planTrackingSplit().rows;
+    const ids: string[] = Array.isArray(req.body?.ids) ? req.body.ids.map(String) : [];
+    if (ids.length > 0) rows = rows.filter((r) => ids.includes(r[0]));
+    const limit = Number(req.body?.limit) || 0;
+    if (limit > 0) rows = rows.slice(0, limit);
+  }
+  if (rows.length === 0) return res.json({ success: true, rows: 0, results: [] });
+  const results = await writeTrackingSplit(rows, Array.isArray(req.body?.manualRows) ? 'manual' : 'request');
+  return res.json({ success: results.every((r) => !r.error && !r.failureCount), rows: rows.length, results, sample: rows.slice(0, 20) });
 });
+
+// 自動：新しく「出荷番号」に入った番号を、20分ごとに2つの欄へ振り分ける（失敗したら6時間あける）
+let trackingSplitRetryAfter = 0;
+async function runTrackingSplitAuto() {
+  if (Date.now() < trackingSplitRetryAfter || !serverRakurakuStore.shipments?.length) return;
+  const rows = planTrackingSplit().rows.slice(0, 500);
+  if (rows.length === 0) return;
+  const results = await writeTrackingSplit(rows, 'auto');
+  if (results.some((r) => r.error || r.failureCount)) trackingSplitRetryAfter = Date.now() + 6 * 60 * 60 * 1000;
+}
 
 // 取り込みの結果を楽楽販売にそのまま問い合わせる（読み取りのみ。失敗した行の理由を調べるため）
 app.get('/api/rakuraku/import-status/:processId', async (req, res) => {
@@ -3335,7 +3363,10 @@ setInterval(() => {
     .catch((e) => console.warn('[Carriers] Auto refresh failed:', e?.message || e))
     // 手動の取得（カードの更新ボタンなど）で変わった分も、20分ごとに書き戻す
     .then(() => runCarrierWriteback())
-    .catch((e) => console.warn('[Carriers] Write-back failed:', e?.message || e));
+    .catch((e) => console.warn('[Carriers] Write-back failed:', e?.message || e))
+    // 出荷番号に入った新しい番号を「国際追跡番号」「国内追跡番号」へ振り分ける
+    .then(() => runTrackingSplitAuto())
+    .catch((e) => console.warn('[Tracking Split] Auto failed:', e?.message || e));
 }, 20 * 60 * 1000);
 // 起動して楽楽販売のデータがそろったころに1回目
 setTimeout(() => {
