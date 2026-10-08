@@ -396,7 +396,12 @@ function transformCsvToShipments(csvText: string): any[] {
     const internationalTrackingNo = getVal(row, 'internationalTrackingNo') || '';
     const sagawaTrackingNo = getVal(row, 'sagawaTrackingNo') || '';
     // 複数口の出荷：対応メモに並べた残りの箱の追跡番号（10桁以上の数字。4桁区切りも読む）
-    const extraTrackingNos = extractTrackingNumbers(handlingMemo).filter((n) => n !== trackingNo.replace(/\D/g, ''));
+    // ＋楽楽販売の「国際追跡番号」「国内追跡番号（佐川）」の欄の番号も同じ出荷の箱として追跡する
+    const mainNos = new Set(parseTrackingNumbers(trackingNo));
+    const sagawaTrackingNos = parseTrackingNumbers(sagawaTrackingNo);
+    const extraTrackingNos = Array.from(
+      new Set([...extractTrackingNumbers(handlingMemo), ...parseTrackingNumbers(internationalTrackingNo), ...sagawaTrackingNos])
+    ).filter((n) => n !== trackingNo.replace(/\D/g, '') && !mainNos.has(n));
     const lineRef = {
       // 明細の受注IDは「000002950-1」のように行番号が付くので外す
       orderId: (getVal(row, 'lineOrderId') || orderId).replace(/-\d+$/, ''),
@@ -450,6 +455,7 @@ function transformCsvToShipments(csvText: string): any[] {
       carrierException,
       internationalTrackingNo,
       sagawaTrackingNo,
+      sagawaTrackingNos,
       extraTrackingNos,
       lineRef,
       isKantoNg,
@@ -2659,7 +2665,20 @@ const ageMs = (c?: CarrierStatus) => (c ? Date.now() - new Date(c.fetchedAt).get
 
 // 照会の順番：番号の形で決めた運送会社 → 該当なしならもう一方。
 // 国内配送の可能性がある12桁（7・8始まりでない）は、FedEx の次に 佐川 → ヤマト → 日本郵便（荷物追跡API）
+// 「国内追跡番号（佐川）」の欄に入っている番号（佐川から先に照会する）
+let sagawaNosSource: any[] | null = null;
+let sagawaNosSet = new Set<string>();
+function isSagawaDesignated(d: string): boolean {
+  const list = serverRakurakuStore.shipments;
+  if (list !== sagawaNosSource) {
+    sagawaNosSource = list;
+    sagawaNosSet = new Set((list || []).flatMap((s: any) => (s.sagawaTrackingNos as string[]) || []));
+  }
+  return sagawaNosSet.has(d);
+}
+
 function chainFor(d: string): CarrierId[] {
+  if (domesticEnabled && isSagawaDesignated(d)) return ['sagawa', ...DOMESTIC_CARRIERS.filter((c) => c !== 'sagawa')];
   const cls = classifyNumber(d);
   if (cls.invalid || !cls.primary) return [];
   const chain: CarrierId[] = [cls.primary as CarrierId];
