@@ -150,6 +150,10 @@ export function buildImportPreview(values: string[][], shipments: ImportShipment
 
       // 確定：倉庫出荷日・倉庫インボイス番号・到着空港
       if (!blank(row.shipDate)) values['倉庫出荷日'] = { to: row.shipDate, rule: '確定' };
+      // 現在地：楽楽販売で空欄の出荷だけ、倉庫から出ていれば「日本向け出荷済」にする（空欄のままだと取り込みが失敗する。後戻りはさせない）
+      if (blank(s.currentLocation) && !blank(row.shipDate)) {
+        values['現在地'] = { to: '日本向け出荷済', rule: '確定', note: '楽楽販売の現在地が空欄のため' };
+      }
       if (!blank(row.invoiceNo)) values['倉庫インボイス番号'] = { to: row.invoiceNo, rule: '確定' };
       if (!blank(row.airport)) {
         if (AIRPORTS.includes(row.airport.toUpperCase())) values['到着空港'] = { to: row.airport.toUpperCase(), rule: '確定' };
@@ -186,6 +190,7 @@ export function buildImportPreview(values: string[][], shipments: ImportShipment
       }
 
       const current: Record<string, string | undefined> = {
+        現在地: s.currentLocation,
         出荷元倉庫: s.warehouse,
         到着空港: s.arrivalAirport,
         輸入確認ステータス: s.importStatus,
@@ -219,11 +224,20 @@ export function buildImportPreview(values: string[][], shipments: ImportShipment
     }
   }
 
-  // 変更がある出荷だけを CSV にする（空欄の列は楽楽販売の値を変えないよう、インポート設定側で「空欄は更新しない」にする前提）
+  // 変更がある出荷だけを CSV にする。
+  // 現在地は空欄にすると取り込みが失敗するため、変えない出荷には楽楽販売の今の値をそのまま入れる。
+  // それでも空欄になる出荷は送らず「保留」に回す。
   const changedIds = new Set(changes.map((c) => c.shipmentId));
-  const csvRows = Array.from(changedIds).map((id) => {
+  const currentLocationOf = new Map(shipments.map((sh) => [sh.shipmentId, blank(sh.currentLocation) ? '' : String(sh.currentLocation)]));
+  const csvRows: string[][] = [];
+  Array.from(changedIds).forEach((id) => {
     const v = proposed.get(id) || {};
-    return IMPORT_COLUMNS.map((col) => (col === '出荷ID' ? id : v[col] || ''));
+    const location = v['現在地'] || currentLocationOf.get(id) || '';
+    if (!location) {
+      held.push({ sheetRow: 0, shipmentId: id, field: '現在地', sheetValue: '', reason: '楽楽販売の現在地が空欄で、シートにも出荷日がないため取り込めない' });
+      return;
+    }
+    csvRows.push(IMPORT_COLUMNS.map((col) => (col === '出荷ID' ? id : col === '現在地' ? location : v[col] || '')));
   });
 
   return {
@@ -232,7 +246,7 @@ export function buildImportPreview(values: string[][], shipments: ImportShipment
     targetRows: sheetRows.length,
     matchedRows,
     unmatchedRows: sheetRows.length - matchedRows,
-    shipmentsUpdated: changedIds.size,
+    shipmentsUpdated: csvRows.length,
     changes,
     held,
     csvColumns: IMPORT_COLUMNS,

@@ -2011,12 +2011,14 @@ async function importCsvToRakuraku(
   // 状況確認APIで完了を待つ（最大3分）
   for (let i = 0; i < 36; i++) {
     await new Promise((r) => setTimeout(r, 5000));
+    // 一時的な通信エラー（fetch failed）は、取り込み自体は進んでいるので次の確認を待つ
     const chk = await fetch(`${baseUrl}/api/checkcsvimportprocess/version/v1`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json; charset=utf-8', 'X-HD-apitoken': token.trim() },
       body: JSON.stringify({ processId }),
       signal: AbortSignal.timeout(30000),
-    });
+    }).catch(() => null);
+    if (!chk) continue;
     const cj: any = await chk.json().catch(() => null);
     const item = Array.isArray(cj?.items) ? cj.items[0] : cj?.items || cj;
     const status = String(cj?.processStatus ?? item?.processStatus ?? '');
@@ -2785,6 +2787,7 @@ const LOCATION_ORDER = ['発注済', 'ベンダー出荷済', 'SG入庫済', '�
 let carrierWritten: Record<string, string> = {}; // 出荷ID → 前回書き込んだ内容（同じなら送らない）
 let carrierWritebackLog: { at: string; rows: number; succeedCount?: number; failureCount?: number; status?: string; error?: string; sample?: string[] }[] = [];
 let carrierWritebackRunning = false;
+let carrierWritebackRetryAfter = 0;
 
 const jstDateTime = (iso?: string) => {
   if (!iso) return '';
@@ -2815,6 +2818,8 @@ function buildCarrierWritebackRows(includeUnchanged = false): string[][] {
     else if (found.some((c) => c.status === 'in_transit' || c.status === 'exception')) next = '日本向け出荷済';
     const current = blankValue(s.currentLocation) ? '' : String(s.currentLocation).trim();
     const location = next && locationIndex(next) > locationIndex(current) ? next : current;
+    // 現在地が空欄の行は楽楽販売が受け付けないので送らない（集荷前など、まだ動きがない出荷）
+    if (!location) continue;
 
     const deliveredDate = !blankValue(s.deliveredDate)
       ? s.deliveredDate
@@ -2858,6 +2863,8 @@ async function runCarrierWriteback(): Promise<{ rows: number; succeedCount?: num
   if (!CARRIER_WRITEBACK_IMPORT_ID || carrierWritebackRunning) return { rows: 0 };
   // 起動直後（10分）は書き込まない（反映のたびに内容を確認できるように）
   if (Date.now() - SERVER_STARTED_AT < 10 * 60 * 1000) return { rows: 0 };
+  // 前回失敗した行があれば、6時間は同じものを送り直さない（20分ごとに全行を送り直さないため）
+  if (Date.now() < carrierWritebackRetryAfter) return { rows: 0 };
   if (!serverRakurakuStore.shipments || serverRakurakuStore.shipments.length === 0) return { rows: 0 };
   carrierWritebackRunning = true;
   try {
@@ -2882,6 +2889,7 @@ async function runCarrierWriteback(): Promise<{ rows: number; succeedCount?: num
         failure += result.failureCount || 0;
         processIds.push(result.processId);
         if (result.failureCount === 0) chunk.forEach((r) => (carrierWritten[r[0]] = r.slice(1).join('|')));
+        else carrierWritebackRetryAfter = Date.now() + 6 * 60 * 60 * 1000;
       } catch (e: any) {
         // 楽楽販売の応答（status・json・text）をそのまま残す
         error = e?.message || (typeof e === 'object' ? JSON.stringify(e).slice(0, 800) : String(e));
