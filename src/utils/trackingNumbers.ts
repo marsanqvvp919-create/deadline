@@ -3,7 +3,7 @@
 //   例：「8750 3048 5323 8750 3086 2334」（FedEx 2箱）／「1643306420 8759-7636-7166」（DHL＋FedEx）／
 //       「4543-0726-7212、7223、7234」（国内配送の下4桁だけを並べた書き方）
 
-export type CarrierCode = 'dhl' | 'fedex';
+export type CarrierCode = 'dhl' | 'fedex' | 'yamato' | 'sagawa' | 'jppost';
 
 /** 欄の文字から追跡番号（数字だけ）を取り出す */
 export function parseTrackingNumbers(raw?: string | null): string[] {
@@ -81,7 +81,15 @@ export function classifyNumber(d: string): NumberClass {
 }
 
 export function carrierName(c: CarrierCode | null | undefined): string {
-  return c === 'dhl' ? 'DHL' : c === 'fedex' ? 'FedEx' : '';
+  return { dhl: 'DHL', fedex: 'FedEx', yamato: 'ヤマト', sagawa: '佐川', jppost: '日本郵便' }[c || ''] || '';
+}
+
+/** 国内配送の追跡ページ */
+export function domesticTrackingUrl(c: CarrierCode | null | undefined, d: string): string | null {
+  if (c === 'yamato') return `https://toi.kuronekoyamato.co.jp/cgi-bin/tneko?number01=${d}`;
+  if (c === 'sagawa') return `https://k2k.sagawa-exp.co.jp/p/web/okurijosearch.do?okurijoNo=${d}`;
+  if (c === 'jppost') return `https://trackings.post.japanpost.jp/services/srv/search/direct?reqCodeNo1=${d}`;
+  return null;
 }
 
 /** 楽楽販売の「配送業者」から読み取れる運送会社 */
@@ -89,6 +97,9 @@ export function hintedCarrier(courier?: string | null): CarrierCode | null {
   const h = String(courier || '').toLowerCase();
   if (h.includes('fedex')) return 'fedex';
   if (h.includes('dhl')) return 'dhl';
+  if (h.includes('佐川')) return 'sagawa';
+  if (h.includes('ヤマト') || h.includes('クロネコ')) return 'yamato';
+  if (h.includes('郵便') || h.includes('ゆうパック')) return 'jppost';
   return null;
 }
 

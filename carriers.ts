@@ -2,11 +2,15 @@
 // 認証情報はサーバーだけで持ち（環境変数、または管理画面から保存したもの）、ブラウザには返さない。
 // 応答は共通の形（CarrierStatus）に直して返す。
 
-export type CarrierId = 'fedex' | 'dhl';
+export type CarrierId = 'fedex' | 'dhl' | 'yamato' | 'sagawa' | 'jppost';
+/** 国内配送（荷物追跡API https://trackingapi.jp/ で照会する運送会社） */
+export const DOMESTIC_CARRIERS: CarrierId[] = ['sagawa', 'yamato', 'jppost'];
 
 export interface CarrierCredentials {
   fedex?: { clientId: string; clientSecret: string; env: 'sandbox' | 'production' };
   dhl?: { apiKey: string };
+  // 荷物追跡API（佐川・ヤマト・日本郵便）
+  domestic?: { apiKey: string; secretKey: string };
 }
 
 export type NormalizedStatus = 'delivered' | 'in_transit' | 'exception' | 'pre_transit' | 'unknown';
@@ -268,4 +272,123 @@ export async function testCarrier(carrier: CarrierId, cred: CarrierCredentials, 
   if (res.status === 404) return '認証に成功しました（テスト番号は見つかりませんでしたが、API Key は有効です）';
   if (!res.ok) throw new Error(`DHL エラー: ${res.status}`);
   return '認証に成功しました';
+}
+
+// ----------------------------------------------------------------------
+// 国内配送（荷物追跡API https://trackingapi.jp/）：佐川・ヤマト・日本郵便。1回50件まで、件数で課金（無料は月3,000件）
+// ----------------------------------------------------------------------
+const TRACKINGAPI_BASE = 'https://api.trackingapi.jp';
+const TRACKINGAPI_CODE: Record<string, string> = { sagawa: 'sagawa', yamato: 'yamato', jppost: 'post' };
+export let domesticQuota: { limit?: number; used?: number; remaining?: number; resetAt?: string } = {};
+
+function domesticAuth(cred: NonNullable<CarrierCredentials['domestic']>) {
+  return { Authorization: `Bearer ${cred.apiKey}:${cred.secretKey}`, 'Content-Type': 'application/json' };
+}
+
+function pickProgress(progresses: any[]): { at?: string; place?: string; text?: string } {
+  const list = Array.isArray(progresses) ? progresses : [];
+  const last = list[list.length - 1] || list[0];
+  if (!last || typeof last !== 'object') return {};
+  const at = last.date || last.datetime || last.dateTime || last.time || last.timestamp;
+  const place = last.place || last.location || last.office || last.branch || last.storeName;
+  const text = last.status || last.statusText || last.description || last.detail;
+  return { at: at ? String(at) : undefined, place: place ? String(place) : undefined, text: text ? String(text) : undefined };
+}
+
+function toIsoMaybe(v?: string): string | undefined {
+  if (!v) return undefined;
+  const t = new Date(v.replace(/\//g, '-').replace(' ', 'T'));
+  return isNaN(t.getTime()) ? undefined : t.toISOString();
+}
+
+function normalizeDomestic(carrier: CarrierId, trackingNo: string, r: any): CarrierStatus {
+  const fetchedAt = new Date().toISOString();
+  if (!r?.success) {
+    const code = String(r?.error?.code || '');
+    return {
+      carrier,
+      trackingNo,
+      status: 'unknown',
+      statusText: code === 'NOT_FOUND' ? '見つかりません' : r?.error?.message || code || '取得できませんでした',
+      error: r?.error?.message || code || 'error',
+      notFound: code === 'NOT_FOUND' || code === 'INVALID_TRACKING_NUMBER',
+      fetchedAt,
+    };
+  }
+  const d = r.data || {};
+  const code = String(d.deliveryStatus || 'UNKNOWN').toUpperCase();
+  const map: Record<string, NormalizedStatus> = {
+    REGISTERED: 'pre_transit',
+    PICKED_UP: 'in_transit',
+    IN_TRANSIT: 'in_transit',
+    OUT_FOR_DELIVERY: 'in_transit',
+    DELIVERED: 'delivered',
+    FAILED: 'exception',
+    RETURNED: 'exception',
+    HOLD: 'exception',
+    CANCELLED: 'exception',
+    UNKNOWN: 'unknown',
+  };
+  const status: NormalizedStatus = d.isDelivered ? 'delivered' : map[code] || 'unknown';
+  const p = pickProgress(d.progresses);
+  const lastAt = toIsoMaybe(p.at);
+  return {
+    carrier,
+    trackingNo,
+    status,
+    statusText: String(d.deliveryStatusText || p.text || code),
+    lastEventAt: lastAt,
+    lastLocation: p.place,
+    deliveredAt: status === 'delivered' ? lastAt : undefined,
+    fetchedAt,
+    // 国内配送はすでに日本国内・通関済み
+    arrivedJapan: true,
+    customsCleared: true,
+    domestic: status !== 'pre_transit',
+  };
+}
+
+export async function trackDomestic(
+  cred: NonNullable<CarrierCredentials['domestic']>,
+  carrier: CarrierId,
+  trackingNos: string[]
+): Promise<CarrierStatus[]> {
+  const courierCode = TRACKINGAPI_CODE[carrier];
+  if (!courierCode) return [];
+  const results: CarrierStatus[] = [];
+  for (let i = 0; i < trackingNos.length; i += 50) {
+    const chunk = trackingNos.slice(i, i + 50);
+    const res = await fetch(`${TRACKINGAPI_BASE}/v1/tracking/trace`, {
+      method: 'POST',
+      headers: domesticAuth(cred),
+      body: JSON.stringify({ items: chunk.map((n) => ({ courierCode, trackingNumber: n })) }),
+      signal: AbortSignal.timeout(30000),
+    });
+    const json: any = await res.json().catch(() => ({}));
+    if (!res.ok || json?.isSuccess === false) {
+      throw new Error(`荷物追跡API エラー: ${json?.error?.message || json?.message || res.status}`);
+    }
+    const q = json?.apiKeyInfo?.quota || json?.data?.apiKeyInfo?.quota;
+    if (q) domesticQuota = q;
+    const list: any[] = json?.data?.results || [];
+    list.forEach((r, idx) => {
+      const n = String(r?.data?.trackingNumber || r?.trackingNumber || chunk[idx]);
+      const st = normalizeDomestic(carrier, n, r);
+      // 一時的なエラーは保存しない（次回また照会する）
+      if (String(r?.error?.code || '') === 'TRACKING_FAILED') return;
+      results.push(st);
+    });
+  }
+  return results;
+}
+
+export async function testDomestic(cred: CarrierCredentials['domestic']): Promise<string> {
+  if (!cred) throw new Error('荷物追跡API のキーが未設定です');
+  const res = await fetch(`${TRACKINGAPI_BASE}/v1/usage`, { headers: domesticAuth(cred), signal: AbortSignal.timeout(20000) });
+  const json: any = await res.json().catch(() => ({}));
+  if (res.status === 401 || res.status === 403) throw new Error('荷物追跡API 認証エラー（API Key・Secret Key を確認してください）');
+  if (!res.ok) throw new Error(`荷物追跡API エラー: ${json?.error?.message || res.status}`);
+  const q = json?.data?.quota || json?.quota || json?.data?.apiKeyInfo?.quota || json?.apiKeyInfo?.quota;
+  if (q) domesticQuota = q;
+  return q ? `認証に成功しました（今月 ${q.used ?? '?'}/${q.limit ?? '?'}件使用、残り${q.remaining ?? '?'}件）` : '認証に成功しました';
 }

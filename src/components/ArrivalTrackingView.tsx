@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { classifyNumber, carrierName, hintedCarrier } from '../utils/trackingNumbers';
+import { classifyNumber, carrierName, hintedCarrier, domesticTrackingUrl } from '../utils/trackingNumbers';
 import { parseYmd, isShippingOrFee } from '../utils';
 import { useUrlState } from '../utils/listState';
 import { Order, ShipmentItem } from '../types';
@@ -139,8 +139,11 @@ function carrierOf(s: TrackingShipment, c: CarrierStatus | undefined, boxes: str
       ? `https://www.fedex.com/fedextrack/?trknbr=${first}`
       : first && code === 'dhl'
         ? `https://www.dhl.com/jp-ja/home/tracking.html?tracking-id=${first}`
-        : null;
-  return { label, url, mismatch: !!(hint && code && c && hint !== code) };
+        : first
+          ? domesticTrackingUrl(code || hintedCarrier(s.courier), first)
+          : null;
+  const intl = (x: string | null | undefined) => x === 'dhl' || x === 'fedex';
+  return { label, url, mismatch: !!(hint && code && c && intl(hint) && intl(code) && hint !== code) };
 }
 
 // 追跡の対象：出荷待ちと、出荷日から21日以内でまだ配達完了していない出荷、直近7日に配達完了した出荷
@@ -637,7 +640,7 @@ export const ArrivalTrackingView: React.FC<{
                             ? '追跡番号の誤りの可能性：DHL・FedEx のどちらにも該当がありません。楽楽販売の出荷番号を確認してください'
                             : boxes.length === 0
                               ? '追跡番号がありません（または国際郵便など、DHL・FedEx 以外の番号）'
-                              : 'API対象外：国内配送（佐川・ヤマトなど）の番号の可能性があります'}
+                              : '国内配送（佐川・ヤマトなど）の番号の可能性があります。「配送会社API連携」で荷物追跡APIを設定すると状況を取得します'}
                       </div>
                     )
                   )}

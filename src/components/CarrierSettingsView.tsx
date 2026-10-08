@@ -7,6 +7,12 @@ import { CheckCircle2, AlertCircle, KeyRound, Truck } from 'lucide-react';
 interface SettingsResponse {
   fedex: { configured: boolean; source: 'env' | 'saved' | null; env?: string; clientIdMasked?: string };
   dhl: { configured: boolean; source: 'env' | 'saved' | null; apiKeyMasked?: string };
+  domestic?: {
+    configured: boolean;
+    source: 'env' | 'saved' | null;
+    apiKeyMasked?: string;
+    quota?: { limit?: number; used?: number; remaining?: number; resetAt?: string };
+  };
   passcodeConfigured: boolean;
   storageConfigured: boolean;
   lastTest: Record<string, { ok: boolean; message: string; at: string }>;
@@ -21,7 +27,8 @@ export const CarrierSettingsView: React.FC = () => {
   // 接続先の既定は本番。保存済みならその接続先を表示する
   const [fedex, setFedex] = useState({ clientId: '', clientSecret: '', env: 'production' });
   const [dhlKey, setDhlKey] = useState('');
-  const [testNo, setTestNo] = useState({ fedex: '', dhl: '' });
+  const [domestic, setDomestic] = useState({ apiKey: '', secretKey: '' });
+  const [testNo, setTestNo] = useState({ fedex: '', dhl: '', domestic: '' });
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -52,6 +59,7 @@ export const CarrierSettingsView: React.FC = () => {
         setNotice({ ok: true, text: '保存しました。「接続テスト」で確認してください。' });
         setFedex({ clientId: '', clientSecret: '', env: fedex.env });
         setDhlKey('');
+        setDomestic({ apiKey: '', secretKey: '' });
         load();
       }
     } finally {
@@ -59,7 +67,7 @@ export const CarrierSettingsView: React.FC = () => {
     }
   };
 
-  const test = async (carrier: 'fedex' | 'dhl') => {
+  const test = async (carrier: 'fedex' | 'dhl' | 'domestic') => {
     setBusy(true);
     try {
       await fetch('/api/carriers/test', {
@@ -73,7 +81,7 @@ export const CarrierSettingsView: React.FC = () => {
     }
   };
 
-  const StatusLine = ({ carrier }: { carrier: 'fedex' | 'dhl' }) => {
+  const StatusLine = ({ carrier }: { carrier: 'fedex' | 'dhl' | 'domestic' }) => {
     const c = settings?.[carrier];
     const t = settings?.lastTest?.[carrier];
     return (
@@ -91,6 +99,12 @@ export const CarrierSettingsView: React.FC = () => {
             </span>
           )}
           {carrier === 'dhl' && settings?.dhl.configured && <span className="text-slate-500">（API Key {settings.dhl.apiKeyMasked}）</span>}
+          {carrier === 'domestic' && settings?.domestic?.configured && (
+            <span className="text-slate-500">
+              （API Key {settings.domestic.apiKeyMasked}
+              {settings.domestic.quota?.limit ? `・今月 ${settings.domestic.quota.used ?? 0}/${settings.domestic.quota.limit}件` : ''}）
+            </span>
+          )}
         </div>
         {t && (
           <div className={t.ok ? 'text-emerald-700' : 'text-rose-700'}>
@@ -111,7 +125,7 @@ export const CarrierSettingsView: React.FC = () => {
           <Truck className="w-5 h-5" /> 配送会社API連携
         </h2>
         <p className="text-xs text-slate-500">
-          FedEx・DHL の追跡APIの認証情報を登録すると、到着トラッキングや伝票の詳細で、配送会社の最新状況（配達完了・輸送中・通関の例外など）を取得できます。
+          FedEx・DHL・国内配送（佐川・ヤマト・日本郵便）の追跡APIの認証情報を登録すると、到着トラッキングや伝票の詳細で、配送会社の最新状況（配達完了・輸送中・通関の例外など）を取得できます。
           入力した値はサーバーに保存し、保存後は画面に表示しません。
         </p>
         {!settings?.passcodeConfigured && (
@@ -250,6 +264,69 @@ export const CarrierSettingsView: React.FC = () => {
               type="button"
               disabled={!canSave}
               onClick={() => save({ clear: 'dhl' })}
+              className="px-3 py-2 rounded-xl text-xs font-bold text-rose-700 disabled:opacity-40"
+            >
+              保存した値を消す
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-3">
+        <h3 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
+          <KeyRound className="w-4 h-4" /> 国内配送（荷物追跡API：佐川・ヤマト・日本郵便）
+        </h3>
+        <StatusLine carrier="domestic" />
+        <p className="text-[11px] text-slate-500">
+          荷物追跡API（trackingapi.jp）のダッシュボードにある API Key（pk_…）と Secret Key（sk_…）を入力してください。
+          国内配送の番号（12桁で7・8始まりでないもの）を、FedEx で見つからなければ 佐川 → ヤマト → 日本郵便の順に照会します。無料枠は月3,000件です。
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <input
+            autoComplete="off"
+            placeholder="API Key（pk_…）"
+            value={domestic.apiKey}
+            onChange={(e) => setDomestic({ ...domestic, apiKey: e.target.value })}
+            className={input}
+          />
+          <input
+            type="password"
+            autoComplete="off"
+            placeholder="Secret Key（sk_…）"
+            value={domestic.secretKey}
+            onChange={(e) => setDomestic({ ...domestic, secretKey: e.target.value })}
+            className={input}
+          />
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            disabled={!canSave || !domestic.apiKey || !domestic.secretKey}
+            onClick={() => save({ domestic })}
+            className="px-3 py-2 rounded-xl bg-slate-900 text-white text-xs font-bold disabled:opacity-40"
+          >
+            保存
+          </button>
+          <input
+            autoComplete="off"
+            placeholder="テスト用の追跡番号（任意）"
+            value={testNo.domestic}
+            onChange={(e) => setTestNo({ ...testNo, domestic: e.target.value })}
+            className={input + ' max-w-[220px]'}
+          />
+          <button
+            type="button"
+            disabled={busy || !settings?.domestic?.configured}
+            onClick={() => test('domestic')}
+            className="px-3 py-2 rounded-xl border border-slate-300 bg-white text-xs font-bold text-slate-700 disabled:opacity-40"
+          >
+            接続テスト
+          </button>
+          {settings?.domestic?.source === 'saved' && (
+            <button
+              type="button"
+              disabled={!canSave}
+              onClick={() => save({ clear: 'domestic' })}
               className="px-3 py-2 rounded-xl text-xs font-bold text-rose-700 disabled:opacity-40"
             >
               保存した値を消す

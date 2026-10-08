@@ -3,7 +3,7 @@
 export type NormalizedStatus = 'delivered' | 'in_transit' | 'exception' | 'pre_transit' | 'unknown';
 
 export interface CarrierStatus {
-  carrier: 'fedex' | 'dhl';
+  carrier: 'fedex' | 'dhl' | 'yamato' | 'sagawa' | 'jppost';
   trackingNo: string;
   status: NormalizedStatus;
   statusText: string;

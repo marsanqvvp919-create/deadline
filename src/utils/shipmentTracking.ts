@@ -1,6 +1,6 @@
 import { ShipmentItem } from '../types';
 import { CarrierStatus, CARRIER_STATUS_LABEL } from './carriers';
-import { parseTrackingNumbers } from './trackingNumbers';
+import { parseTrackingNumbers, carrierName } from './trackingNumbers';
 
 // 出荷ごとの箱（代表の出荷番号＋対応メモに並べた残りの箱の追跡番号）と、その配送状況をまとめる。
 // 複数口（湘南美容の一括配送など）は、全部の箱が配達完了になったときだけ「配達完了」にする。
@@ -52,7 +52,7 @@ export function summarizeBoxes(
 export function boxSummaryText(sum: BoxSummary): string {
   if (!sum.rep && sum.total === 0) return '追跡番号なし';
   if (!sum.rep) return '状況未取得';
-  const carrier = sum.rep.carrier === 'dhl' ? 'DHL' : 'FedEx';
+  const carrier = carrierName(sum.rep.carrier);
   if (sum.partial) return `${carrier} 一部配達（${sum.delivered}/${sum.total}箱）`;
   const boxes = sum.total > 1 ? `（${sum.total}箱）` : '';
   const label = CARRIER_STATUS_LABEL[sum.rep.status];

@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
+import { carrierName } from '../utils/trackingNumbers';
 import { CarrierStatus, fetchSavedCarrierStatuses } from '../utils/carriers';
 import { boxesOf, usableStatus } from '../utils/shipmentTracking';
 import { openRakurakuWithCopiedId } from '../utils';
@@ -350,7 +351,7 @@ export const KantoCustomsNgView: React.FC<KantoCustomsNgViewProps> = ({
                     <td className="py-2 px-3 font-bold text-slate-900">{clinic}</td>
                     <td className="py-2 px-3">{formatValue(s.arrivalAirport)}</td>
                     <td className="py-2 px-3 font-bold text-orange-700">
-                      {c.carrier === 'dhl' ? 'DHL' : 'FedEx'}：{c.statusText}
+                      {carrierName(c.carrier)}：{c.statusText}
                       <div className="font-mono text-[10px] text-slate-500 font-normal">{c.trackingNo}</div>
                     </td>
                     <td className="py-2 px-3">

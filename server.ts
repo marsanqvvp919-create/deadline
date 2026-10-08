@@ -9,8 +9,8 @@ import { Storage } from '@google-cloud/storage';
 import { GoogleAuth } from 'google-auth-library';
 import { parseSheetRows, findUnmatched, isTargetRow, trackingDigits } from './unmatchedShipments';
 import { buildImportPreview } from './sheetImport';
-import { CarrierCredentials, CarrierId, CarrierStatus, trackFedex, trackDhl, testCarrier } from './carriers';
-import { parseTrackingNumbers, classifyNumber, hintedCarrier } from './src/utils/trackingNumbers';
+import { CarrierCredentials, CarrierId, CarrierStatus, trackFedex, trackDhl, testCarrier, trackDomestic, testDomestic, domesticQuota, DOMESTIC_CARRIERS } from './carriers';
+import { parseTrackingNumbers, classifyNumber, hintedCarrier, carrierName } from './src/utils/trackingNumbers';
 
 dotenv.config();
 
@@ -2499,10 +2499,11 @@ async function loadCarrierCreds() {
   return carrierCredsLoadedPromise;
 }
 
-async function effectiveCarrierCreds(): Promise<{ creds: CarrierCredentials; source: Record<CarrierId, 'env' | 'saved' | null> }> {
+type CredSource = Record<'fedex' | 'dhl' | 'domestic', 'env' | 'saved' | null>;
+async function effectiveCarrierCreds(): Promise<{ creds: CarrierCredentials; source: CredSource }> {
   await loadCarrierCreds();
   const creds: CarrierCredentials = {};
-  const source: Record<CarrierId, 'env' | 'saved' | null> = { fedex: null, dhl: null };
+  const source: CredSource = { fedex: null, dhl: null, domestic: null };
   if (process.env.FEDEX_CLIENT_ID && process.env.FEDEX_CLIENT_SECRET) {
     creds.fedex = {
       clientId: process.env.FEDEX_CLIENT_ID,
@@ -2521,8 +2522,20 @@ async function effectiveCarrierCreds(): Promise<{ creds: CarrierCredentials; sou
     creds.dhl = savedCarrierCreds.dhl;
     source.dhl = 'saved';
   }
+  // 国内配送（荷物追跡API）：環境変数 TRACKINGAPI_KEY・TRACKINGAPI_SECRET、または画面から保存したもの
+  if (process.env.TRACKINGAPI_KEY && process.env.TRACKINGAPI_SECRET) {
+    creds.domestic = { apiKey: process.env.TRACKINGAPI_KEY, secretKey: process.env.TRACKINGAPI_SECRET };
+    source.domestic = 'env';
+  } else if (savedCarrierCreds.domestic?.apiKey && savedCarrierCreds.domestic?.secretKey) {
+    creds.domestic = savedCarrierCreds.domestic;
+    source.domestic = 'saved';
+  }
+  domesticEnabled = !!creds.domestic;
   return { creds, source };
 }
+
+// 国内配送の照会が使えるか（番号の照会順を決めるのに使う）
+let domesticEnabled = false;
 
 const mask = (v?: string) => (v ? `${v.slice(0, 4)}…${v.slice(-2)}` : '');
 
@@ -2531,6 +2544,7 @@ app.get('/api/carriers/settings', async (_req, res) => {
   return res.json({
     fedex: { configured: !!creds.fedex, source: source.fedex, env: creds.fedex?.env, clientIdMasked: mask(creds.fedex?.clientId) },
     dhl: { configured: !!creds.dhl, source: source.dhl, apiKeyMasked: mask(creds.dhl?.apiKey) },
+    domestic: { configured: !!creds.domestic, source: source.domestic, apiKeyMasked: mask(creds.domestic?.apiKey), quota: domesticQuota },
     passcodeConfigured: !!process.env.ADMIN_PASSCODE,
     storageConfigured: !!CACHE_BUCKET,
     lastTest: carrierLastTest,
@@ -2549,6 +2563,7 @@ app.put('/api/carriers/settings', async (req, res) => {
   const { fedex, dhl, clear } = req.body || {};
   if (clear === 'fedex') delete savedCarrierCreds.fedex;
   if (clear === 'dhl') delete savedCarrierCreds.dhl;
+  if (clear === 'domestic') delete savedCarrierCreds.domestic;
   // 接続先（テスト環境／本番）だけの変更は、キーを入れ直さずにできる
   if (fedex && !fedex.clientId && !fedex.clientSecret && fedex.env && savedCarrierCreds.fedex) {
     savedCarrierCreds.fedex.env = fedex.env === 'production' ? 'production' : 'sandbox';
@@ -2561,6 +2576,10 @@ app.put('/api/carriers/settings', async (req, res) => {
     };
   }
   if (dhl && dhl.apiKey) savedCarrierCreds.dhl = { apiKey: String(dhl.apiKey).trim() };
+  const { domestic } = req.body || {};
+  if (domestic && domestic.apiKey && domestic.secretKey) {
+    savedCarrierCreds.domestic = { apiKey: String(domestic.apiKey).trim(), secretKey: String(domestic.secretKey).trim() };
+  }
   try {
     await new Storage().bucket(CACHE_BUCKET).file(CARRIER_CRED_OBJECT).save(JSON.stringify(savedCarrierCreds), {
       contentType: 'application/json',
@@ -2576,11 +2595,29 @@ app.put('/api/carriers/settings', async (req, res) => {
 });
 
 app.post('/api/carriers/test', async (req, res) => {
-  const carrier = req.body?.carrier as CarrierId;
-  if (carrier !== 'fedex' && carrier !== 'dhl') return res.status(400).json({ error: 'carrier は fedex か dhl' });
+  const carrier = req.body?.carrier as CarrierId | 'domestic';
+  if (carrier !== 'fedex' && carrier !== 'dhl' && carrier !== 'domestic') return res.status(400).json({ error: 'carrier は fedex・dhl・domestic' });
   const { creds } = await effectiveCarrierCreds();
   try {
-    const message = await testCarrier(carrier, creds, req.body?.trackingNo ? String(req.body.trackingNo) : undefined);
+    let message: string;
+    if (carrier === 'domestic') {
+      message = await testDomestic(creds.domestic);
+      // テスト用の番号があれば、佐川 → ヤマト → 日本郵便の順に1件だけ照会する
+      const no = String(req.body?.trackingNo || '').replace(/\D/g, '');
+      if (no) {
+        for (const c of DOMESTIC_CARRIERS) {
+          const [r] = await trackDomestic(creds.domestic!, c, [no]);
+          if (r && !r.notFound && r.status !== 'unknown') {
+            carrierCache.set(`${c}:${no}`, r);
+            message += `。${no}：${carrierName(c)}・${r.statusText}`;
+            break;
+          }
+          if (c === DOMESTIC_CARRIERS[DOMESTIC_CARRIERS.length - 1]) message += `。${no}：佐川・ヤマト・日本郵便とも該当なし`;
+        }
+      }
+    } else {
+      message = await testCarrier(carrier, creds, req.body?.trackingNo ? String(req.body.trackingNo) : undefined);
+    }
     carrierLastTest[carrier] = { ok: true, message, at: new Date().toISOString() };
   } catch (e: any) {
     carrierLastTest[carrier] = { ok: false, message: e?.message || String(e), at: new Date().toISOString() };
@@ -2606,19 +2643,29 @@ const isFoundStatus = (c?: CarrierStatus) => !!c && !c.notFound && c.status !== 
 const cacheGet = (carrier: CarrierId, d: string) => carrierCache.get(`${carrier}:${d}`);
 const ageMs = (c?: CarrierStatus) => (c ? Date.now() - new Date(c.fetchedAt).getTime() : Infinity);
 
-function resolveDigits(d: string): Resolved {
+// 照会の順番：番号の形で決めた運送会社 → 該当なしならもう一方。
+// 国内配送の可能性がある12桁（7・8始まりでない）は、FedEx の次に 佐川 → ヤマト → 日本郵便（荷物追跡API）
+function chainFor(d: string): CarrierId[] {
   const cls = classifyNumber(d);
-  if (cls.invalid || !cls.primary) return { digits: d, state: 'invalid' };
-  const p = cacheGet(cls.primary, d);
-  if (!p) return { digits: d, state: 'pending', next: cls.primary };
-  if (isFoundStatus(p)) return { digits: d, state: 'found', carrier: cls.primary, status: p };
-  if (cls.domesticCandidate) return { digits: d, state: 'out_of_scope', carrier: cls.primary, status: p };
-  if (cls.fallback) {
-    const f = cacheGet(cls.fallback, d);
-    if (!f) return { digits: d, state: 'pending', next: cls.fallback };
-    if (isFoundStatus(f)) return { digits: d, state: 'found', carrier: cls.fallback, status: f };
+  if (cls.invalid || !cls.primary) return [];
+  const chain: CarrierId[] = [cls.primary as CarrierId];
+  if (cls.fallback) chain.push(cls.fallback as CarrierId);
+  if (cls.domesticCandidate && domesticEnabled) chain.push(...DOMESTIC_CARRIERS);
+  return chain;
+}
+
+function resolveDigits(d: string): Resolved {
+  const chain = chainFor(d);
+  if (chain.length === 0) return { digits: d, state: 'invalid' };
+  let first: CarrierStatus | undefined;
+  for (const carrier of chain) {
+    const c = cacheGet(carrier, d);
+    if (!c) return { digits: d, state: 'pending', next: carrier };
+    if (isFoundStatus(c)) return { digits: d, state: 'found', carrier, status: c };
+    first = first || c;
   }
-  return { digits: d, state: 'not_found', carrier: cls.primary, status: p };
+  const cls = classifyNumber(d);
+  return { digits: d, state: cls.domesticCandidate ? 'out_of_scope' : 'not_found', carrier: chain[0], status: first };
 }
 
 /** 出荷の箱：出荷番号の欄の番号＋対応メモの番号（20桁が FedEx で見つからなければ 10桁＋10桁に分ける） */
@@ -2642,6 +2689,21 @@ const shipDateOf = (s: any): number | null => {
 
 async function lookupCarrier(carrier: CarrierId, nos: string[], creds: CarrierCredentials): Promise<{ got: CarrierStatus[]; error?: string }> {
   if (nos.length === 0) return { got: [] };
+  if (DOMESTIC_CARRIERS.includes(carrier)) {
+    if (!creds.domestic) return { got: [], error: '荷物追跡API が未設定です' };
+    // 無料枠（月3,000件）の残りが少ないときは止める
+    if (domesticQuota.remaining !== undefined && domesticQuota.remaining < 100) {
+      return { got: [], error: `荷物追跡API の今月の残りが少ないため止めています（残り${domesticQuota.remaining}件）` };
+    }
+    try {
+      const got = await trackDomestic(creds.domestic, carrier, nos);
+      got.forEach((g) => carrierCache.set(`${carrier}:${g.trackingNo}`, g));
+      scheduleCarrierStatusSave();
+      return { got };
+    } catch (e: any) {
+      return { got: [], error: e?.message || String(e) };
+    }
+  }
   if (carrier === 'dhl') {
     if (!creds.dhl) return { got: [], error: 'DHL のAPIが未設定です' };
     return runDhlLookup(creds.dhl.apiKey, nos);
@@ -2666,22 +2728,23 @@ async function resolveAndLookup(
   const errors: Record<string, string> = {};
   const attempted = new Set<string>();
   let dhlUsedHere = 0;
-  for (let round = 0; round < 3; round++) {
-    const want: Record<CarrierId, string[]> = { fedex: [], dhl: [] };
+  for (let round = 0; round < 6; round++) {
+    const want: Record<string, string[]> = {};
     for (const d of digitsList) {
       const r = resolveDigits(d);
       let target: CarrierId | undefined;
       if (r.state === 'pending') target = r.next;
       else if (round === 0 && r.carrier && (r.state === 'found' || r.state === 'not_found' || r.state === 'out_of_scope')) {
         // カードの更新ボタン：前回から1分以上たっていれば取り直す
-        if (opts.force && ageMs(r.status) > 60 * 1000) target = r.state === 'found' ? r.carrier : classifyNumber(d).primary || undefined;
-        else if (opts.refreshStale?.(r)) target = r.state === 'found' ? r.carrier : classifyNumber(d).primary || undefined;
+        if (opts.force && ageMs(r.status) > 60 * 1000) target = r.state === 'found' ? r.carrier : chainFor(d)[0];
+        else if (opts.refreshStale?.(r)) target = r.state === 'found' ? r.carrier : chainFor(d)[0];
       }
       if (!target || attempted.has(`${target}:${d}`)) continue;
       attempted.add(`${target}:${d}`);
-      want[target].push(d);
+      (want[target] = want[target] || []).push(d);
     }
-    if (want.fedex.length === 0 && want.dhl.length === 0) break;
+    want.dhl = want.dhl || [];
+    if (Object.values(want).every((l) => l.length === 0)) break;
     // DHL は1日の回数が少ないので、まだ一度も取っていない番号 → 古い順に、上限まで
     const room = Math.max(0, Math.min(opts.dhlLimit - dhlUsedHere, DHL_DAILY_BUDGET - dhlUsedToday()));
     const dhlList = want.dhl.sort((a, b) => ageMs(cacheGet('dhl', b)) - ageMs(cacheGet('dhl', a))).slice(0, room);
@@ -2692,9 +2755,11 @@ async function resolveAndLookup(
           : `DHL は回数制限があるため${dhlList.length}件だけ取得しました（残り${want.dhl.length - dhlList.length}件は次回）`;
     }
     dhlUsedHere += dhlList.length;
-    const [f, h] = await Promise.all([lookupCarrier('fedex', want.fedex, creds), lookupCarrier('dhl', dhlList, creds)]);
-    if (f.error) errors.fedex = f.error;
-    if (h.error) errors.dhl = h.error;
+    const jobs = Object.entries(want).map(async ([carrier, list]) => {
+      const r = await lookupCarrier(carrier as CarrierId, carrier === 'dhl' ? dhlList : list, creds);
+      if (r.error) errors[DOMESTIC_CARRIERS.includes(carrier as CarrierId) ? 'domestic' : carrier] = r.error;
+    });
+    await Promise.all(jobs);
   }
   return errors;
 }
@@ -2708,7 +2773,12 @@ function resolvedStatusForClient(d: string): CarrierStatus | null {
       carrier: r.carrier!,
       trackingNo: d,
       status: 'unknown',
-      statusText: r.state === 'out_of_scope' ? 'API対象外（国内配送の可能性）' : '追跡番号の誤りの可能性（DHL・FedEx とも該当なし）',
+      statusText:
+        r.state === 'out_of_scope'
+          ? domesticEnabled
+            ? '追跡できない国内配送（佐川・ヤマト・日本郵便のどれにも該当なし）'
+            : 'API対象外（国内配送の可能性）'
+          : '追跡番号の誤りの可能性（どの運送会社にも該当なし）',
       error: r.status?.error || '該当なし',
       fetchedAt: r.status?.fetchedAt || new Date().toISOString(),
       lookup: r.state,
@@ -2750,6 +2820,7 @@ app.get('/api/carriers/statuses', async (_req, res) => {
     statuses: Array.from(digits).map(resolvedStatusForClient).filter(Boolean),
     dhl: { usedToday: dhlUsedToday(), budget: DHL_DAILY_BUDGET, lastAutoRunAt: carrierLastAutoRunAt, autoEnabled: !!creds.dhl },
     fedex: { lastAutoRunAt: carrierLastAutoRunAt, autoEnabled: !!creds.fedex, lastError: carrierLastErrors.fedex || null },
+    domestic: { lastAutoRunAt: carrierLastAutoRunAt, autoEnabled: !!creds.domestic, lastError: carrierLastErrors.domestic || null, quota: domesticQuota },
   });
 });
 
@@ -2897,11 +2968,14 @@ function buildCarrierWritebackRows(includeUnchanged = false): string[][] {
     const deliveredN = found.filter((c) => c.status === 'delivered').length;
     const allDelivered = deliveredN === boxes.length;
     const latest = found.slice().sort((a, b) => String(b.lastEventAt || '').localeCompare(String(a.lastEventAt || '')))[0];
-    const carrier = latest.carrier === 'dhl' ? 'DHL' : 'FedEx';
+    const carrier = carrierName(latest.carrier);
+    const isDomestic = DOMESTIC_CARRIERS.includes(latest.carrier);
 
     // 現在地：全箱配達完了 → 配達完了、日本で通関の記録・日本到着 → 通関中、輸送中 → 日本向け出荷済（後戻りはしない）
     let next = '';
     if (allDelivered) next = '配達完了';
+    // 国内配送（佐川・ヤマト・日本郵便）は通関がないので、配達完了以外は現在地を変えない
+    else if (isDomestic) next = '';
     else if (found.some((c) => c.arrivedJapan || c.customsCleared || /通関/.test(c.statusText || ''))) next = '通関中';
     else if (found.some((c) => c.status === 'in_transit' || c.status === 'exception')) next = '日本向け出荷済';
     const current = blankValue(s.currentLocation) ? '' : String(s.currentLocation).trim();
@@ -3092,7 +3166,9 @@ async function runCarrierAutoRefresh(force = false) {
           // 以前の形式で保存した FedEx の結果（通関完了日時などがない）は一度だけ取り直す
           if (r.carrier === 'fedex' && r.status!.domestic === undefined) return true;
           if (r.status!.status === 'delivered') return false;
-          return ageMs(r.status) > (r.carrier === 'dhl' ? DHL_REFRESH_AFTER_MS : 2 * 60 * 60 * 1000);
+          // 国内配送は無料枠（月3,000件）を守るため12時間ごと
+          const every = r.carrier === 'dhl' ? DHL_REFRESH_AFTER_MS : DOMESTIC_CARRIERS.includes(r.carrier!) ? 12 * 60 * 60 * 1000 : 2 * 60 * 60 * 1000;
+          return ageMs(r.status) > every;
         }
         // 作ったばかりの送り状は、まだ運送会社に登録されていないことがある
         return recent.has(r.digits) && ageMs(r.status) > 12 * 60 * 60 * 1000;
