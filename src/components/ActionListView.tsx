@@ -7,11 +7,13 @@ import { isShippingOrFee, openRakurakuWithCopiedId } from '../utils';
 import { isQuoteOrder } from '../utils/salesCalculations';
 import { getConfiguredUrls } from '../api';
 import { boxesOf } from '../utils/shipmentTracking';
+import { CarrierStatus, fetchSavedCarrierStatuses } from '../utils/carriers';
+import { carrierName, hintedCarrier } from '../utils/trackingNumbers';
 
 // やることリスト：楽楽販売のデータの抜け・止まっているものを、直す場所ごとにまとめる。
 // 納期超過・配送の問題は「朝の納期会議」で扱うので、ここには入れない。
 
-type RuleId = 'B1' | 'B2' | 'stuck_status' | 'no_supplier' | 'no_tracking' | 'bad_tracking';
+type RuleId = 'B1' | 'B2' | 'stuck_status' | 'no_supplier' | 'no_tracking' | 'bad_tracking' | 'wrong_carrier';
 
 const RULES: { id: RuleId; label: string; description: string; fix: string; kind: 'order' | 'shipment' }[] = [
   { id: 'B1', label: '未発注（3日以上）', description: '受注日から3日以上たっても未発注の明細がある伝票', fix: '発注して、楽楽販売の発注管理に登録する', kind: 'order' },
@@ -19,6 +21,7 @@ const RULES: { id: RuleId; label: string; description: string; fix: string; kind
   { id: 'stuck_status', label: 'ステータスが止まっている', description: '明細はすべて出荷完了なのに、伝票のステータスが「受注済み」「発注済み」のまま', fix: 'ご注文管理のステータスを「出荷済み」にする', kind: 'order' },
   { id: 'no_supplier', label: '仕入先が空', description: '仕入先が入っていない明細がある伝票（発注先が分からない）', fix: 'ご注文管理の明細に仕入先を入れる', kind: 'order' },
   { id: 'no_tracking', label: '出荷済みなのに追跡番号なし', description: `出荷済みの出荷（${60}日以内）で、出荷番号・国際追跡番号・国内追跡番号がどれも空`, fix: '出荷管理の「国際追跡番号」か「国内追跡番号」に番号を入れる', kind: 'shipment' },
+  { id: 'wrong_carrier', label: '配送業者の登録違い', description: '楽楽販売の「配送業者」と、追跡番号から分かった配送会社が違う出荷', fix: '出荷管理の「配送業者」を正しい会社に直す', kind: 'shipment' },
   { id: 'bad_tracking', label: '追跡番号が読めない', description: '出荷番号の桁数が合わず、自動で振り分けられなかった', fix: '出荷管理の「国際追跡番号」か「国内追跡番号」に正しい番号を入れる', kind: 'shipment' },
 ];
 
@@ -58,6 +61,14 @@ export const ActionListView: React.FC<{
   const [copied, setCopied] = useState<string | null>(null);
   const [irregular, setIrregular] = useState<{ shipmentId: string; trackingNo: string }[] | null>(null);
   const orderById = useMemo(() => new Map(orders.map((o) => [o.orderId, o])), [orders]);
+  const [carrierStatus, setCarrierStatus] = useState<Record<string, CarrierStatus> | null>(null);
+  useEffect(() => {
+    fetchSavedCarrierStatuses().then((snap) => {
+      const map: Record<string, CarrierStatus> = {};
+      (snap?.statuses || []).forEach((r) => (map[r.trackingNo] = r));
+      setCarrierStatus(map);
+    });
+  }, []);
 
   // 自動で振り分けられなかった追跡番号（サーバーが判定したもの）
   useEffect(() => {
@@ -129,6 +140,18 @@ export const ActionListView: React.FC<{
       if (boxesOf(s).length > 0 || NO_NUMBER_OK.test(s.trackingNo || '')) return;
       result.no_tracking.push(shipRow(s, s.trackingNo && s.trackingNo !== '—' ? `出荷番号「${s.trackingNo}」` : '番号なし'));
     });
+    // 配送業者の登録違い：番号で見つかった配送会社と、楽楽販売の「配送業者」が違う
+    result.wrong_carrier = [];
+    const seenWrong = new Set<string>();
+    shipments.forEach((s) => {
+      if (!carrierStatus || seenWrong.has(s.shipmentId) || !(s.shipStatus || '').includes('出荷済')) return;
+      seenWrong.add(s.shipmentId);
+      const hint = hintedCarrier(s.courier);
+      if (!hint) return;
+      const found = boxesOf(s).map((d) => carrierStatus[d]).filter((c) => c && c.lookup === 'found');
+      const other = found.find((c) => c!.carrier !== hint);
+      if (other) result.wrong_carrier.push(shipRow(s, `楽楽販売は${carrierName(hint)}／番号は${carrierName(other.carrier)}（${other.trackingNo}）`));
+    });
     const shipById = new Map(shipments.map((s) => [s.shipmentId, s]));
     result.bad_tracking = (irregular || []).map((x) => {
       const s = shipById.get(x.shipmentId);
@@ -139,7 +162,7 @@ export const ActionListView: React.FC<{
     if (repFilter) (Object.keys(result) as RuleId[]).forEach((k) => (result[k] = result[k].filter((r) => r.salesRep === repFilter)));
     (Object.keys(result) as RuleId[]).forEach((k) => result[k].sort((a, b) => String(b.date).localeCompare(String(a.date))));
     return result;
-  }, [alerts, orderById, orders, shipments, excludedOrderIds, irregular, repFilter]);
+  }, [alerts, orderById, orders, shipments, excludedOrderIds, irregular, repFilter, carrierStatus]);
 
   const current = RULES.find((r) => r.id === rule) || RULES[0];
   const rows = byRule[current.id] || [];
@@ -170,9 +193,10 @@ export const ActionListView: React.FC<{
             </p>
           )}
         </div>
-        <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-2">
+        <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-7 gap-2">
           {RULES.map((r) => {
-            const n = r.id === 'bad_tracking' && irregular === null ? null : byRule[r.id]?.length || 0;
+            const n =
+              (r.id === 'bad_tracking' && irregular === null) || (r.id === 'wrong_carrier' && carrierStatus === null) ? null : byRule[r.id]?.length || 0;
             return (
               <button
                 key={r.id}

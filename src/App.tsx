@@ -1093,6 +1093,8 @@ export default function App() {
               orders={filteredOrders}
               clinics={clinics}
               onSelectOrder={handleOpenDetail}
+              customsTabCount={kantoNgCount}
+              onOpenCustomsNg={() => setActiveTab('kanto_customs_ng')}
             />
           )}
 

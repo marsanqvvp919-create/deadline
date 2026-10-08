@@ -18,7 +18,7 @@ export interface CarrierStatus {
   customsClearedAt?: string;
   domestic?: boolean;
   notFound?: boolean;
-  lookup?: 'found' | 'not_found' | 'out_of_scope';
+  lookup?: 'found' | 'not_found' | 'out_of_scope' | 'retrying';
 }
 
 export const CARRIER_STATUS_LABEL: Record<NormalizedStatus, string> = {

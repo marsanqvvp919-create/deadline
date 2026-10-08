@@ -30,6 +30,9 @@ interface CustomsManagementViewProps {
   error?: string | null;
   lastSuccessTime?: string | null;
   onRetry?: () => void;
+  /** 「通関NG・通関保留」タブと同じ数（関東通関不可＋配送会社の通関保留） */
+  customsTabCount?: number;
+  onOpenCustomsNg?: () => void;
 }
 
 export const CustomsManagementView: React.FC<CustomsManagementViewProps> = ({
@@ -41,6 +44,8 @@ export const CustomsManagementView: React.FC<CustomsManagementViewProps> = ({
   error = null,
   lastSuccessTime = null,
   onRetry,
+  customsTabCount,
+  onOpenCustomsNg,
 }) => {
   const [selectedAirport, setSelectedAirport] = useUrlState<string>('airport', 'all');
   // 最初は対応中の出荷だけを表示する（全件だと過去の出荷が大半を占めるため）
@@ -294,10 +299,15 @@ export const CustomsManagementView: React.FC<CustomsManagementViewProps> = ({
             <span className="text-[10px] text-slate-500 block mt-0.5">クール申請・委任状・伝票のいずれかが未</span>
           </div>
 
-          <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
-            <span className="text-xs text-rose-700 block mb-1">通関NG</span>
-            <span className="text-2xl font-extrabold font-mono text-rose-600">{customsNgTotal}</span>
-            <span className="text-[10px] text-slate-500 block mt-0.5">到着NRTかつ関東通関不可</span>
+          <div
+            className={`bg-slate-50 border border-slate-200 p-3.5 rounded-2xl ${onOpenCustomsNg ? 'cursor-pointer hover:bg-slate-100' : ''}`}
+            onClick={onOpenCustomsNg}
+          >
+            <span className="text-xs text-rose-700 block mb-1">通関NG・通関保留</span>
+            <span className="text-2xl font-extrabold font-mono text-rose-600">{customsTabCount ?? customsNgTotal}</span>
+            <span className="text-[10px] text-slate-500 block mt-0.5">
+              関東通関不可（NRT）{customsNgTotal}件・配送会社の通関保留{Math.max(0, (customsTabCount ?? customsNgTotal) - customsNgTotal)}件
+            </span>
           </div>
         </div>
       </div>

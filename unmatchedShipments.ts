@@ -321,11 +321,22 @@ export function findUnmatched(
         issues.push({ ...row, issue: 'registered_elsewhere', shipments: hits });
         continue;
       }
-      // 出荷日のずれ：シートの出荷日と楽楽販売の出荷日が違う
+      // 出荷日のずれ：番号が別の出荷に付いていないかの確認。
+      // 「倉庫出荷日」があればそれと比べる（シートから入れた日なので本来一致する）。
+      // 無ければ「出荷日」と比べるが、出荷日は楽楽販売に入力した日になることが多いので、
+      // シートより前の日付か、7日を超えて後の日付のときだけ知らせる
       const sheetDate = parseDate(row.shipDate);
-      const rakurakuDates = hits.map((s) => parseDate(s.shippedDate || '')).filter((d): d is Date => !!d);
-      if (sheetDate && rakurakuDates.length > 0 && rakurakuDates.every((d) => daysBetween(d, sheetDate) !== 0)) {
-        issues.push({ ...row, issue: 'ship_date_mismatch', shipments: hits, rakurakuShipDate: formatYmd(rakurakuDates[0]) });
+      const off = (s: any): number | null => {
+        const wh = parseDate(s.warehouseShippedDate || '');
+        if (wh && sheetDate) return daysBetween(wh, sheetDate) === 0 ? null : 1;
+        const d = parseDate(s.shippedDate || '');
+        if (!d || !sheetDate) return null;
+        const gap = Math.round((d.getTime() - sheetDate.getTime()) / 86400000);
+        return gap < 0 || gap > 7 ? 1 : null;
+      };
+      if (sheetDate && hits.length > 0 && hits.every((s) => off(s) !== null)) {
+        const first = hits[0] as any;
+        issues.push({ ...row, issue: 'ship_date_mismatch', shipments: hits, rakurakuShipDate: formatYmd(parseDate(first.warehouseShippedDate || '') || parseDate(first.shippedDate || '')!) });
       }
       continue;
     }

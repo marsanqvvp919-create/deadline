@@ -67,7 +67,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   }, [generatedAt, ticker]);
 
   // 追跡のカバー率（サーバーがシートと楽楽販売・配送会社の状況から計算）
-  const [coverage, setCoverage] = useState<{ denominator: number; tracked: number; notFetched: number; outOfScope?: number; untracked: number } | null>(null);
+  const [coverage, setCoverage] = useState<{ denominator: number; tracked: number; notFetched: number; outOfScope?: number; untracked: number; bulk?: number } | null>(null);
   useEffect(() => {
     fetch('/api/tracking/coverage')
       .then((r) => r.json())
@@ -625,6 +625,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <h3 className="text-sm font-bold text-slate-900">追跡のカバー率</h3>
             <span className="text-[11px] text-slate-500">
               直近30日の「◆出荷ステータス」の出荷のうち、まだ配達完了でない {coverage.denominator}件が対象
+              {coverage.bulk ? `（一括発注の${coverage.bulk}件は除く）` : ''}
             </span>
           </div>
           <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
@@ -636,7 +637,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   件{coverage.denominator > 0 && `（${Math.round((coverage.tracked / coverage.denominator) * 100)}%）`}
                 </span>
               </div>
-              <span className="text-[11px] text-emerald-800/80">楽楽販売に追跡番号があり、DHL・FedEx から状況が取れている</span>
+              <span className="text-[11px] text-emerald-800/80">楽楽販売に追跡番号があり、配送会社（DHL・FedEx・佐川・ヤマト・日本郵便）から状況が取れている</span>
             </div>
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
               <span className="text-xs font-bold text-slate-700">照合済み・状況まだ</span>
@@ -652,7 +653,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 <span className="text-2xl font-extrabold font-mono text-slate-700">{coverage.outOfScope ?? 0}</span>
                 <span className="text-xs font-bold text-slate-600">件</span>
               </div>
-              <span className="text-[11px] text-slate-500">国内配送（佐川・ヤマトなど）の番号や、DHL・FedEx とも該当がない番号。APIでは追えない</span>
+              <span className="text-[11px] text-slate-500">どの配送会社にも該当がない番号など。APIでは追えない</span>
             </div>
             <button
               type="button"
@@ -664,7 +665,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 <span className="text-2xl font-extrabold font-mono text-amber-700">{coverage.untracked}</span>
                 <span className="text-xs font-bold text-amber-700">件</span>
               </div>
-              <span className="text-[11px] text-amber-800/80">追跡番号が楽楽販売にない。押すと未照合の一覧へ</span>
+              <span className="text-[11px] text-amber-800/80">追跡番号が楽楽販売にない（「楽楽販売と未照合」と同じ数え方。対象期間が違うため件数は少しずれます）。押すと一覧へ</span>
             </button>
           </div>
         </div>

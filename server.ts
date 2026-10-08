@@ -7,7 +7,7 @@ import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { Storage } from '@google-cloud/storage';
 import { GoogleAuth } from 'google-auth-library';
-import { parseSheetRows, findUnmatched, isTargetRow, trackingDigits } from './unmatchedShipments';
+import { parseSheetRows, findUnmatched, isTargetRow, trackingDigits, BULK_ORDER_GROUPS } from './unmatchedShipments';
 import { buildImportPreview } from './sheetImport';
 import { CarrierCredentials, CarrierId, CarrierStatus, trackFedex, trackDhl, testCarrier, trackDomestic, testDomestic, traceDomesticRaw, domesticQuota, DOMESTIC_CARRIERS, fedexDetails } from './carriers';
 import { parseTrackingNumbers, classifyNumber, hintedCarrier, carrierName } from './src/utils/trackingNumbers';
@@ -1965,6 +1965,7 @@ app.get('/api/shipment-sheet/unmatched', async (req, res) => {
       // 複数口：対応メモの追跡番号でも照合する
       trackingNo: [s.trackingNo, ...((s.extraTrackingNos as string[]) || [])].join(' '),
       shippedDate: s.shippedDate,
+      warehouseShippedDate: s.warehouseShippedDate,
       shipStatus: s.shipStatus,
       warehouse: s.warehouse,
       warehouseInvoiceNo: s.warehouseInvoiceNo,
@@ -2798,6 +2799,8 @@ interface Resolved {
   carrier?: CarrierId;
   status?: CarrierStatus;
   next?: CarrierId;
+  /** 一時的なエラーで取り直し待ち（どの運送会社で失敗したか） */
+  retrying?: CarrierStatus;
 }
 
 // 「不明」（見つからない・エラー）は見つかったとみなさない
@@ -2837,7 +2840,7 @@ function resolveDigits(d: string): Resolved {
   const chain = chainFor(d);
   if (chain.length === 0) return { digits: d, state: 'invalid' };
   let first: CarrierStatus | undefined;
-  let transientSeen = false;
+  let transientSeen: CarrierStatus | undefined;
   for (const carrier of chain) {
     const c = cacheGet(carrier, d);
     if (!c) return { digits: d, state: 'pending', next: carrier };
@@ -2845,13 +2848,13 @@ function resolveDigits(d: string): Resolved {
     // 運送会社側の一時的なエラー（「後ほどもう一度」・メンテナンス中など）は「見つからない」と区別し、時間をおいて取り直す
     if (isTransientError(c)) {
       if (ageMs(c) > transientRetryMs(carrier)) return { digits: d, state: 'pending', next: carrier };
-      transientSeen = true;
+      transientSeen = transientSeen || c;
       continue;
     }
     first = first || c;
   }
   // どこかで一時的なエラーがあった番号は「番号の誤り」にしない（取り直すまで未取得のまま）
-  if (transientSeen) return { digits: d, state: 'pending' };
+  if (transientSeen) return { digits: d, state: 'pending', retrying: transientSeen };
   const cls = classifyNumber(d);
   return { digits: d, state: cls.domesticCandidate ? 'out_of_scope' : 'not_found', carrier: chain[0], status: first };
 }
@@ -2956,6 +2959,17 @@ async function resolveAndLookup(
 function resolvedStatusForClient(d: string): CarrierStatus | null {
   const r = resolveDigits(d);
   if (r.state === 'found') return { ...r.status!, trackingNo: d, lookup: 'found' } as any;
+  if (r.state === 'pending' && r.retrying) {
+    return {
+      carrier: r.retrying.carrier,
+      trackingNo: d,
+      status: 'unknown',
+      statusText: '運送会社側の一時的なエラー（自動で取り直します）',
+      error: r.retrying.error,
+      fetchedAt: r.retrying.fetchedAt,
+      lookup: 'retrying',
+    } as any;
+  }
   if (r.state === 'not_found' || r.state === 'out_of_scope') {
     return {
       carrier: r.carrier!,
@@ -3043,6 +3057,7 @@ app.get('/api/tracking/coverage', async (_req, res) => {
     let untracked = 0;
     let noNumber = 0;
     let outOfScope = 0;
+    let bulk = 0;
     for (const r of rows) {
       const digits = parseTrackingNumbers(r.trackingNo);
       if (digits.length === 0) {
@@ -3055,7 +3070,9 @@ app.get('/api/tracking/coverage', async (_req, res) => {
         continue;
       }
       const inRakuraku = digits.some((d) => known.has(d));
-      if (!inRakuraku) untracked++;
+      // 一括発注（湘南美容など）は「楽楽販売と未照合」と同じく別に数える
+      if (!inRakuraku && BULK_ORDER_GROUPS.some((g) => g.sheetPattern.test(r.clinicName || ''))) bulk++;
+      else if (!inRakuraku) untracked++;
       else if (found.length > 0) tracked++;
       // 国内配送・両社とも該当なし・桁数違いは、待っても状況が取れないので別に数える
       else if (digits.map(resolveDigits).every((x) => x.state !== 'pending')) outOfScope++;
@@ -3071,6 +3088,7 @@ app.get('/api/tracking/coverage', async (_req, res) => {
       untracked,
       delivered,
       noNumber,
+      bulk,
     });
   } catch (e: any) {
     return res.json({ success: false, error: e?.message || String(e) });

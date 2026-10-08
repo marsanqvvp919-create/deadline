@@ -85,7 +85,7 @@ function lookupKindOf(boxes: string[], statuses: Record<string, CarrierStatus>):
   if (boxes.length === 0) return 'none';
   const ls = boxes.map((d) => statuses[d]?.lookup || (statuses[d] ? 'found' : classifyNumber(d).primary ? 'pending' : 'invalid'));
   if (ls.includes('found')) return 'found';
-  if (ls.includes('pending')) return 'pending';
+  if (ls.includes('pending') || ls.includes('retrying')) return 'pending';
   if (ls.includes('not_found') || ls.includes('invalid')) return 'not_found';
   return 'none';
 }
@@ -630,14 +630,19 @@ export const ArrivalTrackingView: React.FC<{
                   ) : (
                     (now === 'no_info' || now === 'not_linked' || now === 'bad_number') && (
                       <div className="text-[11px] text-slate-500 bg-slate-50 rounded-lg px-2.5 py-1.5">
-                        {now === 'no_info'
+                        {now === 'no_info' && boxes.some((d) => carrierStatus[d]?.lookup === 'retrying')
+                          ? (() => {
+                              const r = boxes.map((d) => carrierStatus[d]).find((c) => c?.lookup === 'retrying')!;
+                              return `${carrierName(r.carrier)}の照会が、運送会社側の一時的な不具合（メンテナンスなど）で失敗しました。時間をおいて自動で取り直します`;
+                            })()
+                          : now === 'no_info'
                           ? carrier.label === 'DHL'
                             ? dhlInfo && dhlInfo.usedToday >= dhlInfo.budget - 40
                               ? `DHL の今日の取得回数（${dhlInfo.usedToday}/${dhlInfo.budget}回）が上限近くのため、自動取得は明日の朝7時以降になります。急ぐときは右下の更新ボタンで取得できます（残り${Math.max(0, dhlInfo.budget - dhlInfo.usedToday)}回）`
                               : 'DHL の状況はまだ取得していません（2時間ごとの自動取得で順番に取得します。急ぐときは右下の更新ボタン）'
                             : `${carrier.label} の状況はまだ取得していません（上のボタンで取得）`
                           : now === 'bad_number'
-                            ? '追跡番号の誤りの可能性：DHL・FedEx のどちらにも該当がありません。楽楽販売の出荷番号を確認してください'
+                            ? '追跡番号の誤りの可能性：どの運送会社にも該当がありません。楽楽販売の追跡番号を確認してください'
                             : boxes.length === 0
                               ? '追跡番号がありません（または国際郵便など、DHL・FedEx 以外の番号）'
                               : '国内配送（佐川・ヤマトなど）の番号の可能性があります。「配送会社API連携」で荷物追跡APIを設定すると状況を取得します'}
