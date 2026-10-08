@@ -2421,7 +2421,7 @@ async function loadCarrierStatusCache() {
       try {
         const [buf] = await new Storage().bucket(CACHE_BUCKET).file(CARRIER_STATUS_OBJECT).download();
         const json = JSON.parse(buf.toString('utf-8')) || {};
-        (json.statuses || []).forEach((c: CarrierStatus) => carrierCache.set(`${c.carrier}:${c.trackingNo}`, c));
+        (json.statuses || []).forEach((c: CarrierStatus) => carrierCache.set(`${c.carrier}:${c.trackingNo}`, fixLegacyStatus(c)));
         if (json.usage?.date === jstDate()) dhlUsage = json.usage;
         dhlLastAutoRunAt = json.lastAutoRunAt || null;
         carrierWritten = json.written || {};
@@ -2433,6 +2433,16 @@ async function loadCarrierStatusCache() {
     })();
   }
   return carrierStatusLoadedPromise;
+}
+
+// 以前の判定で保存した結果を、今の判定に合わせて直す（取り直さずに済むように）
+function fixLegacyStatus(c: CarrierStatus): CarrierStatus {
+  const text = String(c.statusText || '').trim();
+  if (c.status === 'in_transit' && /^配達完了|^delivered/i.test(text)) {
+    return { ...c, status: 'delivered', deliveredAt: c.deliveredAt || c.lastEventAt, customsCleared: true };
+  }
+  if (c.status === 'in_transit' && /ラベルを作成|label created/i.test(text)) return { ...c, status: 'pre_transit' };
+  return c;
 }
 
 function scheduleCarrierStatusSave() {

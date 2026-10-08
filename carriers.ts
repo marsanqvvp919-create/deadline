@@ -101,7 +101,8 @@ function normalizeFedex(trackingNo: string, r: any): CarrierStatus {
   let status: NormalizedStatus = 'unknown';
   if (code === 'DL') status = 'delivered';
   else if (['DE', 'SE', 'CD', 'CA', 'RS'].includes(code)) status = 'exception';
-  else if (['OC', 'PU'].includes(code) && !scan) status = 'pre_transit';
+  // OC（送り状作成）はまだ集荷されていない。PU（集荷）からは輸送中
+  else if (code === 'OC' || /label created|ラベルを作成/i.test(String(latest.statusByLocale || latest.description || ''))) status = 'pre_transit';
   else if (code) status = 'in_transit';
   const loc = latest.scanLocation || scan?.scanLocation;
   const events: any[] = r?.scanEvents || [];
