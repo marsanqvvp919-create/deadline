@@ -183,14 +183,16 @@ function normalizeDhl(trackingNo: string, s: any): CarrierStatus {
     'pre-transit': 'pre_transit',
     failure: 'exception',
   };
+  // 状態コードが「輸送中」のままでも、説明が「配達完了」なら配達完了とする
+  const deliveredByText = /^配達完了|^delivered/i.test(String(st.description || st.status || '').trim());
   return {
     carrier: 'dhl',
     trackingNo,
-    status: map[code] || 'unknown',
+    status: deliveredByText ? 'delivered' : map[code] || 'unknown',
     statusText: st.description || st.status || code,
     lastEventAt: st.timestamp,
     lastLocation: st.location?.address?.addressLocality,
-    deliveredAt: code === 'delivered' ? st.timestamp : undefined,
+    deliveredAt: code === 'delivered' || deliveredByText ? st.timestamp : undefined,
     estimatedDelivery: s?.estimatedTimeOfDelivery,
     fetchedAt: new Date().toISOString(),
     arrivedJapan,

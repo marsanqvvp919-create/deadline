@@ -1620,6 +1620,58 @@ setInterval(() => {
 }, 60 * 1000); // 1分ごとにチェック
 
 // 楽楽販売 全統合データ取得API（クライアントのブラウザからはここを呼ぶことでRakuraku API回数を消費しない）
+// ----------------------------------------------------------------------
+// 画面に送るデータを軽くする（開く速さのため）。画面側（src/api.ts）で空の項目を元の既定値に戻す。
+// ・見積の伝票は画面で使わないので送らない
+// ・出荷済みの伝票は納期超過の判定に使わないので、判定用の明細（overdueBasis）を送らない
+// ・空欄・「—」・null の項目は送らない
+// ----------------------------------------------------------------------
+const LINE_OPTIONAL_KEYS = ['promisedDate', 'deliveryRisk', 'deliveryCompliance', 'rakurakuMissedOrder', 'warehouseShippedDate', 'trackingNo', 'poDate', 'earliestDate'];
+const SHIPMENT_KEEP_KEYS = new Set(['shipmentId', 'orderId', 'trackingNo', 'customerName']);
+const isEmptyValue = (v: any) => v === null || v === undefined || v === '' || v === '—' || (Array.isArray(v) && v.length === 0);
+let slimCache: { key: string; orders: any; shipments: any } | null = null;
+
+function slimForClient() {
+  const key = `${serverRakurakuStore.lastSuccessTime}|${(serverRakurakuStore.orders?.orders || []).length}|${(serverRakurakuStore.shipments || []).length}`;
+  if (slimCache && slimCache.key === key) return slimCache;
+  const src = serverRakurakuStore.orders;
+  const orders = src
+    ? {
+        ...src,
+        weeklyDelayHistory: weeklyDelayHistory(),
+        orders: (src.orders || [])
+          .filter((o: any) => !String(o.status || '').includes('見積'))
+          .map((o: any) => {
+            const out: any = {};
+            for (const [k, v] of Object.entries(o)) {
+              if (k === 'lines' || v === null || v === undefined) continue;
+              if (k === 'overdueBasis' && String(o.status || '').trim() === '出荷済み') continue;
+              out[k] = v;
+            }
+            out.lines = (o.lines || []).map((l: any) => {
+              const line: any = {};
+              for (const [k, v] of Object.entries(l)) {
+                if (LINE_OPTIONAL_KEYS.includes(k) && (v === null || v === '')) continue;
+                line[k] = v;
+              }
+              return line;
+            });
+            return out;
+          }),
+      }
+    : null;
+  const shipments = (serverRakurakuStore.shipments || []).map((sh: any) => {
+    const out: any = {};
+    for (const [k, v] of Object.entries(sh)) {
+      if (!SHIPMENT_KEEP_KEYS.has(k) && isEmptyValue(v)) continue;
+      out[k] = v;
+    }
+    return out;
+  });
+  slimCache = { key, orders, shipments };
+  return slimCache;
+}
+
 app.get('/api/rakuraku/all-data', async (_req, res) => {
   const currentIp = await getOutboundIp();
 
@@ -1628,12 +1680,12 @@ app.get('/api/rakuraku/all-data', async (_req, res) => {
     syncAllRakurakuData(false).catch(() => {});
   }
 
+  const slim = slimForClient();
   res.json({
     success: true,
-    orders: serverRakurakuStore.orders
-      ? { ...serverRakurakuStore.orders, weeklyDelayHistory: weeklyDelayHistory() }
-      : null,
-    shipments: serverRakurakuStore.shipments,
+    slim: true,
+    orders: slim.orders,
+    shipments: slim.shipments,
     suppliers: serverRakurakuStore.suppliers,
     products: serverRakurakuStore.products,
     clinics: serverRakurakuStore.clinics,
@@ -1684,13 +1736,9 @@ app.post('/api/rakuraku/sync-now', async (req, res) => {
   const isMasterRequested = Boolean(req.body.includeMasters);
   const syncSuccess = await syncAllRakurakuData(isMasterRequested);
 
+  // 画面は続けて all-data を読み直すので、ここではデータ本体を返さない（約15MBの無駄な転送をなくす）
   return res.json({
     success: syncSuccess,
-    orders: serverRakurakuStore.orders,
-    shipments: serverRakurakuStore.shipments,
-    suppliers: serverRakurakuStore.suppliers,
-    products: serverRakurakuStore.products,
-    clinics: serverRakurakuStore.clinics,
     lastSuccessTime: serverRakurakuStore.lastSuccessTime,
     lastError: serverRakurakuStore.lastError,
     serverIp: currentIp,

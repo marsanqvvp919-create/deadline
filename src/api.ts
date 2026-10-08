@@ -510,6 +510,50 @@ export function normalizeDeliveryData(data: DeliveryData): DeliveryData {
   return data;
 }
 
+// サーバーが省いた空の項目を、以前と同じ既定値に戻す（画面のコードはそのままで動くように）
+const SHIPMENT_DASH_DEFAULTS = [
+  'customerName', 'warehouse', 'arrivalAirport', 'importStatus', 'coolApplicationStatus', 'powerOfAttorneyStatus',
+  'slipStatus', 'phaNumber', 'warehouseInvoiceNo', 'currentLocation', 'trackingNo', 'kantoCustomsPermitted',
+  'customsStatus', 'shippedDate', 'orderId',
+];
+const SHIPMENT_EMPTY_DEFAULTS = [
+  'customerId', 'shipStatus', 'courier', 'warehouseShippedDate', 'deliveredDate', 'customsClearedDate', 'deliveryEta',
+  'customsEta', 'nextDeadline', 'vendorShipDate', 'handlingMemo', 'carrierLatestStatus', 'lastScanAt', 'lastScanPlace',
+  'carrierException',
+];
+const ORDER_NULL_DEFAULTS = ['requestedDate', 'deliveredDate', 'paymentDate', 'paymentDueDate', 'quoteDate', 'quoteValidUntil', 'billingDate'];
+const LINE_DEFAULTS: Record<string, any> = {
+  promisedDate: null,
+  deliveryRisk: '',
+  deliveryCompliance: '',
+  rakurakuMissedOrder: '',
+  warehouseShippedDate: null,
+  trackingNo: '',
+  poDate: null,
+  earliestDate: null,
+};
+
+function restoreSlimData(json: any) {
+  (json.shipments || []).forEach((sh: any) => {
+    SHIPMENT_DASH_DEFAULTS.forEach((k) => {
+      if (sh[k] === undefined) sh[k] = '—';
+    });
+    SHIPMENT_EMPTY_DEFAULTS.forEach((k) => {
+      if (sh[k] === undefined) sh[k] = '';
+    });
+    if (!sh.extraTrackingNos) sh.extraTrackingNos = [];
+    if (!sh.lineRefs) sh.lineRefs = [];
+  });
+  (json.orders?.orders || []).forEach((o: any) => {
+    ORDER_NULL_DEFAULTS.forEach((k) => {
+      if (o[k] === undefined) o[k] = null;
+    });
+    (o.lines || []).forEach((l: any) => {
+      for (const [k, v] of Object.entries(LINE_DEFAULTS)) if (l[k] === undefined) l[k] = v;
+    });
+  });
+}
+
 export async function syncNow(includeMasters = false): Promise<FetchResult> {
   const res = await fetch('/api/rakuraku/sync-now', {
     method: 'POST',
@@ -559,10 +603,15 @@ export async function fetchData(): Promise<FetchResult> {
       const lastError = json.lastError || null;
       const detectedIp = json.serverIp || config.serverIp || currentServerIp;
 
-      // 出荷管理 (101270) 保存
+      // サーバーは空の項目を省いて送るので、元の既定値に戻す
+      if (json.slim) restoreSlimData(json);
+
+      // 出荷管理 (101270)：約5MBありブラウザの保存容量を超えるため、ブラウザには保存しない（毎回失敗していた）
       if (Array.isArray(json.shipments) && json.shipments.length > 0) {
         fetchedShipments = json.shipments;
-        saveLocalShipments(json.shipments);
+        try {
+          localStorage.removeItem(STORAGE_SHIPMENTS_KEY);
+        } catch {}
       }
 
       // 仕入先マスタ (101253) 保存
