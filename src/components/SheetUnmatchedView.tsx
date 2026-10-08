@@ -465,7 +465,7 @@ export const SheetUnmatchedView: React.FC<{ onCountChange?: (count: number | nul
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   onClick={() => copyShipmentId(c.shipmentId)}
-                                  className="px-2 py-1 rounded bg-slate-900 text-white text-[11px] font-bold flex items-center gap-1"
+                                  className="rakuraku-open-btn"
                                 >
                                   楽楽販売で開く
                                   <ExternalLink className="w-3 h-3" />

@@ -123,3 +123,31 @@ main td select {
     display: none;
   }
 }
+
+/* 「楽楽販売で開く」：ふだんは控えめに、行にマウスを乗せたときだけ強調する */
+.rakuraku-open-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.5rem;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  color: #475569;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  transition: background-color 0.15s, color 0.15s, border-color 0.15s;
+}
+.group:hover .rakuraku-open-btn,
+.rakuraku-open-btn:hover,
+.rakuraku-open-btn:focus-visible {
+  color: #ffffff;
+  background: #0f172a;
+  border-color: #0f172a;
+}
+/* 小さなバッジは2行に崩さない */
+main span.rounded-full,
+main span.rounded-md {
+  white-space: nowrap;
+}

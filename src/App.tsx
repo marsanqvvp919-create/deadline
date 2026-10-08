@@ -697,7 +697,7 @@ export default function App() {
       label: '未出荷クリニック',
       icon: Truck,
       badge: unshippedClinicsCount > 0 ? `${unshippedClinicsCount}` : null,
-      badgeColor: 'bg-indigo-600 text-white font-bold',
+      badgeColor: 'bg-slate-600 text-white font-bold',
     },
     {
       id: 'customs_management',

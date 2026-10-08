@@ -343,7 +343,7 @@ export const KantoCustomsNgView: React.FC<KantoCustomsNgViewProps> = ({
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {carrierHolds.map(({ s, c, clinic }) => (
-                  <tr key={s.shipmentId} className="align-top hover:bg-orange-50/40 cursor-pointer" onClick={() => onSelectOrder?.(getClickableOrder(s))}>
+                  <tr key={s.shipmentId} className="align-top hover:bg-orange-50/40 cursor-pointer group" onClick={() => onSelectOrder?.(getClickableOrder(s))}>
                     <td className="py-2 px-3">
                       <div className="font-mono font-bold text-slate-900">{s.shipmentId}</div>
                       <div className="font-mono text-[10px] text-blue-600">受注 {formatValue(s.orderId)}</div>
@@ -368,7 +368,7 @@ export const KantoCustomsNgView: React.FC<KantoCustomsNgViewProps> = ({
                           setCopied(s.shipmentId);
                           setTimeout(() => setCopied(null), 2000);
                         }}
-                        className="px-2 py-1 rounded-lg bg-slate-900 text-white text-[11px] font-bold"
+                        className="rakuraku-open-btn"
                         title="出荷IDをコピーして楽楽販売を開きます"
                       >
                         {copied === s.shipmentId ? 'コピー済み' : '開く'}

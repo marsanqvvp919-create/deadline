@@ -558,7 +558,7 @@ export const ArrivalTrackingView: React.FC<{
             const shippedOn = blank(s.warehouseShippedDate) ? (blank(s.shippedDate) ? '' : s.shippedDate) : s.warehouseShippedDate;
             const contents = contentsOf(s);
             return (
-              <div key={s.shipmentId} className={`bg-white border border-slate-200 border-l-4 ${st.border} rounded-2xl shadow-xs flex flex-col overflow-hidden`}>
+              <div key={s.shipmentId} className={`group bg-white border border-slate-200 border-l-4 ${st.border} rounded-2xl shadow-xs flex flex-col overflow-hidden`}>
                 {/* 今の状況（いちばん大きく） */}
                 <div className={`px-4 py-2.5 flex items-center justify-between gap-2 ${st.color}`}>
                   <span className="flex items-center gap-2 font-bold text-sm">
@@ -701,7 +701,7 @@ export const ArrivalTrackingView: React.FC<{
                     <button
                       type="button"
                       onClick={() => copyAndOpen(s.shipmentId)}
-                      className="px-2 py-1 rounded bg-slate-900 text-white text-[11px] font-bold flex items-center gap-1"
+                      className="rakuraku-open-btn"
                       title="出荷IDをコピーして楽楽販売を開きます"
                     >
                       <Copy className="w-3 h-3" />

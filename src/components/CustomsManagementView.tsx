@@ -243,13 +243,13 @@ export const CustomsManagementView: React.FC<CustomsManagementViewProps> = ({
       <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-start gap-4">
-            <div className="w-14 h-14 rounded-2xl bg-indigo-600 flex items-center justify-center shrink-0 shadow-lg">
+            <div className="w-14 h-14 rounded-2xl bg-blue-600 flex items-center justify-center shrink-0 shadow-lg">
               <ShieldAlert className="w-7 h-7 text-white" />
             </div>
             <div>
               <div className="flex items-center gap-2.5 flex-wrap">
                 <h1 className="text-xl font-bold tracking-tight">通関・輸入管理一覧</h1>
-                <span className="text-xs font-bold px-3 py-1 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200 font-mono">
+                <span className="text-xs font-bold px-3 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200 font-mono">
                   楽楽販売 出荷管理
                 </span>
                 <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-700 border border-emerald-400/30 font-mono">
@@ -342,7 +342,7 @@ export const CustomsManagementView: React.FC<CustomsManagementViewProps> = ({
                 onClick={() => setSelectedStatus(tab.id)}
                 className={`px-3 py-1.5 rounded-lg font-bold transition cursor-pointer ${
                   selectedStatus === tab.id
-                    ? 'bg-indigo-600 text-white shadow-xs'
+                    ? 'bg-blue-600 text-white shadow-xs'
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
@@ -368,7 +368,7 @@ export const CustomsManagementView: React.FC<CustomsManagementViewProps> = ({
       <div className="bg-white border border-slate-200 rounded-2xl shadow-xs overflow-hidden">
         <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
           <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-            <Plane className="w-4 h-4 text-indigo-600" />
+            <Plane className="w-4 h-4 text-blue-600" />
             通関・出荷管理 実レコード一覧 ({filteredShipments.length} 件)
           </h2>
           <span className="text-xs font-mono text-slate-400">

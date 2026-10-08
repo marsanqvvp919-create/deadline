@@ -475,16 +475,9 @@ ${linesText}
             <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
               発注管理（入金済み未発注）
             </h1>
-            <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-300 flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
-              入金確認済・要即時発注
-            </span>
-            <span className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600 border border-slate-200">
-              ※ 送料・手数料除外
-            </span>
           </div>
           <p className="text-xs sm:text-sm text-slate-500">
-            クリニックよりご入金確認が取れ、仕入先への発注手配が可能な未発注案件を管理します。滞留を防ぎ最短納期を実現します。
+            まだ仕入先に発注していない明細です（送料・手数料は除く）。仕入先ごとにまとめて、楽楽販売で発注登録します。
           </p>
         </div>
 
@@ -515,252 +508,36 @@ ${linesText}
         </div>
       </div>
 
-      {/* KPI Summary Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Card 1: 入金済・未発注 */}
-        <div
-          onClick={() => setActiveFilter('paid_unordered')}
-          className={`p-4 rounded-2xl border transition-all cursor-pointer shadow-2xs relative overflow-hidden ${
-            activeFilter === 'paid_unordered'
-              ? 'bg-amber-500/10 border-amber-400 ring-2 ring-amber-300'
-              : 'bg-white border-slate-200 hover:border-amber-300 hover:bg-amber-50/30'
-          }`}
-        >
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-amber-900 flex items-center gap-1.5">
-              <CreditCard className="w-4 h-4 text-amber-600" />
-              入金済・未発注（要発注）
+      {/* 上部：「要発注」「入金待ち」の2つのタブと、仕入先の選択・検索だけにまとめる */}
+      <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs space-y-3">
+        <div className="flex flex-wrap items-center gap-2">
+          {([
+            ['paid_unordered', '要発注（入金済み）', stats.paidUnorderedCount, 'bg-amber-500 text-white', 'text-amber-800 bg-amber-50 border border-amber-200'],
+            ['waiting_payment', '入金待ち', stats.waitingPaymentCount, 'bg-blue-600 text-white', 'text-blue-800 bg-blue-50 border border-blue-200'],
+          ] as const).map(([id, label, n, on, off]) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => {
+                setActiveFilter(id);
+                setViewMode('by_supplier');
+              }}
+              className={`px-4 py-2 rounded-xl text-sm font-bold whitespace-nowrap flex items-center gap-2 ${activeFilter === id ? on : off}`}
+            >
+              {label}
+              <span className={`font-mono text-xs px-1.5 rounded-md ${activeFilter === id ? 'bg-white/25' : 'bg-white'}`}>{n}明細</span>
+            </button>
+          ))}
+          <div className="ml-auto flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-600">
+            <span>
+              発注対象 <b className="font-mono text-slate-900">¥{stats.paidUnorderedAmount.toLocaleString()}</b>
             </span>
-            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500 text-white">
-              最優先
-            </span>
-          </div>
-          <div className="mt-2.5 flex items-baseline gap-2">
-            <span className="text-2xl sm:text-3xl font-extrabold text-amber-950 font-mono">
-              {stats.paidUnorderedCount}
-            </span>
-            <span className="text-xs font-semibold text-amber-800">
-              明細 ({stats.paidUnorderedOrdersCount}伝票 / {stats.paidUnorderedQty}点)
-            </span>
-          </div>
-          <div className="mt-2 pt-2 border-t border-amber-200/60 flex items-center justify-between text-[11px] text-amber-800">
-            <span>発注対象金額:</span>
-            <b className="font-mono">¥{stats.paidUnorderedAmount.toLocaleString()}</b>
-          </div>
-        </div>
-
-        {/* Card 2: 滞留アラート（入金後2日以上） */}
-        <div
-          onClick={() => setActiveFilter('aging_alert')}
-          className={`p-4 rounded-2xl border transition-all cursor-pointer shadow-2xs ${
-            activeFilter === 'aging_alert'
-              ? 'bg-rose-50 border-rose-400 ring-2 ring-rose-300'
-              : 'bg-white border-slate-200 hover:border-rose-300 hover:bg-rose-50/20'
-          }`}
-        >
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-rose-900 flex items-center gap-1.5">
-              <AlertTriangle className="w-4 h-4 text-rose-600" />
-              滞留アラート（入金後2日超）
+            <span>
+              <b className="font-mono text-slate-900">{stats.paidUnorderedOrdersCount}</b>伝票・<b className="font-mono text-slate-900">{stats.supplierCount}</b>社
             </span>
             {stats.agingAlertsCount > 0 && (
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-600 text-white animate-pulse">
-                要確認
-              </span>
+              <span className="text-rose-700 font-bold whitespace-nowrap">入金から2日超 {stats.agingAlertsCount}明細</span>
             )}
-          </div>
-          <div className="mt-2.5 flex items-baseline gap-2">
-            <span className="text-2xl sm:text-3xl font-extrabold text-rose-700 font-mono">
-              {stats.agingAlertsCount}
-            </span>
-            <span className="text-xs font-semibold text-rose-800">明細が滞留中</span>
-          </div>
-          <p className="mt-2 pt-2 border-t border-rose-200/60 text-[11px] text-rose-700">
-            入金から発注が停滞し納期遅延のリスクあり
-          </p>
-        </div>
-
-        {/* Card 3: 入金待ち（保留案件） */}
-        <div
-          onClick={() => setActiveFilter('waiting_payment')}
-          className={`p-4 rounded-2xl border transition-all cursor-pointer shadow-2xs ${
-            activeFilter === 'waiting_payment'
-              ? 'bg-blue-50 border-blue-400 ring-2 ring-blue-300'
-              : 'bg-white border-slate-200 hover:border-blue-300 hover:bg-blue-50/20'
-          }`}
-        >
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-blue-900 flex items-center gap-1.5">
-              <Clock className="w-4 h-4 text-blue-600" />
-              入金待ち・保留
-            </span>
-            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800">
-              確認後発注
-            </span>
-          </div>
-          <div className="mt-2.5 flex items-baseline gap-2">
-            <span className="text-2xl sm:text-3xl font-extrabold text-blue-900 font-mono">
-              {stats.waitingPaymentCount}
-            </span>
-            <span className="text-xs font-semibold text-blue-700">明細が保留中</span>
-          </div>
-          <p className="mt-2 pt-2 border-t border-blue-200/60 text-[11px] text-blue-700">
-            クリニックからの入金連絡を確認次第手配
-          </p>
-        </div>
-
-        {/* Card 4: 仕入先数 */}
-        <div
-          onClick={() => {
-            setActiveFilter('all_unordered');
-            setViewMode('by_supplier');
-          }}
-          className="p-4 rounded-2xl border border-slate-200 bg-white hover:border-indigo-300 hover:bg-indigo-50/20 transition-all cursor-pointer shadow-2xs"
-        >
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-              <Building2 className="w-4 h-4 text-indigo-600" />
-              発注対象仕入先
-            </span>
-            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700">
-              仕入先別
-            </span>
-          </div>
-          <div className="mt-2.5 flex items-baseline gap-2">
-            <span className="text-2xl sm:text-3xl font-extrabold text-slate-900 font-mono">
-              {stats.supplierCount}
-            </span>
-            <span className="text-xs font-semibold text-slate-600">社へ発注指示可能</span>
-          </div>
-          <p className="mt-2 pt-2 border-t border-slate-100 text-[11px] text-slate-500 truncate">
-            全未発注: {stats.allUnorderedCount}明細 / 直近発注: {stats.recentlyOrderedCount}明細
-          </p>
-        </div>
-      </div>
-
-      {/* Filter and View Mode Control Bar */}
-      <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs space-y-3.5">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-          {/* Status Filter Chips */}
-          <div className="flex flex-wrap items-center gap-1.5 pb-1 lg:pb-0 text-xs">
-            <button
-              onClick={() => setActiveFilter('paid_unordered')}
-              className={`px-3 py-1.5 rounded-xl font-bold transition shrink-0 cursor-pointer flex items-center gap-1.5 ${
-                activeFilter === 'paid_unordered'
-                  ? 'bg-amber-500 text-white shadow-xs'
-                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-              }`}
-            >
-              <span>入金済の未発注（要手配）</span>
-              <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
-                activeFilter === 'paid_unordered' ? 'bg-amber-700 text-white' : 'bg-slate-200 text-slate-800'
-              }`}>
-                {stats.paidUnorderedCount}
-              </span>
-            </button>
-
-            <button
-              onClick={() => setActiveFilter('aging_alert')}
-              className={`px-3 py-1.5 rounded-xl font-bold transition shrink-0 cursor-pointer flex items-center gap-1.5 ${
-                activeFilter === 'aging_alert'
-                  ? 'bg-rose-600 text-white shadow-xs'
-                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-              }`}
-            >
-              <span>滞留アラート (2日以上)</span>
-              {stats.agingAlertsCount > 0 && (
-                <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-rose-200 text-rose-900 font-bold">
-                  {stats.agingAlertsCount}
-                </span>
-              )}
-            </button>
-
-            <button
-              onClick={() => setActiveFilter('all_unordered')}
-              className={`px-3 py-1.5 rounded-xl font-bold transition shrink-0 cursor-pointer flex items-center gap-1.5 ${
-                activeFilter === 'all_unordered'
-                  ? 'bg-blue-600 text-white shadow-xs'
-                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-              }`}
-            >
-              <span>すべての未発注</span>
-              <span className="font-mono text-[10px]">({stats.allUnorderedCount})</span>
-            </button>
-
-            <button
-              onClick={() => setActiveFilter('waiting_payment')}
-              className={`px-3 py-1.5 rounded-xl font-bold transition shrink-0 cursor-pointer flex items-center gap-1.5 ${
-                activeFilter === 'waiting_payment'
-                  ? 'bg-slate-800 text-white shadow-xs'
-                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-              }`}
-            >
-              <span>入金待ち</span>
-              <span className="font-mono text-[10px]">({stats.waitingPaymentCount})</span>
-            </button>
-
-            <button
-              onClick={() => setActiveFilter('credit_cleared')}
-              className={`px-3 py-1.5 rounded-xl font-bold transition shrink-0 cursor-pointer flex items-center gap-1.5 ${
-                activeFilter === 'credit_cleared'
-                  ? 'bg-indigo-600 text-white shadow-xs'
-                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-              }`}
-            >
-              <span>売掛・締日決済</span>
-              <span className="font-mono text-[10px]">({stats.creditClearedCount})</span>
-            </button>
-
-            <button
-              onClick={() => setActiveFilter('recently_ordered')}
-              className={`px-3 py-1.5 rounded-xl font-bold transition shrink-0 cursor-pointer flex items-center gap-1.5 ${
-                activeFilter === 'recently_ordered'
-                  ? 'bg-emerald-600 text-white shadow-xs'
-                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-              }`}
-            >
-              <span>直近発注済</span>
-              <span className="font-mono text-[10px]">({stats.recentlyOrderedCount})</span>
-            </button>
-          </div>
-
-          {/* View Mode Switching Tabs */}
-          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl self-start shrink-0 text-xs">
-            <button
-              onClick={() => setViewMode('by_supplier')}
-              className={`px-3 py-1.5 rounded-lg font-bold transition cursor-pointer flex items-center gap-1.5 ${
-                viewMode === 'by_supplier'
-                  ? 'bg-white text-slate-900 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <Building2 className="w-3.5 h-3.5 text-amber-500" />
-              <span>仕入先別まとめ</span>
-            </button>
-
-            <button
-              onClick={() => setViewMode('by_order')}
-              className={`px-3 py-1.5 rounded-lg font-bold transition cursor-pointer flex items-center gap-1.5 ${
-                viewMode === 'by_order'
-                  ? 'bg-white text-slate-900 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <Package className="w-3.5 h-3.5 text-blue-500" />
-              <span>受注伝票別</span>
-            </button>
-
-            <button
-              onClick={() => setViewMode('all_lines')}
-              className={`px-3 py-1.5 rounded-lg font-bold transition cursor-pointer flex items-center gap-1.5 ${
-                viewMode === 'all_lines'
-                  ? 'bg-white text-slate-900 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <FileSpreadsheet className="w-3.5 h-3.5 text-indigo-500" />
-              <span>商品一覧表</span>
-            </button>
           </div>
         </div>
 

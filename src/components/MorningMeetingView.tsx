@@ -248,29 +248,30 @@ export const MorningMeetingView: React.FC<{
     setTimeout(() => setCopied(null), 2000);
   };
 
-  const Table: React.FC<{ rows: Row[]; showDays?: boolean }> = ({ rows, showDays = true }) =>
-    rows.length === 0 ? (
-      <p className="text-xs text-slate-500 px-4 py-3">該当なし</p>
-    ) : (
+  // 中身がない列（全行「出荷なし」のキャリア状況・全行空の対応メモ）は出さない
+  const Table: React.FC<{ rows: Row[]; showDays?: boolean }> = ({ rows, showDays = true }) => {
+    if (rows.length === 0) return <p className="text-xs text-slate-500 px-4 py-3">該当なし</p>;
+    const showCarrier = rows.some((r) => !['出荷なし', '出荷待ち', '追跡番号なし'].includes(r.carrier));
+    const showMemo = rows.some((r) => !!r.memo);
+    return (
       <div className="data-table-wrap overflow-x-auto" style={{ maxHeight: 'none' }}>
         <table className="w-full text-xs text-left">
           <thead>
             <tr className="text-slate-600 border-b border-slate-200">
               <th className="py-2 px-3">受注ID</th>
-              <th className="py-2 px-3">クリニック</th>
-              <th className="py-2 px-3">担当</th>
+              <th className="py-2 px-3">クリニック・担当</th>
               <th className="py-2 px-3">仕入先</th>
               <th className="py-2 px-3">最長納品予定日</th>
-              {showDays && <th className="py-2 px-3 text-right">超過日数</th>}
-              <th className="py-2 px-3">キャリアの最新状況</th>
-              <th className="py-2 px-3">対応メモ（楽楽販売）</th>
+              {showDays && <th className="py-2 px-3 text-right">超過</th>}
+              {showCarrier && <th className="py-2 px-3">キャリアの最新状況</th>}
+              {showMemo && <th className="py-2 px-3">対応メモ（楽楽販売）</th>}
               <th className="py-2 px-3"></th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {rows.map((r) => (
-              <tr key={r.key} className="align-top hover:bg-slate-50">
-                <td className="py-2 px-3">
+              <tr key={r.key} className="align-top hover:bg-slate-50 group">
+                <td className="py-2.5 px-3">
                   {r.order ? (
                     <button type="button" onClick={() => onSelectOrder(r.order!)} className="font-mono font-bold text-blue-700 hover:underline">
                       {r.orderId}
@@ -281,22 +282,28 @@ export const MorningMeetingView: React.FC<{
                   {r.shipmentId && <div className="font-mono text-[10px] text-slate-500">{r.shipmentId}</div>}
                   {r.alsoIn && <div className="text-[10px] font-bold text-rose-700">↑{r.alsoIn}にも</div>}
                 </td>
-                <td className="py-2 px-3 font-bold text-slate-900">{r.clinic}</td>
-                <td className="py-2 px-3">{r.rep}</td>
-                <td className="py-2 px-3 text-slate-600">{r.suppliers}</td>
-                <td className="py-2 px-3 font-mono">{r.latestDate ? formatDate(r.latestDate) : '—'}</td>
+                <td className="py-2.5 px-3">
+                  <div className="font-bold text-slate-900">{r.clinic}</div>
+                  <div className="text-[11px] text-slate-500">{r.rep}</div>
+                </td>
+                <td className="py-2.5 px-3 text-sm font-semibold text-slate-800">{r.suppliers}</td>
+                <td className="py-2.5 px-3 font-mono text-sm font-semibold text-slate-900">{r.latestDate ? formatDate(r.latestDate) : '—'}</td>
                 {showDays && (
-                  <td className={`py-2 px-3 text-right font-mono font-bold ${r.daysOver > 0 ? 'text-rose-600' : 'text-slate-400'}`}>
+                  <td className={`py-2.5 px-3 text-right font-mono text-base font-extrabold ${r.daysOver > 0 ? 'text-rose-600' : 'text-slate-400'}`}>
                     {r.daysOver > 0 ? `${r.daysOver}日` : '—'}
                   </td>
                 )}
-                <td className={`py-2 px-3 ${r.carrierAlert ? 'text-orange-700 font-bold' : 'text-slate-600'}`}>{r.carrier}</td>
-                <td className="py-2 px-3 text-slate-800 whitespace-pre-wrap">{r.memo || <span className="text-slate-400">—</span>}</td>
-                <td className="py-2 px-3">
+                {showCarrier && (
+                  <td className={`py-2.5 px-3 ${r.carrierAlert ? 'text-orange-700 font-bold' : 'text-slate-600'}`}>{r.carrier}</td>
+                )}
+                {showMemo && (
+                  <td className="py-2.5 px-3 text-slate-800 whitespace-pre-wrap">{r.memo || <span className="text-slate-300">—</span>}</td>
+                )}
+                <td className="py-2.5 px-3 text-right">
                   <button
                     type="button"
                     onClick={() => openInRakuraku(r.shipmentId || r.orderId)}
-                    className="px-2 py-1 rounded-lg bg-slate-900 text-white text-[11px] font-bold inline-flex items-center gap-1"
+                    className="rakuraku-open-btn"
                     title={`${r.shipmentId ? '出荷ID' : '受注ID'}をコピーして楽楽販売を開きます`}
                   >
                     <Copy className="w-3 h-3" />
@@ -309,6 +316,7 @@ export const MorningMeetingView: React.FC<{
         </table>
       </div>
     );
+  };
 
   return (
     <div className="space-y-4">
