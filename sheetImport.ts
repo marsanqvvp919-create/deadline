@@ -1,5 +1,5 @@
 // 毎朝6時の「シート → 楽楽販売」取り込み。
-// 「◆出荷ステータス」の行を出荷管理の出荷番号と照合し、インポート設定 100754 の列に入る値と、
+// 「◆出荷ステータス」の行を出荷管理の出荷番号と照合し、インポート設定 100757 の列に入る値と、
 // 今の楽楽販売の値との差分を作る（書き込みはサーバー側で CSVデータインポートAPI を使う）。
 // 変換ルール（2026/10/07 確定）：出荷元倉庫は選択肢にない値を「その他」、輸入確認「申請済」→「申請中」、
 // クール申請・委任状・伝票はクール便の行だけ TRUE→済／FALSE→未。
@@ -67,7 +67,7 @@ export interface ImportPreview {
   csvRows: string[][];
 }
 
-// インポート設定 100754 の列の順番（指示どおり。倉庫出荷日は追加予定の列として最後に置く）
+// インポート設定 100757 の列の順番（指示どおり。倉庫出荷日は追加予定の列として最後に置く）
 export const IMPORT_COLUMNS = [
   '出荷ID',
   '出荷元倉庫',
@@ -82,7 +82,8 @@ export const IMPORT_COLUMNS = [
   '倉庫出荷日',
 ];
 
-const WAREHOUSE_OPTIONS = ['SG倉庫', '韓国倉庫', 'J ONE', 'VM', 'CSwell', 'その他'];
+// 楽楽販売の「出荷元倉庫」の選択肢（2026/10/08 確認）
+const WAREHOUSE_OPTIONS = ['SG倉庫', '韓国倉庫', 'BIO', 'J ONE', 'VM', 'CSwell', 'その他'];
 const AIRPORTS = ['KIX', 'NRT', 'NGO'];
 
 export function parseSheetRowsFull(values: string[][]): SheetRowFull[] {
@@ -162,7 +163,8 @@ export function buildImportPreview(values: string[][], shipments: ImportShipment
 
       // 出荷元倉庫：楽楽販売の選択肢にない値（JD bio など）は「その他」
       if (!blank(row.origin)) {
-        if (WAREHOUSE_OPTIONS.includes(row.origin)) values['出荷元倉庫'] = { to: row.origin, rule: '確定' };
+        const option = WAREHOUSE_OPTIONS.find((o) => o.toLowerCase() === row.origin.trim().toLowerCase());
+        if (option) values['出荷元倉庫'] = { to: option, rule: '確定' };
         else values['出荷元倉庫'] = { to: 'その他', rule: '確定', note: `シートの値：${row.origin}` };
       }
 

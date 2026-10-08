@@ -2023,12 +2023,13 @@ app.put('/api/shared-notes/:scope', async (req, res) => {
 
 // ----------------------------------------------------------------------
 // 毎朝6時の「シート → 楽楽販売」取り込み（2026/10/07 から本番書き込み）
-// 差分のある出荷だけを CSVデータインポートAPI（インポート設定 100754）で取り込み、結果を記録する。
+// 差分のある出荷だけを CSVデータインポートAPI（インポート設定 100757）で取り込み、結果を記録する。
 // 環境変数 SHEET_IMPORT_WRITE=off で書き込みを止め、試運転だけにできる。
 // 結果は Cloud Storage に保存し、画面で「どの出荷のどの項目が何から何に変わったか」を確認する
 // ----------------------------------------------------------------------
 const SHEET_IMPORT_WRITE_ENABLED = process.env.SHEET_IMPORT_WRITE !== 'off';
-const SHEET_IMPORT_ID = '100754';
+// 楽楽販売のインポート設定「シート同期（倉庫出荷日つき）」（11列：出荷ID〜倉庫出荷日）。100754 は倉庫出荷日の無い10列で、全件「項目数が異なります」になっていた
+const SHEET_IMPORT_ID = process.env.SHEET_IMPORT_ID || '100757';
 
 function toCsv(columns: string[], rows: string[][]): string {
   const esc = (v: string) => `"${String(v ?? '').replace(/"/g, '""')}"`;
@@ -2954,6 +2955,16 @@ const CARRIER_LABEL_JA: Record<string, string> = { delivered: '配達完了', in
 const blankValue = (v?: string) => !v || v === '—';
 const locationIndex = (v?: string) => LOCATION_ORDER.indexOf(String(v || '').trim());
 
+function carrierExceptionOption(texts: string[]): string {
+  if (texts.length === 0) return 'なし';
+  const t = texts.join(' ');
+  if (/通関|処理保留|clearance|customs|保留/i.test(t)) return '通関保留';
+  if (/不在|持ち帰|営業時間外|住所|宛先|address|no one|not available/i.test(t)) return '住所不明・不在';
+  if (/返送|返却|return/i.test(t)) return '返送';
+  if (/遅延|遅れ|delay/i.test(t)) return '配達遅延';
+  return 'その他';
+}
+
 function buildCarrierWritebackRows(includeUnchanged = false): string[][] {
   const rows: string[][] = [];
   for (const s of serverRakurakuStore.shipments || []) {
@@ -2997,7 +3008,8 @@ function buildCarrierWritebackRows(includeUnchanged = false): string[][] {
       const label = CARRIER_LABEL_JA[latest.status];
       statusText = `${carrier}：${label}${latest.statusText && latest.statusText !== label ? `（${latest.statusText}）` : ''}`;
     }
-    const exception = Array.from(new Set(found.filter((c) => c.status === 'exception').map((c) => c.statusText))).join(' / ');
+    // キャリア例外は楽楽販売では選択肢（なし・通関保留・住所不明・不在・配達遅延・返送・その他）。文言をそのまま送ると「選択肢に存在しません」で失敗する
+    const exception = carrierExceptionOption(found.filter((c) => c.status === 'exception').map((c) => c.statusText));
     const row = [
       s.shipmentId,
       location,

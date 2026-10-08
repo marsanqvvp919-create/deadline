@@ -79,7 +79,7 @@ export const SheetImportView: React.FC = () => {
     if (
       write &&
       !window.confirm(
-        `楽楽販売の出荷管理に書き込みます（インポート設定 100754）。\n差分のある出荷 ${latest?.shipmentsUpdated ?? 0} 件が対象です。実行しますか？`
+        `楽楽販売の出荷管理に書き込みます（インポート設定 100757）。\n差分のある出荷 ${latest?.shipmentsUpdated ?? 0} 件が対象です。実行しますか？`
       )
     )
       return;
@@ -117,7 +117,7 @@ export const SheetImportView: React.FC = () => {
           <div>
             <h2 className="text-lg font-bold text-slate-900">シート取り込み</h2>
             <p className="text-xs text-slate-500 mt-1">
-              毎朝6時に「◆出荷ステータス」を読み、差分のある出荷を出荷管理（インポート設定 100754）に取り込みます。
+              毎朝6時に「◆出荷ステータス」を読み、差分のある出荷を出荷管理（インポート設定 100757）に取り込みます。
               {data?.writeEnabled ? (
                 <b className="text-slate-700">楽楽販売に書き込みます。</b>
               ) : (
