@@ -493,9 +493,12 @@ export function normalizeDeliveryData(data: DeliveryData): DeliveryData {
 
     const totalLines = order.lines.length;
     const allShipped = totalLines > 0 && order.lines.every((l) => l.shippedQty >= l.quantity || l.stage === '出荷完了');
-    if (order.deliveredDate && allShipped) {
+    // 楽楽販売のステータスが「出荷済み」「納品済み」の伝票は、明細に未発注などが残っていても完了扱い（サーバーと同じ判定）
+    const status = (order.status || '').trim();
+    const closedByStatus = status === '出荷済み' || status === '納品済み';
+    if ((order.deliveredDate && allShipped) || status === '納品済み') {
       order.orderState = '納品完了';
-    } else if (allShipped) {
+    } else if (allShipped || closedByStatus) {
       order.orderState = '全明細出荷済';
     } else {
       order.orderState = '進行中';
