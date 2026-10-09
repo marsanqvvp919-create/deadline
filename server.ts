@@ -2409,7 +2409,7 @@ app.post('/api/bulk-deliveries/import', async (req, res) => {
   if (!batch) {
     const title = bulkText(req.body?.title, 80);
     if (!title) return res.status(400).json({ error: '一括発注の名前を入れてください' });
-    batch = { id: bulkId(), title, orderId: bulkText(req.body?.orderId, 20), createdAt: now, updatedAt: now, rows: [] };
+    batch = { id: bulkId(), title, orderId: bulkText(req.body?.orderId, 200), createdAt: now, updatedAt: now, rows: [] };
     bulkBatches.push(batch);
   }
   for (const r of rows) {
@@ -2426,7 +2426,7 @@ app.post('/api/bulk-deliveries/import', async (req, res) => {
     }
   }
   batch.updatedAt = now;
-  if (req.body?.orderId !== undefined && !batch.orderId) batch.orderId = bulkText(req.body.orderId, 20);
+  if (req.body?.orderId !== undefined && !batch.orderId) batch.orderId = bulkText(req.body.orderId, 200);
   await saveBulkDeliveries();
   // 新しく入った番号は、その場で状況を取りに行く（国内配送の無料枠を使いすぎないよう、まだ一度も取っていない番号だけ）
   const fresh = Array.from(new Set(batch.rows.flatMap((r) => parseTrackingNumbers(r.trackingNo)))).filter((d) => resolveDigits(d).state === 'pending');
@@ -2466,7 +2466,7 @@ app.post('/api/bulk-deliveries/:batchId', async (req, res) => {
   const batch = bulkBatches.find((b) => b.id === req.params.batchId);
   if (!batch) return res.status(404).json({ error: '見つかりません' });
   if (typeof req.body?.title === 'string' && req.body.title.trim()) batch.title = bulkText(req.body.title, 80);
-  if (typeof req.body?.orderId === 'string') batch.orderId = bulkText(req.body.orderId, 20);
+  if (typeof req.body?.orderId === 'string') batch.orderId = bulkText(req.body.orderId, 200);
   batch.updatedAt = new Date().toISOString();
   await saveBulkDeliveries();
   return res.json({ success: true });

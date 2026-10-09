@@ -7,6 +7,7 @@ import { getConfiguredUrls, getLocalClinics } from '../api';
 import { openRakurakuWithCopiedId } from '../utils';
 import { Search, Truck, ExternalLink, Snowflake, Copy, RefreshCw, AlertTriangle, Package, PackageCheck, Plane, ShieldCheck, CheckCircle2, HelpCircle, Link2Off } from 'lucide-react';
 import { boxesOf, isHandCarried, summarizeBoxes, usableStatus } from '../utils/shipmentTracking';
+import { BulkSummary, fetchBulkByOrder } from '../utils/bulk';
 import { CARRIER_STATUS_LABEL, CARRIER_STATUS_STYLE, CarrierStatus, CarrierStatusSnapshot, digitsOf, fetchCarrierStatuses, fetchSavedCarrierStatuses } from '../utils/carriers';
 
 // 出荷管理（101270）の実データから、出荷ごとに「今どの段階か」を表示する。
@@ -177,6 +178,11 @@ export const ArrivalTrackingView: React.FC<{
   const [issueFilter, setIssueFilter] = useUrlState<'' | 'mismatch' | 'bad' | 'scope'>('issue', '');
   const [page, setPage] = useState(0);
   const { rakurakuBaseUrl } = getConfiguredUrls();
+  // 一括発注の配送で院ごとに追跡している受注（楽楽販売の出荷には追跡番号がない）
+  const [bulkByOrder, setBulkByOrder] = useState<Map<string, BulkSummary>>(new Map());
+  useEffect(() => {
+    fetchBulkByOrder().then(setBulkByOrder);
+  }, []);
 
   // 画面を開いたら、サーバーが自動取得した最新状況を読み込む（配送会社には問い合わせない）
   // 開いたまま置いておいても新しい結果が出るよう、5分ごとと、画面に戻ってきたときにも読み直す
@@ -260,7 +266,11 @@ export const ArrivalTrackingView: React.FC<{
         const lookup = lookupKindOf(boxes, carrierStatus);
         const carrier = carrierOf(s, c, boxes);
         const rep = repByOrder.get(s.orderId) || '';
-        return { s, c, box, boxes, lookup, carrier, rep, stage, now: nowStatusOf(stage, c, lookup, box.partial), shipped: toDate(s.warehouseShippedDate) || toDate(s.shippedDate) };
+        const bulk = boxes.length === 0 && (s.shipStatus || '').includes('出荷済') ? bulkByOrder.get(s.orderId) : undefined;
+        // 一括発注：全院に届いたら配達完了、それまでは国内配送中として扱う
+        const bulkStage: Stage | null = bulk ? (bulk.total > 0 && bulk.delivered >= bulk.total ? 'delivered' : 'domestic') : null;
+        const st = bulkStage || stage;
+        return { s, c, box, boxes, lookup, carrier, rep, bulk, stage: st, now: bulkStage === 'delivered' ? 'delivered' as NowStatus : bulkStage ? 'domestic' as NowStatus : nowStatusOf(stage, c, lookup, box.partial), shipped: toDate(s.warehouseShippedDate) || toDate(s.shippedDate) };
       })
       .filter(({ s, c, stage, shipped }) => {
         if (stage === 'waiting') return true;
@@ -551,7 +561,7 @@ export const ArrivalTrackingView: React.FC<{
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {pageItems.map(({ s, c, box, boxes, carrier, now, customerName }) => {
+          {pageItems.map(({ s, c, box, boxes, carrier, now, customerName, bulk }) => {
             const st = NOW_STATUS[now];
             const trackUrl = carrier.url;
             const coolPending = s.isCoolMissing;
@@ -650,6 +660,12 @@ export const ArrivalTrackingView: React.FC<{
                               : '国内配送（佐川・ヤマトなど）の番号の可能性があります。「配送会社API連携」で荷物追跡APIを設定すると状況を取得します'}
                       </div>
                     )
+                  )}
+
+                  {bulk && (
+                    <div className="text-[11px] text-indigo-800 bg-indigo-50 rounded-lg px-2.5 py-1.5">
+                      一括発注の配送「{bulk.title}」で院ごとに追跡しています（{bulk.total}院のうち配達完了 {bulk.delivered}院）
+                    </div>
                   )}
 
                   <div className="text-[11px] text-slate-600 grid grid-cols-2 gap-x-3 gap-y-0.5">

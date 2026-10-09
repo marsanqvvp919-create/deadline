@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight, Download, ExternalLink, RefreshCw, Trash2, U
 import readXlsxFile from 'read-excel-file/browser';
 import { Order } from '../types';
 import { domesticTrackingUrl, hintedCarrier, parseTrackingNumbers } from '../utils/trackingNumbers';
+import { splitOrderIds } from '../utils/bulk';
 
 // 一括発注の配送（湘南美容・東京ベレッザなど）：院ごとの納品先・数量・追跡番号を、配送リスト（Excel・CSV）から取り込んで追跡する。
 // 楽楽販売とは切り離して、このシステムだけで持つ（楽楽販売には書き込まない）。
@@ -444,7 +445,7 @@ export const BulkDeliveriesView: React.FC<{ orders: Order[]; onSelectOrder: (ord
                 </label>
                 <label className="text-[11px] text-slate-600 space-y-1">
                   <span className="block font-bold">楽楽販売の受注ID（あれば）</span>
-                  <input value={orderId} onChange={(e) => setOrderId(e.target.value)} list="bulk-order-options" className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs font-mono" placeholder="000003861" />
+                  <input value={orderId} onChange={(e) => setOrderId(e.target.value)} list="bulk-order-options" className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs font-mono" placeholder="000003861（複数ならカンマ区切り）" />
                   <datalist id="bulk-order-options">
                     {bulkOrderOptions.map((o) => (
                       <option key={o.orderId} value={o.orderId}>
@@ -483,7 +484,7 @@ export const BulkDeliveriesView: React.FC<{ orders: Order[]; onSelectOrder: (ord
         const rows = b.rows
           .filter((r) => f === 'all' || r.status.state === f)
           .sort((x, y) => STATE_ORDER.indexOf(x.status.state) - STATE_ORDER.indexOf(y.status.state) || x.clinic.localeCompare(y.clinic, 'ja'));
-        const order = b.orderId ? orderById.get(b.orderId) : undefined;
+        const orderIds = splitOrderIds(b.orderId);
         const delivered = b.counts.delivered || 0;
         return (
           <div key={b.id} className="bg-white border border-slate-200 rounded-2xl shadow-xs overflow-hidden">
@@ -499,14 +500,16 @@ export const BulkDeliveriesView: React.FC<{ orders: Order[]; onSelectOrder: (ord
                   </span>
                 </button>
                 <div className="flex items-center gap-2 text-xs">
-                  {b.orderId &&
-                    (order ? (
-                      <button type="button" onClick={() => onSelectOrder(order)} className="font-mono font-bold text-blue-700 hover:underline">
-                        受注 {b.orderId}
+                  {orderIds.map((id) => {
+                    const order = orderById.get(id);
+                    return order ? (
+                      <button key={id} type="button" onClick={() => onSelectOrder(order)} className="font-mono font-bold text-blue-700 hover:underline">
+                        受注 {id}
                       </button>
                     ) : (
-                      <span className="font-mono text-slate-500">受注 {b.orderId}</span>
-                    ))}
+                      <span key={id} className="font-mono text-slate-500">受注 {id}</span>
+                    );
+                  })}
                   {confirmDelete === b.id ? (
                     <span className="flex items-center gap-1.5">
                       <span className="text-rose-700 font-bold">この一括発注を消しますか？</span>

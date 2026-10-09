@@ -9,6 +9,7 @@ import { getConfiguredUrls } from '../api';
 import { boxesOf, isHandCarried } from '../utils/shipmentTracking';
 import { CarrierStatus, fetchSavedCarrierStatuses } from '../utils/carriers';
 import { carrierName, hintedCarrier } from '../utils/trackingNumbers';
+import { BulkSummary, fetchBulkByOrder } from '../utils/bulk';
 
 // やることリスト：楽楽販売のデータの抜け・止まっているものを、直す場所ごとにまとめる。
 // 納期超過・配送の問題は「朝の納期会議」で扱うので、ここには入れない。
@@ -62,6 +63,10 @@ export const ActionListView: React.FC<{
   const [irregular, setIrregular] = useState<{ shipmentId: string; trackingNo: string }[] | null>(null);
   const orderById = useMemo(() => new Map(orders.map((o) => [o.orderId, o])), [orders]);
   const [carrierStatus, setCarrierStatus] = useState<Record<string, CarrierStatus> | null>(null);
+  const [bulkByOrder, setBulkByOrder] = useState<Map<string, BulkSummary>>(new Map());
+  useEffect(() => {
+    fetchBulkByOrder().then(setBulkByOrder);
+  }, []);
   useEffect(() => {
     fetchSavedCarrierStatuses().then((snap) => {
       const map: Record<string, CarrierStatus> = {};
@@ -138,6 +143,8 @@ export const ActionListView: React.FC<{
       const age = daysAgo(s.shippedDate);
       if (age === null || age > NO_TRACKING_DAYS) return;
       if (boxesOf(s).length > 0 || isHandCarried(s) || NO_NUMBER_OK.test(s.trackingNo || '')) return;
+      // 一括発注の配送で院ごとに追跡している受注は対象外
+      if (bulkByOrder.has(s.orderId)) return;
       result.no_tracking.push(shipRow(s, s.trackingNo && s.trackingNo !== '—' ? `出荷番号「${s.trackingNo}」` : '番号なし'));
     });
     // 配送業者の登録違い：番号で見つかった配送会社と、楽楽販売の「配送業者」が違う
@@ -162,7 +169,7 @@ export const ActionListView: React.FC<{
     if (repFilter) (Object.keys(result) as RuleId[]).forEach((k) => (result[k] = result[k].filter((r) => r.salesRep === repFilter)));
     (Object.keys(result) as RuleId[]).forEach((k) => result[k].sort((a, b) => String(b.date).localeCompare(String(a.date))));
     return result;
-  }, [alerts, orderById, orders, shipments, excludedOrderIds, irregular, repFilter, carrierStatus]);
+  }, [alerts, orderById, orders, shipments, excludedOrderIds, irregular, repFilter, carrierStatus, bulkByOrder]);
 
   const current = RULES.find((r) => r.id === rule) || RULES[0];
   const rows = byRule[current.id] || [];
