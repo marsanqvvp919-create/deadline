@@ -3190,6 +3190,16 @@ function carrierExceptionOption(texts: string[]): string {
 function buildCarrierWritebackRows(includeUnchanged = false): string[][] {
   const rows: string[][] = [];
   for (const s of serverRakurakuStore.shipments || []) {
+    // 手持ち（持参）で届けた出荷：出荷日に配達完了として書く（追跡番号はない）
+    if (/手持ち|持参/.test(String(s.courier || '')) && String(s.shipStatus || '').includes('出荷済')) {
+      const day = [s.deliveredDate, s.warehouseShippedDate, s.shippedDate].find((d) => !blankValue(d));
+      if (!day || String(s.currentLocation || '').trim() === '配達完了') continue;
+      const row = [s.shipmentId, '配達完了', String(day).slice(0, 10), blankValue(s.customsClearedDate) ? '' : s.customsClearedDate, '手持ち（持参）：配達完了', '', '', 'なし'];
+      const key = row.slice(1).join('|');
+      if (!includeUnchanged && carrierWritten[s.shipmentId] === key) continue;
+      rows.push(row);
+      continue;
+    }
     const boxes = boxesOfShipment(s);
     const found = boxes.map(resolveDigits).filter((r) => r.state === 'found').map((r) => r.status!);
     if (found.length === 0) continue;

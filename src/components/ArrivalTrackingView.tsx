@@ -6,7 +6,7 @@ import { Order, ShipmentItem } from '../types';
 import { getConfiguredUrls, getLocalClinics } from '../api';
 import { openRakurakuWithCopiedId } from '../utils';
 import { Search, Truck, ExternalLink, Snowflake, Copy, RefreshCw, AlertTriangle, Package, PackageCheck, Plane, ShieldCheck, CheckCircle2, HelpCircle, Link2Off } from 'lucide-react';
-import { boxesOf, summarizeBoxes, usableStatus } from '../utils/shipmentTracking';
+import { boxesOf, isHandCarried, summarizeBoxes, usableStatus } from '../utils/shipmentTracking';
 import { CARRIER_STATUS_LABEL, CARRIER_STATUS_STYLE, CarrierStatus, CarrierStatusSnapshot, digitsOf, fetchCarrierStatuses, fetchSavedCarrierStatuses } from '../utils/carriers';
 
 // 出荷管理（101270）の実データから、出荷ごとに「今どの段階か」を表示する。
@@ -42,6 +42,8 @@ const blank = (v?: string) => !v || v === '—';
 function stageOf(s: TrackingShipment, c?: CarrierStatus): Stage {
   if (!blank(s.deliveredDate) || c?.status === 'delivered') return 'delivered';
   if ((s.shipStatus || '').includes('出荷待ち')) return 'waiting';
+  // 手持ち（持参）で届けた出荷は、出荷した時点で配達完了
+  if (isHandCarried(s)) return 'delivered';
   if (!blank(s.customsClearedDate) || c?.customsCleared) return 'domestic';
   if (IMPORT_IN_PROGRESS.includes(s.importStatus)) return 'import_check';
   return 'in_transit';
@@ -132,7 +134,7 @@ function toDate(v?: string): Date | null {
 function carrierOf(s: TrackingShipment, c: CarrierStatus | undefined, boxes: string[]) {
   const first = boxes[0];
   const code = c?.carrier || (first ? classifyNumber(first).primary : null);
-  const label = carrierName(code) || s.courier || '配送業者未設定';
+  const label = isHandCarried(s) ? '手持ち（持参）' : carrierName(code) || s.courier || '配送業者未設定';
   const hint = hintedCarrier(s.courier);
   const url =
     first && code === 'fedex'

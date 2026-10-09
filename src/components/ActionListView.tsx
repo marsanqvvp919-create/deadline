@@ -6,7 +6,7 @@ import { isStaleUnpaid, STALE_UNPAID_DAYS } from '../utils/delayCalculation';
 import { isShippingOrFee, openRakurakuWithCopiedId } from '../utils';
 import { isQuoteOrder } from '../utils/salesCalculations';
 import { getConfiguredUrls } from '../api';
-import { boxesOf } from '../utils/shipmentTracking';
+import { boxesOf, isHandCarried } from '../utils/shipmentTracking';
 import { CarrierStatus, fetchSavedCarrierStatuses } from '../utils/carriers';
 import { carrierName, hintedCarrier } from '../utils/trackingNumbers';
 
@@ -137,7 +137,7 @@ export const ActionListView: React.FC<{
       seen.add(s.shipmentId);
       const age = daysAgo(s.shippedDate);
       if (age === null || age > NO_TRACKING_DAYS) return;
-      if (boxesOf(s).length > 0 || NO_NUMBER_OK.test(s.trackingNo || '')) return;
+      if (boxesOf(s).length > 0 || isHandCarried(s) || NO_NUMBER_OK.test(s.trackingNo || '')) return;
       result.no_tracking.push(shipRow(s, s.trackingNo && s.trackingNo !== '—' ? `出荷番号「${s.trackingNo}」` : '番号なし'));
     });
     // 配送業者の登録違い：番号で見つかった配送会社と、楽楽販売の「配送業者」が違う

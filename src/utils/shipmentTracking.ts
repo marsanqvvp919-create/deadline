@@ -10,6 +10,12 @@ export function boxesOf(s: Pick<ShipmentItem, 'trackingNo' | 'extraTrackingNos'>
   return Array.from(new Set([...parseTrackingNumbers(s.trackingNo), ...(s.extraTrackingNos || [])]));
 }
 
+/** 手持ち（持参・手渡し）で届けた出荷：配送業者が「手持ち（持参）」か、追跡番号の欄に番号がなく「手持ち・手渡し・持参」と書いてある */
+export function isHandCarried(s: { courier?: string; trackingNo?: string }): boolean {
+  if (/手持ち|持参|手渡し/.test(s.courier || '')) return true;
+  return parseTrackingNumbers(s.trackingNo).length === 0 && /手持ち|持参|手渡し/.test(s.trackingNo || '');
+}
+
 /** 「見つからない」だった番号は状況なしとして扱う */
 export function usableStatus(c?: CarrierStatus): CarrierStatus | undefined {
   return c && c.status !== 'unknown' && !c.notFound ? c : undefined;
