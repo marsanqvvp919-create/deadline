@@ -346,7 +346,9 @@ export const ArrivalTrackingView: React.FC<{
           if (repFilter !== 'all' && i.rep !== repFilter) return false;
           const q = query.trim().toLowerCase();
           if (!q) return true;
-          return [i.customerName, i.s.shipmentId, i.s.orderId, i.s.trackingNo].some((v) => (v || '').toLowerCase().includes(q));
+          if ([i.customerName, i.s.shipmentId, i.s.orderId, i.s.trackingNo].some((v) => (v || '').toLowerCase().includes(q))) return true;
+          // 製剤名（出荷の明細の商品名）でも探す
+          return contentsOf(i.s).items.some((x) => (x.name || '').toLowerCase().includes(q));
         })
         .sort(SORTERS[sortKey] || SORTERS.status),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -512,7 +514,7 @@ export const ArrivalTrackingView: React.FC<{
             <input autoComplete="off"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="クリニック名・出荷ID・受注ID・追跡番号"
+              placeholder="クリニック名・製剤名・出荷ID・受注ID・追跡番号"
               className="w-full pl-9 pr-3 py-2 text-xs border border-slate-300 rounded-xl bg-white"
             />
           </div>
