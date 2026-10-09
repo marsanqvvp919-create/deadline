@@ -407,10 +407,10 @@ export async function trackDomestic(
     const list: any[] = json?.data?.results || [];
     list.forEach((r, idx) => {
       const n = String(r?.data?.trackingNumber || r?.trackingNumber || chunk[idx]);
-      const st = normalizeDomestic(carrier, n, r);
-      // 一時的なエラーは保存しない（次回また照会する）
-      if (String(r?.error?.code || '') === 'TRACKING_FAILED') return;
-      results.push(st);
+      // 一時的なエラー（TRACKING_FAILED：運送会社のメンテナンスなど）も「エラー」として保存する。
+      // 保存しないと、その運送会社の照会待ちのまま止まり、次の運送会社（ヤマト・日本郵便）に進めない。
+      // 取り直しはサーバー側で12時間あけて行う
+      results.push(normalizeDomestic(carrier, n, r));
     });
   }
   return results;
