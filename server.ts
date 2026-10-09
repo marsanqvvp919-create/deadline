@@ -1429,6 +1429,15 @@ async function loadStoreSnapshot(): Promise<boolean> {
     const [buf] = await new Storage().bucket(CACHE_BUCKET).file(CACHE_OBJECT).download();
     const snap = JSON.parse(buf.toString('utf-8'));
     serverRakurakuStore.orders = snap.orders ?? null;
+    // 保存したときと計算のしかた（伝票の状態・アラート）が変わっていても、すぐ新しい計算で表示する
+    if (Array.isArray(snap.orders?.orders)) {
+      try {
+        // 取得した時刻（generatedAt）は保存時のものを残す（新しいデータに見えないように）
+        serverRakurakuStore.orders = { ...snap.orders, ...finalizeDeliveryData(snap.orders.orders), generatedAt: snap.orders.generatedAt };
+      } catch (e: any) {
+        console.warn('[Rakuraku Cache] Recompute failed:', e?.message || e);
+      }
+    }
     serverRakurakuStore.shipments = snap.shipments ?? null;
     serverRakurakuStore.suppliers = snap.suppliers ?? null;
     serverRakurakuStore.products = snap.products ?? null;
