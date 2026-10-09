@@ -184,6 +184,7 @@ export type ViewTab =
   | 'unmatched_sheets'
   | 'sheet_import'
   | 'carrier_settings'
+  | 'bulk_deliveries'
   | 'morning_meeting';
 
 export interface WarehouseStockRecord {

@@ -41,6 +41,7 @@ import { CarrierStatus, fetchSavedCarrierStatuses } from './utils/carriers';
 import { attentionCounts } from './utils/meeting';
 import { boxesOf } from './utils/shipmentTracking';
 import { BudgetSettingsModal } from './components/BudgetSettingsModal';
+import { BulkDeliveriesView } from './components/BulkDeliveriesView';
 import { DailyDigestModal } from './components/DailyDigestModal';
 import { ClinicProductStatusDrawer } from './components/ClinicProductStatusDrawer';
 import { getLocalClinics, getLocalShipments } from './api';
@@ -80,12 +81,13 @@ import {
   FileWarning,
   CalendarCheck,
   ListChecks,
+  Boxes,
 } from 'lucide-react';
 
 const KNOWN_TABS: ViewTab[] = [
   'dashboard', 'morning_meeting', 'alerts', 'procurement', 'unshipped_clinics', 'partial_shipment', 'overdue',
   'customs_management', 'cool_missing', 'kanto_customs_ng', 'unmatched_sheets', 'inventory_management',
-  'sheet_import', 'arrival_tracking', 'products', 'clinics', 'carrier_settings',
+  'sheet_import', 'arrival_tracking', 'products', 'clinics', 'carrier_settings', 'bulk_deliveries',
   'sales_dashboard', 'sales_rep_sales', 'sales_clinic_master', 'reorder_prediction', 'rep_ranking',
 ];
 
@@ -696,6 +698,13 @@ export default function App() {
       badge: null,
     },
     {
+      id: 'bulk_deliveries',
+      group: 'shipping',
+      label: '一括発注の配送',
+      icon: Boxes,
+      badge: null,
+    },
+    {
       id: 'unshipped_clinics',
       group: 'shipping',
       label: '未出荷クリニック',
@@ -1123,6 +1132,10 @@ export default function App() {
           {activeTab === 'sheet_import' && <SheetImportView />}
 
           {activeTab === 'carrier_settings' && <CarrierSettingsView />}
+
+          {activeTab === 'bulk_deliveries' && (
+            <BulkDeliveriesView orders={deliveryData.orders} onSelectOrder={handleOpenDetail} />
+          )}
 
           {activeTab === 'morning_meeting' && (
             <MorningMeetingView

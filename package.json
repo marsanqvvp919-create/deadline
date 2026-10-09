@@ -32,6 +32,7 @@
     "motion": "^12.23.24",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
+    "read-excel-file": "9.3.10",
     "recharts": "^3.10.1",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.21.0",

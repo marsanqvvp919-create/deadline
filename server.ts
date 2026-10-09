@@ -2255,6 +2255,232 @@ async function runTrackingSplitAuto() {
   if (results.some((r) => r.error || r.failureCount)) trackingSplitRetryAfter = Date.now() + 6 * 60 * 60 * 1000;
 }
 
+// ----------------------------------------------------------------------
+// 一括発注の配送（湘南美容・東京ベレッザなど）：院ごとの納品先・数量・追跡番号。
+// 楽楽販売とは切り離して、このシステムだけで持つ（楽楽販売には書き込まない）。
+// ----------------------------------------------------------------------
+const BULK_OBJECT = 'bulk-deliveries.json';
+interface BulkRow {
+  id: string;
+  clinic: string;
+  address: string;
+  product: string;
+  qty: number | null;
+  carrier: string;
+  trackingNo: string;
+  shipDate: string;
+  note: string;
+}
+interface BulkBatch {
+  id: string;
+  title: string;
+  orderId: string;
+  createdAt: string;
+  updatedAt: string;
+  rows: BulkRow[];
+}
+let bulkBatches: BulkBatch[] = [];
+let bulkLoadPromise: Promise<void> | null = null;
+// 一括発注の追跡番号のうち、国内配送として照会するもの（12桁で 7・8 始まりでないもの）
+let bulkDomesticNos = new Set<string>();
+const BULK_HAND = /手持ち|持参|手渡し/;
+const BULK_TRACK_DAYS = 45;
+
+function refreshBulkIndex() {
+  bulkDomesticNos = new Set(
+    bulkBatches.flatMap((b) => b.rows.flatMap((r) => parseTrackingNumbers(r.trackingNo).filter((d) => classifyNumber(d).domesticCandidate)))
+  );
+}
+
+function loadBulkDeliveries() {
+  if (!bulkLoadPromise) {
+    bulkLoadPromise = (async () => {
+      if (!CACHE_BUCKET) return;
+      try {
+        const [buf] = await new Storage().bucket(CACHE_BUCKET).file(BULK_OBJECT).download();
+        const j = JSON.parse(buf.toString('utf-8'));
+        bulkBatches = Array.isArray(j?.batches) ? j.batches : [];
+      } catch (e: any) {
+        if (e?.code !== 404) console.warn('[Bulk] Load failed:', e?.message || e);
+      }
+      refreshBulkIndex();
+    })();
+  }
+  return bulkLoadPromise;
+}
+
+async function saveBulkDeliveries() {
+  refreshBulkIndex();
+  if (!CACHE_BUCKET) return;
+  await new Storage()
+    .bucket(CACHE_BUCKET)
+    .file(BULK_OBJECT)
+    .save(JSON.stringify({ batches: bulkBatches }), { contentType: 'application/json', resumable: false });
+}
+
+const bulkId = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+const bulkNorm = (v: string) => String(v || '').replace(/[\s　・()（）\-－]/g, '').toLowerCase();
+const bulkText = (v: any, max = 200) => String(v ?? '').trim().slice(0, max);
+
+/** まだ届いていない一括発注の追跡番号（出荷日から45日以内か、出荷日が空のもの） */
+function bulkActiveDigits(): string[] {
+  const out: string[] = [];
+  const now = Date.now();
+  for (const b of bulkBatches) {
+    for (const r of b.rows) {
+      if (BULK_HAND.test(r.carrier)) continue;
+      const m = String(r.shipDate || '').match(/(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})/);
+      const shipped = m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).getTime() : new Date(b.updatedAt).getTime();
+      if (now - shipped > BULK_TRACK_DAYS * 86400000) continue;
+      for (const d of parseTrackingNumbers(r.trackingNo)) {
+        const rs = resolveDigits(d);
+        if (rs.state === 'found' && rs.status!.status === 'delivered') continue;
+        if (!out.includes(d)) out.push(d);
+      }
+    }
+  }
+  return out;
+}
+
+/** 院ごとの配送状況（箱が複数なら、全部届いたときだけ配達完了） */
+function bulkRowStatus(r: BulkRow) {
+  if (BULK_HAND.test(r.carrier)) return { state: 'delivered', label: '手持ちで配達済み' };
+  const digits = parseTrackingNumbers(r.trackingNo);
+  if (digits.length === 0) return { state: 'no_number', label: '番号未登録' };
+  const rs = digits.map(resolveDigits);
+  const found = rs.filter((x) => x.state === 'found').map((x) => x.status!);
+  const latest = found.slice().sort((a, b) => String(b.lastEventAt || '').localeCompare(String(a.lastEventAt || '')))[0];
+  const base = latest
+    ? { carrier: carrierName(latest.carrier), lastEventAt: latest.lastEventAt || '', lastLocation: latest.lastLocation || '', statusText: latest.statusText || '' }
+    : {};
+  const delivered = found.filter((c) => c.status === 'delivered');
+  if (delivered.length === digits.length) {
+    const at = delivered.map((c) => c.deliveredAt || c.lastEventAt || '').sort().pop();
+    return { ...base, state: 'delivered', label: digits.length > 1 ? `配達完了（${digits.length}箱）` : '配達完了', deliveredAt: at };
+  }
+  if (found.some((c) => c.status === 'exception')) return { ...base, state: 'exception', label: '要確認' };
+  if (delivered.length > 0) return { ...base, state: 'in_transit', label: `一部配達（${delivered.length}/${digits.length}箱）` };
+  if (found.some((c) => c.status === 'in_transit')) return { ...base, state: 'in_transit', label: '配送中' };
+  if (found.some((c) => c.status === 'pre_transit')) return { ...base, state: 'pickup', label: '集荷待ち' };
+  if (rs.some((x) => x.state === 'pending')) {
+    const retrying = rs.find((x) => x.retrying);
+    return { state: 'pending', label: retrying ? '配送会社の一時エラー（自動で取り直し）' : '状況の取得待ち' };
+  }
+  return { state: 'not_found', label: '番号が見つからない（番号の確認を）' };
+}
+
+function bulkBatchView(b: BulkBatch) {
+  const rows = b.rows.map((r) => ({ ...r, status: bulkRowStatus(r) }));
+  const counts: Record<string, number> = {};
+  rows.forEach((r) => (counts[r.status.state] = (counts[r.status.state] || 0) + 1));
+  return { ...b, rows, counts, total: rows.length };
+}
+
+app.get('/api/bulk-deliveries', async (_req, res) => {
+  await loadBulkDeliveries();
+  await loadCarrierStatusCache();
+  const list = bulkBatches.slice().sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map(bulkBatchView);
+  return res.json({ batches: list });
+});
+
+// 配送リストの取り込み：batchId があればその一括発注に追加・更新（納品先＋商品が同じ行は、入っている項目だけ上書き）
+app.post('/api/bulk-deliveries/import', async (req, res) => {
+  await loadBulkDeliveries();
+  await loadCarrierStatusCache();
+  const input: any[] = Array.isArray(req.body?.rows) ? req.body.rows.slice(0, 2000) : [];
+  const rows: BulkRow[] = input
+    .map((r) => ({
+      id: bulkId(),
+      clinic: bulkText(r.clinic, 120),
+      address: bulkText(r.address, 200),
+      product: bulkText(r.product, 120),
+      qty: r.qty === '' || r.qty === null || r.qty === undefined || isNaN(Number(r.qty)) ? null : Number(r.qty),
+      carrier: bulkText(r.carrier, 40),
+      trackingNo: bulkText(r.trackingNo, 200),
+      shipDate: bulkText(r.shipDate, 20),
+      note: bulkText(r.note, 300),
+    }))
+    .filter((r) => r.clinic);
+  if (rows.length === 0) return res.status(400).json({ error: '納品先の入った行がありません' });
+  const now = new Date().toISOString();
+  let batch = bulkBatches.find((b) => b.id === String(req.body?.batchId || ''));
+  let added = 0;
+  let updated = 0;
+  if (!batch) {
+    const title = bulkText(req.body?.title, 80);
+    if (!title) return res.status(400).json({ error: '一括発注の名前を入れてください' });
+    batch = { id: bulkId(), title, orderId: bulkText(req.body?.orderId, 20), createdAt: now, updatedAt: now, rows: [] };
+    bulkBatches.push(batch);
+  }
+  for (const r of rows) {
+    const same = batch.rows.find((x) => bulkNorm(x.clinic) === bulkNorm(r.clinic) && bulkNorm(x.product) === bulkNorm(r.product));
+    if (same) {
+      (['address', 'product', 'carrier', 'trackingNo', 'shipDate', 'note'] as const).forEach((k) => {
+        if (r[k]) same[k] = r[k];
+      });
+      if (r.qty !== null) same.qty = r.qty;
+      updated++;
+    } else {
+      batch.rows.push(r);
+      added++;
+    }
+  }
+  batch.updatedAt = now;
+  if (req.body?.orderId !== undefined && !batch.orderId) batch.orderId = bulkText(req.body.orderId, 20);
+  await saveBulkDeliveries();
+  // 新しく入った番号は、その場で状況を取りに行く（国内配送の無料枠を使いすぎないよう、まだ一度も取っていない番号だけ）
+  const fresh = Array.from(new Set(batch.rows.flatMap((r) => parseTrackingNumbers(r.trackingNo)))).filter((d) => resolveDigits(d).state === 'pending');
+  if (fresh.length > 0) {
+    effectiveCarrierCreds()
+      .then(({ creds }) => resolveAndLookup(fresh.slice(0, 200), creds, { dhlLimit: 20 }))
+      .then(() => scheduleCarrierStatusSave())
+      .catch((e) => console.warn('[Bulk] Lookup failed:', e?.message || e));
+  }
+  return res.json({ success: true, batchId: batch.id, added, updated, looking: fresh.length });
+});
+
+// 1行だけ直す（追跡番号・配送業者・出荷日・メモ）
+app.post('/api/bulk-deliveries/:batchId/rows/:rowId', async (req, res) => {
+  await loadBulkDeliveries();
+  await loadCarrierStatusCache();
+  const batch = bulkBatches.find((b) => b.id === req.params.batchId);
+  const row = batch?.rows.find((r) => r.id === req.params.rowId);
+  if (!batch || !row) return res.status(404).json({ error: '見つかりません' });
+  (['trackingNo', 'carrier', 'shipDate', 'note'] as const).forEach((k) => {
+    if (typeof req.body?.[k] === 'string') row[k] = bulkText(req.body[k], k === 'note' ? 300 : 200);
+  });
+  batch.updatedAt = new Date().toISOString();
+  await saveBulkDeliveries();
+  const fresh = parseTrackingNumbers(row.trackingNo).filter((d) => resolveDigits(d).state === 'pending');
+  if (fresh.length > 0) {
+    const { creds } = await effectiveCarrierCreds();
+    await resolveAndLookup(fresh, creds, { dhlLimit: 5 }).catch(() => {});
+    scheduleCarrierStatusSave();
+  }
+  return res.json({ success: true, row: { ...row, status: bulkRowStatus(row) } });
+});
+
+// 一括発注の名前・受注IDを直す
+app.post('/api/bulk-deliveries/:batchId', async (req, res) => {
+  await loadBulkDeliveries();
+  const batch = bulkBatches.find((b) => b.id === req.params.batchId);
+  if (!batch) return res.status(404).json({ error: '見つかりません' });
+  if (typeof req.body?.title === 'string' && req.body.title.trim()) batch.title = bulkText(req.body.title, 80);
+  if (typeof req.body?.orderId === 'string') batch.orderId = bulkText(req.body.orderId, 20);
+  batch.updatedAt = new Date().toISOString();
+  await saveBulkDeliveries();
+  return res.json({ success: true });
+});
+
+app.delete('/api/bulk-deliveries/:batchId', async (req, res) => {
+  await loadBulkDeliveries();
+  const before = bulkBatches.length;
+  bulkBatches = bulkBatches.filter((b) => b.id !== req.params.batchId);
+  if (bulkBatches.length === before) return res.status(404).json({ error: '見つかりません' });
+  await saveBulkDeliveries();
+  return res.json({ success: true });
+});
+
 // 取り込みの結果を楽楽販売にそのまま問い合わせる（読み取りのみ。失敗した行の理由を調べるため）
 app.get('/api/rakuraku/import-status/:processId', async (req, res) => {
   const processId = String(req.params.processId || '').replace(/\D/g, '');
@@ -2823,7 +3049,7 @@ function isDomesticDesignated(d: string): boolean {
     domesticNosSource = list;
     domesticNosSet = new Set((list || []).flatMap((s: any) => (s.domesticTrackingNos as string[]) || []));
   }
-  return domesticNosSet.has(d);
+  return domesticNosSet.has(d) || bulkDomesticNos.has(d);
 }
 
 function chainFor(d: string): CarrierId[] {
@@ -3396,6 +3622,12 @@ async function runCarrierAutoRefresh(force = false) {
         if (!digits.includes(d)) digits.push(d);
         if (now - shipped <= 7 * 86400000) recent.add(d);
       });
+    }
+    // 一括発注の配送（院ごとの追跡番号）も、まだ届いていないものは同じように取り直す
+    await loadBulkDeliveries();
+    for (const d of bulkActiveDigits()) {
+      if (!digits.includes(d)) digits.push(d);
+      recent.add(d);
     }
     carrierLastAutoRunAt = new Date().toISOString();
     carrierLastErrors = await resolveAndLookup(digits, creds, {
