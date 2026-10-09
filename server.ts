@@ -194,7 +194,19 @@ const CLINIC_FIELD_MAP: Record<string, string[]> = {
   email: ['メールアドレス1', 'メールアドレス2', 'メールアドレス', 'E-mail', 'mail', 'email'],
   postalCode: ['クリニック住所：郵便番号', '郵便番号', '〒', 'postalCode'],
   prefecture: ['クリニック住所：都道府県', '都道府県', 'prefecture'],
-  address: ['クリニック住所：市区町村', 'クリニック住所：町名・番地', 'クリニック住所：建物名', 'クリニック住所', '住所', '所在地', 'address'],
+  address: ['クリニック住所', '住所', '所在地', 'address'],
+  // 住所は「市区町村」「町名・番地」「建物名」に分かれているので、つなげて使う
+  addressCity: ['クリニック住所：市区町村'],
+  addressStreet: ['クリニック住所：町名・番地'],
+  addressBuilding: ['クリニック住所：建物名'],
+  // 海外の倉庫から直送するときに使う英語の住所
+  addressEn: ['住所英語表記'],
+  addressLine1: ['Address Line 1'],
+  addressLine2: ['Address Line 2'],
+  addressCityEn: ['City'],
+  addressStateEn: ['State/Province/Region'],
+  addressZipEn: ['Zip/Postal Code'],
+  branchName: ['院・支店名', '院名・支店名'],
   status: ['取引ステータス', '取引状態', 'status'],
   paymentMethod: ['支払方法'],
   paymentTerms: ['支払条件', '決済条件', '締日', 'paymentTerms'],
@@ -691,7 +703,16 @@ function transformCsvToClinics(csvText: string): any[] {
       email: getVal(row, 'email') || '',
       postalCode: getVal(row, 'postalCode') || '',
       prefecture: getVal(row, 'prefecture') || '',
-      address: getVal(row, 'address') || '',
+      address:
+        [getVal(row, 'prefecture'), getVal(row, 'addressCity'), getVal(row, 'addressStreet'), getVal(row, 'addressBuilding')].filter(Boolean).join('') ||
+        getVal(row, 'address') ||
+        '',
+      addressEn:
+        getVal(row, 'addressEn') ||
+        [getVal(row, 'addressLine1'), getVal(row, 'addressLine2'), getVal(row, 'addressCityEn'), getVal(row, 'addressStateEn'), getVal(row, 'addressZipEn')]
+          .filter(Boolean)
+          .join(', '),
+      branchName: getVal(row, 'branchName') || '',
       // 楽楽販売の「支払方法」（前払い・後払いなど）。取引状態の項目はないので status には入れない
       paymentMethod: getVal(row, 'paymentMethod') || '',
       status: getVal(row, 'status') || '',
@@ -2273,6 +2294,8 @@ interface BulkRow {
   domesticNo: string;
   shipDate: string;
   note: string;
+  /** 顧客マスタのクリニックID（院名から自動で結びつける。手で選び直せる） */
+  clinicId?: string;
 }
 interface BulkBatch {
   id: string;
@@ -2414,8 +2437,55 @@ function bulkRowStatus(r: BulkRow): any {
   return { ...dom, legs };
 }
 
+// ---- 院名から顧客マスタのクリニックを探す（住所をマスタから出すため） ----
+const clinicKey = (v: string) => String(v || '').replace(/[\s　・･\-－]/g, '').toLowerCase();
+const clinicKeyNoParen = (v: string) => clinicKey(String(v || '').replace(/[（(][^）)]*[）)]/g, ''));
+let clinicIndexSource: any[] | null = null;
+let clinicIndex = new Map<string, any>();
+function masterClinicIndex() {
+  const list = serverRakurakuStore.clinics || [];
+  if (list !== clinicIndexSource) {
+    clinicIndexSource = list;
+    clinicIndex = new Map();
+    for (const c of list) {
+      for (const k of [clinicKey(c.clinicName), clinicKeyNoParen(c.clinicName), clinicKey(c.clinicNameEn)]) {
+        if (k && !clinicIndex.has(k)) clinicIndex.set(k, c);
+      }
+    }
+  }
+  return clinicIndex;
+}
+function findMasterClinic(name: string): any | null {
+  const idx = masterClinicIndex();
+  const k = clinicKey(name);
+  const k2 = clinicKeyNoParen(name);
+  const hit = idx.get(k) || idx.get(k2);
+  if (hit) return hit;
+  if (k2.length < 6) return null;
+  // 片方がもう片方を含む院が1つだけなら、それとみなす（「〇〇院(中央区)」と「〇〇院」など）
+  const cands = (serverRakurakuStore.clinics || []).filter((c: any) => {
+    const ck = clinicKeyNoParen(c.clinicName);
+    return ck.length >= 6 && (ck.includes(k2) || k2.includes(ck));
+  });
+  return cands.length === 1 ? cands[0] : null;
+}
+const masterClinicById = (id?: string) => (id ? (serverRakurakuStore.clinics || []).find((c: any) => c.clinicId === id) || null : null);
+
 function bulkBatchView(b: BulkBatch) {
-  const rows = b.rows.map((r) => ({ ...r, status: bulkRowStatus(r) }));
+  const rows = b.rows.map((r) => {
+    const m = masterClinicById(r.clinicId) || (r.clinicId === undefined || r.clinicId === '' ? findMasterClinic(r.clinic) : null);
+    const masterAddress = m ? m.address || m.addressEn || '' : '';
+    return {
+      ...r,
+      clinicId: m?.clinicId || '',
+      masterName: m?.clinicName || '',
+      // 住所：配送リストに書いてあればそれ、なければ顧客マスタ（日本語、なければ英語）
+      address: r.address || masterAddress,
+      addressSource: r.address ? 'file' : masterAddress ? 'master' : '',
+      masterAddressEn: m?.addressEn || '',
+      status: bulkRowStatus(r),
+    };
+  });
   const counts: Record<string, number> = {};
   rows.forEach((r) => (counts[r.status.state] = (counts[r.status.state] || 0) + 1));
   return { ...b, rows, counts, total: rows.length };
@@ -2501,7 +2571,7 @@ app.post('/api/bulk-deliveries/:batchId/rows/:rowId', async (req, res) => {
   const batch = bulkBatches.find((b) => b.id === req.params.batchId);
   const row = batch?.rows.find((r) => r.id === req.params.rowId);
   if (!batch || !row) return res.status(404).json({ error: '見つかりません' });
-  (['trackingNo', 'domesticNo', 'carrier', 'shipDate', 'note'] as const).forEach((k) => {
+  (['trackingNo', 'domesticNo', 'carrier', 'shipDate', 'note', 'clinicId', 'address'] as const).forEach((k) => {
     if (typeof req.body?.[k] === 'string') row[k] = bulkText(req.body[k], k === 'note' ? 300 : 200);
   });
   batch.updatedAt = new Date().toISOString();
@@ -2512,7 +2582,8 @@ app.post('/api/bulk-deliveries/:batchId/rows/:rowId', async (req, res) => {
     await resolveAndLookup(fresh, creds, { dhlLimit: 5 }).catch(() => {});
     scheduleCarrierStatusSave();
   }
-  return res.json({ success: true, row: { ...row, status: bulkRowStatus(row) } });
+  const view = bulkBatchView({ ...batch, rows: [row] }).rows[0];
+  return res.json({ success: true, row: view });
 });
 
 // 一括発注の名前・受注IDを直す

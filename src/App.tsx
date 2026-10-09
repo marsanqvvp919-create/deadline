@@ -1134,7 +1134,7 @@ export default function App() {
           {activeTab === 'carrier_settings' && <CarrierSettingsView />}
 
           {activeTab === 'bulk_deliveries' && (
-            <BulkDeliveriesView orders={deliveryData.orders} onSelectOrder={handleOpenDetail} />
+            <BulkDeliveriesView orders={deliveryData.orders} clinics={clinics} onSelectOrder={handleOpenDetail} />
           )}
 
           {activeTab === 'morning_meeting' && (

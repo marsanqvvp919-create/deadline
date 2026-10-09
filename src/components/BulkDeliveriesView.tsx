@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, ChevronRight, Download, ExternalLink, RefreshCw, Trash2, Upload } from 'lucide-react';
 import readXlsxFile from 'read-excel-file/browser';
-import { Order } from '../types';
+import { ClinicItem, Order } from '../types';
 import { domesticTrackingUrl, hintedCarrier, parseTrackingNumbers } from '../utils/trackingNumbers';
 import { splitOrderIds } from '../utils/bulk';
 
@@ -52,6 +52,11 @@ interface BulkRow {
   shipDate: string;
   note: string;
   status: RowStatus;
+  /** 顧客マスタで結びついたクリニック（院名から自動。手で選び直せる） */
+  clinicId: string;
+  masterName: string;
+  addressSource: 'file' | 'master' | '';
+  masterAddressEn: string;
 }
 interface Batch {
   id: string;
@@ -181,7 +186,11 @@ function ago(iso?: string): string {
 }
 
 // ---- 画面 ----
-export const BulkDeliveriesView: React.FC<{ orders: Order[]; onSelectOrder: (order: Order) => void }> = ({ orders, onSelectOrder }) => {
+export const BulkDeliveriesView: React.FC<{ orders: Order[]; clinics?: ClinicItem[]; onSelectOrder: (order: Order) => void }> = ({
+  orders,
+  clinics = [],
+  onSelectOrder,
+}) => {
   const [batches, setBatches] = useState<Batch[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<Record<string, boolean>>({});
@@ -217,6 +226,7 @@ export const BulkDeliveriesView: React.FC<{ orders: Order[]; onSelectOrder: (ord
   }, []);
 
   const orderById = useMemo(() => new Map(orders.map((o) => [o.orderId, o])), [orders]);
+  const masterByName = useMemo(() => new Map(clinics.map((c) => [c.clinicName, c])), [clinics]);
   const bulkOrderOptions = useMemo(
     () =>
       orders
@@ -329,10 +339,11 @@ export const BulkDeliveriesView: React.FC<{ orders: Order[]; onSelectOrder: (ord
   // 一括発注の院ごとの状況を CSV で書き出す（倉庫・営業への共有用）
   const exportBatch = (b: Batch) =>
     saveCsv(`${b.title}_配送状況.csv`, [
-      ['納品先', '住所', '商品名', '数量', '国際追跡番号（DHL・FedEx）', '国内追跡番号（佐川）', '出荷日', '状況', '国際の状況', '国内の状況', '最終スキャン', 'メモ'],
+      ['納品先', '住所', '英語の住所（マスタ）', '商品名', '数量', '国際追跡番号（DHL・FedEx）', '国内追跡番号（佐川）', '出荷日', '状況', '国際の状況', '国内の状況', '最終スキャン', 'メモ'],
       ...b.rows.map((r) => [
         r.clinic,
         r.address,
+        r.masterAddressEn,
         r.product,
         r.qty ?? '',
         r.trackingNo,
@@ -617,7 +628,29 @@ export const BulkDeliveriesView: React.FC<{ orders: Order[]; onSelectOrder: (ord
                         <tr key={r.id} className="align-top">
                           <td className="py-2 px-3">
                             <div className="font-bold text-slate-900">{r.clinic}</div>
-                            {r.address && <div className="text-[10px] text-slate-500 max-w-[16rem] truncate" title={r.address}>{r.address}</div>}
+                            {r.address ? (
+                              <div className="text-[10px] text-slate-500 max-w-[18rem]" title={[r.address, r.masterAddressEn].filter(Boolean).join('\n')}>
+                                <span className={`mr-1 px-1 rounded font-bold ${r.addressSource === 'master' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>
+                                  {r.addressSource === 'master' ? 'マスタ' : 'リスト'}
+                                </span>
+                                {r.address}
+                              </div>
+                            ) : r.clinicId ? (
+                              <div className="text-[10px] text-amber-700">顧客マスタ「{r.masterName}」に住所が未入力です</div>
+                            ) : (
+                              <div className="text-[10px] text-amber-700 flex items-center gap-1 flex-wrap">
+                                顧客マスタに見つかりません
+                                <input
+                                  list="bulk-master-clinics"
+                                  placeholder="マスタから選ぶ"
+                                  className="border border-amber-300 rounded px-1 py-0.5 w-40 text-slate-800"
+                                  onChange={(e) => {
+                                    const c = masterByName.get(e.target.value);
+                                    if (c) saveRow(b.id, r, { clinicId: c.clinicId });
+                                  }}
+                                />
+                              </div>
+                            )}
                           </td>
                           <td className="py-2 px-3">
                             {r.product || '—'}
@@ -670,6 +703,11 @@ export const BulkDeliveriesView: React.FC<{ orders: Order[]; onSelectOrder: (ord
           </div>
         );
       })}
+      <datalist id="bulk-master-clinics">
+        {clinics.map((c) => (
+          <option key={c.clinicId} value={c.clinicName} />
+        ))}
+      </datalist>
       <datalist id="bulk-carriers">
         <option value="佐川" />
         <option value="ヤマト" />
