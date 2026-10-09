@@ -268,6 +268,8 @@ export default function App() {
   const [isMobileNavOpen, setIsMobileNavOpen] = useState<boolean>(false);
 
   const lastSyncedTabRef = useRef<ViewTab | null>(activeTab);
+  // 「戻る」「進む」で画面が変わったとき（履歴に積み直さない）
+  const fromHistoryRef = useRef(false);
   // 2. URLクエリパラメータとの双方向同期（フェーズ3要件）
   useEffect(() => {
     try {
@@ -281,11 +283,29 @@ export default function App() {
 
       const newRelativePathQuery =
         window.location.pathname + (params.toString() ? '?' + params.toString() : '');
-      window.history.replaceState(null, '', newRelativePathQuery);
+      // 画面を切り替えたときは履歴に残す（ブラウザの「戻る」で前の画面に戻れるように）。
+      // 「戻る」「進む」で切り替わったときは、すでに履歴にあるので書き換えるだけ
+      if (tabChanged && !fromHistoryRef.current) window.history.pushState(null, '', newRelativePathQuery);
+      else window.history.replaceState(null, '', newRelativePathQuery);
+      fromHistoryRef.current = false;
     } catch {
       // ignore
     }
   }, [activeTab, selectedRep]);
+
+  // ブラウザの「戻る」「進む」で、URLの画面に切り替える
+  useEffect(() => {
+    const onPop = () => {
+      const t = new URLSearchParams(window.location.search).get('tab') as ViewTab | null;
+      const next = t && KNOWN_TABS.includes(t) ? t : 'morning_meeting';
+      setActiveTab((prev) => {
+        if (prev !== next) fromHistoryRef.current = true;
+        return next;
+      });
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
 
   // 担当営業の絞り込みは要対応リストの中だけ。ほかの画面へ移ったら解除する
   useEffect(() => {

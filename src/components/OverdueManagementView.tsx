@@ -659,7 +659,7 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
               {/* ユーザー要件: 納期超過と納期間近（5日以内）を別指標として分けるタブ */}
               <div className="flex flex-wrap items-center gap-2 mt-3 pt-2 border-t border-slate-100">
                 <span className="text-xs font-bold text-slate-500">指標切替:</span>
-                <div className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-xl">
+                <div className="flex flex-wrap items-center gap-1.5 p-1 bg-slate-100 rounded-xl max-w-full">
                   <button
                     type="button"
                     onClick={() => setActiveScope('overdue')}
