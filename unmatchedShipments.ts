@@ -457,7 +457,7 @@ export function findUnmatched(
         const quotes = clinicOrders.filter((o) => (o.status || '').includes('見積')).slice(0, 3);
         const latest = clinicOrders[0];
         if (quotes.length > 0 && latest && (latest.status || '').includes('見積')) {
-          noCandidateReason = `最新の受注 ${quotes.map((o) => o.orderId).join('・')} が「${latest.status}」のままです（受注に進んでいないため出荷がありません）`;
+          noCandidateReason = `最新の受注 ${quotes.map((o) => `${o.orderId}（${o.status}）`).join('・')} が見積のままです（受注に進んでいないため出荷がありません）`;
         } else {
           noCandidateReason = '出荷待ちの出荷も、出荷日が近い出荷もありません（楽楽販売に出荷が登録されていない可能性があります）';
         }
