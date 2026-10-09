@@ -98,7 +98,11 @@ export const SheetImportView: React.FC = () => {
     [latest, fieldFilter]
   );
   const lastScheduled = (data?.history || []).filter((h) => h.trigger === 'schedule').slice(0, 2);
-  const twoDaysClean = lastScheduled.length === 2 && lastScheduled.every((h) => !h.failed);
+  // 失敗した自動実行でも、そのあとの取り込み（手動を含む）が失敗なしで終わっていれば解消済みとみなす
+  const history = data?.history || [];
+  const resolved = (h: any) => !h.failed || history.slice(0, history.indexOf(h)).some((later: any) => later.mode === 'write' && !later.failed);
+  const twoDaysClean = lastScheduled.length === 2 && lastScheduled.every(resolved);
+  const unresolvedFailed = history.filter((h: any) => h.failed && !resolved(h)).reduce((a: number, h: any) => a + (h.failed || 0), 0);
 
   const downloadCsv = () => {
     if (!latest) return;
@@ -178,11 +182,9 @@ export const SheetImportView: React.FC = () => {
               <span className="text-[10px] text-slate-500 ml-1">件</span>
             </div>
             <div className={`p-3 rounded-xl border ${twoDaysClean ? 'border-emerald-300 bg-emerald-50' : 'border-slate-200'}`}>
-              <span className="text-[11px] font-semibold text-slate-600 block">失敗（直近の自動実行）</span>
-              <span className="text-2xl font-bold font-mono text-slate-900">
-                {lastScheduled.reduce((a, h) => a + (h.failed || 0), 0)}
-              </span>
-              <span className="text-[10px] text-slate-500 ml-1">回</span>
+              <span className="text-[11px] font-semibold text-slate-600 block">失敗した行（未解消）</span>
+              <span className={`text-2xl font-bold font-mono ${unresolvedFailed ? 'text-rose-600' : 'text-slate-900'}`}>{unresolvedFailed}</span>
+              <span className="text-[10px] text-slate-500 ml-1">行</span>
               <span className="text-[10px] block text-slate-500">
                 {twoDaysClean ? '2日続けて失敗なし' : `自動実行 ${lastScheduled.length}/2日`}
               </span>

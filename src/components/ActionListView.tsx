@@ -14,12 +14,13 @@ import { BulkSummary, fetchBulkByOrder } from '../utils/bulk';
 // やることリスト：楽楽販売のデータの抜け・止まっているものを、直す場所ごとにまとめる。
 // 納期超過・配送の問題は「朝の納期会議」で扱うので、ここには入れない。
 
-type RuleId = 'B1' | 'B2' | 'stuck_status' | 'no_supplier' | 'no_tracking' | 'bad_tracking' | 'wrong_carrier';
+type RuleId = 'B1' | 'B2' | 'stuck_status' | 'leftover_lines' | 'no_supplier' | 'no_tracking' | 'bad_tracking' | 'wrong_carrier';
 
 const RULES: { id: RuleId; label: string; description: string; fix: string; kind: 'order' | 'shipment' }[] = [
   { id: 'B1', label: '未発注（3日以上）', description: '受注日から3日以上たっても未発注の明細がある伝票', fix: '発注して、楽楽販売の発注管理に登録する', kind: 'order' },
   { id: 'B2', label: '納期未設定', description: '最短・最長納品予定日が未入力の明細がある伝票', fix: 'ご注文管理の明細に最短・最長納品予定日を入れる', kind: 'order' },
   { id: 'stuck_status', label: 'ステータスが止まっている', description: '明細はすべて出荷完了なのに、伝票のステータスが「受注済み」「発注済み」のまま', fix: 'ご注文管理のステータスを「出荷済み」にする', kind: 'order' },
+  { id: 'leftover_lines', label: '出荷済みなのに未発注の明細', description: '伝票のステータスは「出荷済み」「納品済み」なのに、未発注・未出荷のままの明細が残っている', fix: 'ご注文管理の明細を直す（出荷した・取り消した等）。発注管理と未出荷クリニックの数字には入れていません', kind: 'order' },
   { id: 'no_supplier', label: '仕入先が空', description: '仕入先が入っていない明細がある伝票（発注先が分からない）', fix: 'ご注文管理の明細に仕入先を入れる', kind: 'order' },
   { id: 'no_tracking', label: '出荷済みなのに追跡番号なし', description: `出荷済みの出荷（${60}日以内）で、出荷番号・国際追跡番号・国内追跡番号がどれも空`, fix: '出荷管理の「国際追跡番号」か「国内追跡番号」に番号を入れる', kind: 'shipment' },
   { id: 'wrong_carrier', label: '配送業者の登録違い', description: '楽楽販売の「配送業者」と、追跡番号から分かった配送会社が違う出荷', fix: '出荷管理の「配送業者」を正しい会社に直す', kind: 'shipment' },
@@ -115,6 +116,11 @@ export const ActionListView: React.FC<{
         return ['受注済み', '発注済み'].includes(o.status) && lines.length > 0 && lines.every((l) => l.stage === '出荷完了');
       })
       .map((o) => orderRow(o, o.orderId, o.salesRep, o.lines.length, '明細すべて出荷完了'));
+    result.leftover_lines = orders
+      .filter((o) => !isQuoteOrder(o) && ['出荷済み', '納品済み'].includes(o.status))
+      .map((o) => ({ o, n: o.lines.filter((l) => !isShippingOrFee(l.productName, l.productId) && l.stage !== '出荷完了').length }))
+      .filter((x) => x.n > 0)
+      .map(({ o, n }) => orderRow(o, o.orderId, o.salesRep, n, '明細が未出荷のまま'));
     result.no_supplier = live
       .map((o) => ({ o, n: o.lines.filter((l) => !isShippingOrFee(l.productName, l.productId) && !String(l.supplierName || '').trim()).length }))
       .filter((x) => x.n > 0)
@@ -200,7 +206,7 @@ export const ActionListView: React.FC<{
             </p>
           )}
         </div>
-        <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-7 gap-2">
+        <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 gap-2">
           {RULES.map((r) => {
             const n =
               (r.id === 'bad_tracking' && irregular === null) || (r.id === 'wrong_carrier' && carrierStatus === null) ? null : byRule[r.id]?.length || 0;

@@ -939,9 +939,13 @@ function finalizeDeliveryData(orders: any[]): any {
     const totalLines = order.lines.length;
     const allShipped = totalLines > 0 && order.lines.every((l: any) => l.shippedQty >= l.quantity || l.stage === '出荷完了');
 
-    if (order.deliveredDate && allShipped) {
+    // 楽楽販売で伝票のステータスが「出荷済み」「納品済み」なら、明細に未発注・未出荷が残っていても完了した伝票として扱う
+    // （残った明細は発注・出荷の対象ではなく、データの直し漏れ。やることリストに出す）
+    const closedByStatus = ['出荷済み', '納品済み'].includes((order.status || '').trim());
+    order.leftoverLines = closedByStatus && !allShipped ? order.lines.filter((l: any) => l.stage !== '出荷完了').length : 0;
+    if ((order.deliveredDate && allShipped) || (closedByStatus && (order.status || '').trim() === '納品済み')) {
       order.orderState = '納品完了';
-    } else if (allShipped) {
+    } else if (allShipped || closedByStatus) {
       order.orderState = '全明細出荷済';
     } else {
       order.orderState = '進行中';

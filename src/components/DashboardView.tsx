@@ -106,7 +106,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   );
 
   // 未完了明細（stage !== '出荷完了'）
-  const incompleteLines = allLines.filter((l) => l.stage !== '出荷完了');
+  const incompleteLines = allLines.filter((l) => l.stage !== '出荷完了' && l.orderState !== '全明細出荷済' && l.orderState !== '納品完了');
 
   // 統一された納期超過判定（伝票・明細）
   const delayedOrders = useMemo(() => {
@@ -565,7 +565,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 </span>
               </div>
               <p className="text-[11px] text-slate-500 mt-1.5 line-clamp-2">
-                楽楽販売「納期：①超過」と同じ条件（最長納品予定日が過ぎ、出荷日が空欄の明細がある伝票）。
+                楽楽販売「納期：①超過」と同じ条件（最長納品予定日が過ぎ、出荷日が空欄の明細がある伝票）。ただし割引・不足分などの精算行だけが残った伝票は数えません。
               </p>
             </div>
           </div>
@@ -731,7 +731,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <span className="text-xs text-amber-600 font-bold">件（{approachingCounts.linesCount}明細）</span>
             </div>
             <span className="text-[11px] text-slate-500 mt-1 block leading-tight">
-              最長納品予定日まで{APPROACHING_DAYS}日以内で、出荷日が空欄の明細がある伝票（楽楽販売「②注意」と同じ）
+              最長納品予定日まで{APPROACHING_DAYS}日以内で、出荷日が空欄の明細がある伝票（楽楽販売「②注意」とほぼ同じ。納期超過に入っている伝票は二重に数えません）
             </span>
           </div>
           <div className="mt-3 pt-2.5 border-t border-amber-100 flex items-center justify-between">

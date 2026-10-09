@@ -115,6 +115,8 @@ export const ProcurementView: React.FC<ProcurementViewProps> = ({
     orders.forEach((ord) => {
       // 見積もりステータスのものは発注管理に含めない
       if (isQuoteOrder(ord)) return;
+      // 出荷済み・納品済みの伝票（明細に未発注が残っていても、発注の対象ではない）
+      if (ord.orderState === '全明細出荷済' || ord.orderState === '納品完了') return;
 
       const payStatus = ord.paymentStatus;
       // 入金日は楽楽販売の値だけ（受注日で代用しない）

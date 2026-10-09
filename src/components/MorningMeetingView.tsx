@@ -25,8 +25,8 @@ const SECTIONS: { id: SectionId; label: string; rule: string; tone: string }[] =
   { id: 'missed', label: '発注漏れ', rule: '受注済みのまま未発注で、最長納品予定日を過ぎている', tone: 'rose' },
   { id: 'stalled', label: '配送の問題', rule: '配送会社が例外（通関保留・住所不明・不在・配達遅延・返送など）を返しているか、輸送中のまま最後のスキャンから3日以上動きがない', tone: 'orange' },
   { id: 'labelOnly', label: '送り状だけで動いていない', rule: '送り状（ラベル）を作ってから3日以上、配送会社が荷物を受け取っていない', tone: 'slate' },
-  { id: 'overdue', label: '納期超過', rule: '楽楽販売「納期：①超過」と同じ条件', tone: 'rose' },
-  { id: 'approaching', label: '5日以内に期限', rule: '楽楽販売「納期：②注意」と同じ条件', tone: 'amber' },
+  { id: 'overdue', label: '納期超過', rule: '楽楽販売「納期：①超過」と同じ条件（割引・不足分などの精算行だけが残った伝票は除く）', tone: 'rose' },
+  { id: 'approaching', label: '5日以内に期限', rule: '楽楽販売「納期：②注意」と同じ条件（納期超過に入っている伝票は除く）', tone: 'amber' },
   { id: 'untracked', label: '追跡番号なし', rule: '「◆出荷ステータス」の追跡番号が楽楽販売の出荷管理にない（未照合）', tone: 'slate' },
 ];
 

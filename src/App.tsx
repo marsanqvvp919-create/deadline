@@ -511,6 +511,8 @@ export default function App() {
     filteredOrders.forEach((o) => {
       // 入金ステータスが楽楽販売で「入金済」の伝票だけ（不明は数えない）
       if (o.paymentStatus !== '入金済') return;
+      // 出荷済み・納品済みの伝票に残った未発注の明細は、発注の対象ではない
+      if (o.orderState === '全明細出荷済' || o.orderState === '納品完了') return;
       o.lines.forEach((l) => {
         if (isShippingOrFee(l.productName, l.productId)) return;
         if (l.stage === '未発注') count++;
