@@ -8,7 +8,7 @@ import { splitOrderIds } from '../utils/bulk';
 // 一括発注の配送（湘南美容・東京ベレッザなど）：院ごとの納品先・数量・追跡番号を、配送リスト（Excel・CSV）から取り込んで追跡する。
 // 楽楽販売とは切り離して、このシステムだけで持つ（楽楽販売には書き込まない）。
 
-type FieldKey = 'clinic' | 'address' | 'product' | 'qty' | 'carrier' | 'trackingNo' | 'shipDate' | 'note';
+type FieldKey = 'clinic' | 'address' | 'product' | 'qty' | 'carrier' | 'domesticNo' | 'trackingNo' | 'shipDate' | 'note';
 
 const FIELDS: { key: FieldKey; label: string; required?: boolean; pattern: RegExp }[] = [
   { key: 'clinic', label: '納品先（院名）', required: true, pattern: /納品先|お届け先|届け先|配送先|宛先|院名|医院|クリニック|店舗|施設/ },
@@ -16,14 +16,24 @@ const FIELDS: { key: FieldKey; label: string; required?: boolean; pattern: RegEx
   { key: 'product', label: '商品', pattern: /商品|品名|品目|製品/ },
   { key: 'qty', label: '数量', pattern: /数量|個数|出荷数|本数|qty/i },
   { key: 'carrier', label: '配送業者', pattern: /配送業者|運送会社|業者|キャリア/ },
-  { key: 'trackingNo', label: '追跡番号', pattern: /追跡|伝票|送り状|問合せ|問い合わせ/ },
+  // 「国内」を先に判定する（「国内追跡番号」が国際の列に入らないように）。「追跡番号」1列だけのファイルは、番号の形で国際・国内に振り分ける
+  { key: 'domesticNo', label: '国内追跡番号（佐川）', pattern: /国内|佐川|飛脚|お問い合わせ番号|問合せ番号/ },
+  { key: 'trackingNo', label: '国際追跡番号（DHL・FedEx）', pattern: /国際|DHL|FedEx|AWB|エアウェイ|追跡|伝票|送り状/i },
   { key: 'shipDate', label: '出荷日', pattern: /出荷日|発送日|出荷予定|発送予定/ },
   { key: 'note', label: 'メモ', pattern: /備考|メモ|注記/ },
 ];
 
+interface LegStatus {
+  state: string;
+  label: string;
+  carrier?: string;
+  lastEventAt?: string;
+  lastLocation?: string;
+}
 interface RowStatus {
   state: 'delivered' | 'in_transit' | 'pickup' | 'exception' | 'pending' | 'no_number' | 'not_found';
   label: string;
+  legs?: { intl: LegStatus | null; domestic: LegStatus | null };
   carrier?: string;
   lastEventAt?: string;
   lastLocation?: string;
@@ -38,6 +48,7 @@ interface BulkRow {
   qty: number | null;
   carrier: string;
   trackingNo: string;
+  domesticNo: string;
   shipDate: string;
   note: string;
   status: RowStatus;
@@ -64,7 +75,21 @@ const STATE_STYLE: Record<RowStatus['state'], { label: string; cls: string; bar:
 };
 const STATE_ORDER: RowStatus['state'][] = ['exception', 'not_found', 'no_number', 'pending', 'pickup', 'in_transit', 'delivered'];
 
-const TEMPLATE_HEADERS = ['納品先', '住所', '商品名', '数量', '配送業者', '追跡番号', '出荷日', 'メモ'];
+const TEMPLATE_HEADERS = ['納品先', '住所', '商品名', '数量', '国際追跡番号（DHL・FedEx）', '国内追跡番号（佐川）', '出荷日', 'メモ'];
+const TEMPLATE_SAMPLE = [
+  ['湘南美容クリニック 新宿本院', '東京都新宿区…', 'PRX-T33(マッサージピール)', '6', '7511638724', '', '2026/10/14', 'SG倉庫からDHLで直送'],
+  ['湘南美容クリニック 横浜院', '神奈川県横浜市…', 'PRX-T33(マッサージピール)', '4', '877477993783', '4407-7232-6536', '2026/10/14', '日本で佐川に積み替え'],
+];
+const csvCell = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+function saveCsv(fileName: string, rows: unknown[][]) {
+  const csv = '\uFEFF' + rows.map((r) => r.map(csvCell).join(',')).join('\r\n') + '\r\n';
+  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 
 // ---- ファイルの読み込み ----
 function cellText(v: unknown): string {
@@ -138,10 +163,10 @@ function guessMapping(rows: string[][]): { headerRow: number; map: Partial<Recor
   return { headerRow: best.headerRow, map: best.map };
 }
 
-function trackingUrl(row: BulkRow): string | null {
-  const first = parseTrackingNumbers(row.trackingNo)[0];
+function trackingUrl(numbers: string, leg: LegStatus | null | undefined, domestic: boolean): string | null {
+  const first = parseTrackingNumbers(numbers)[0];
   if (!first) return null;
-  const code = hintedCarrier(row.status.carrier || row.carrier);
+  const code = hintedCarrier(leg?.carrier) || (domestic ? 'sagawa' : first.length === 10 ? 'dhl' : 'fedex');
   if (code === 'fedex') return `https://www.fedex.com/fedextrack/?trknbr=${first}`;
   if (code === 'dhl') return `https://www.dhl.com/jp-ja/home/tracking.html?tracking-id=${first}`;
   return domesticTrackingUrl(code, first);
@@ -245,6 +270,7 @@ export const BulkDeliveriesView: React.FC<{ orders: Order[]; onSelectOrder: (ord
           qty: qtyText && !isNaN(Number(qtyText)) ? Number(qtyText) : null,
           carrier: get('carrier'),
           trackingNo: get('trackingNo'),
+          domesticNo: get('domesticNo'),
           shipDate: get('shipDate'),
           note: get('note'),
         };
@@ -298,15 +324,27 @@ export const BulkDeliveriesView: React.FC<{ orders: Order[]; onSelectOrder: (ord
     load();
   };
 
-  const downloadTemplate = () => {
-    const csv = '﻿' + TEMPLATE_HEADERS.join(',') + '\r\n' + '湘南美容クリニック 新宿本院,東京都新宿区…,ジュベルック 1ml,20,佐川,,2026/10/14,\r\n';
-    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = '一括発注_配送リスト_ひな形.csv';
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  };
+  const downloadTemplate = () => saveCsv('一括発注_配送リスト_ひな形.csv', [TEMPLATE_HEADERS, ...TEMPLATE_SAMPLE]);
+
+  // 一括発注の院ごとの状況を CSV で書き出す（倉庫・営業への共有用）
+  const exportBatch = (b: Batch) =>
+    saveCsv(`${b.title}_配送状況.csv`, [
+      ['納品先', '住所', '商品名', '数量', '国際追跡番号（DHL・FedEx）', '国内追跡番号（佐川）', '出荷日', '状況', '国際の状況', '国内の状況', '最終スキャン', 'メモ'],
+      ...b.rows.map((r) => [
+        r.clinic,
+        r.address,
+        r.product,
+        r.qty ?? '',
+        r.trackingNo,
+        r.domesticNo,
+        r.shipDate,
+        r.status.label,
+        r.status.legs?.intl ? `${r.status.legs.intl.carrier || ''} ${r.status.legs.intl.label}`.trim() : '',
+        r.status.legs?.domestic ? `${r.status.legs.domestic.carrier || ''} ${r.status.legs.domestic.label}`.trim() : '',
+        [r.status.lastLocation, r.status.lastEventAt ? new Date(r.status.lastEventAt).toLocaleString('ja-JP') : ''].filter(Boolean).join(' '),
+        r.note,
+      ]),
+    ]);
 
   return (
     <div className="space-y-4">
@@ -315,7 +353,7 @@ export const BulkDeliveriesView: React.FC<{ orders: Order[]; onSelectOrder: (ord
           <div className="min-w-0">
             <h2 className="text-lg font-bold text-slate-900">一括発注の配送</h2>
             <p className="text-xs text-slate-500 mt-1">
-              湘南美容・東京ベレッザなどの一括発注を、院ごとの配送先と追跡番号で管理します。配送リスト（Excel・CSV）を取り込み、送り状を出したら追跡番号の列を埋めて同じファイルをもう一度取り込むか、下の表に直接入力してください。
+              湘南美容・東京ベレッザなどの一括発注を、院ごとの配送先と追跡番号で管理します。配送リスト（Excel・CSV）を取り込み、送り状を出したら番号の列（国際：DHL・FedEx／国内：佐川）を埋めて同じファイルをもう一度取り込むか、下の表に直接入力してください。国内（佐川）の番号がある院は、佐川で届いた時点で配達完了にします。
               この画面のデータは楽楽販売には書き込みません。
             </p>
           </div>
@@ -510,6 +548,10 @@ export const BulkDeliveriesView: React.FC<{ orders: Order[]; onSelectOrder: (ord
                       <span key={id} className="font-mono text-slate-500">受注 {id}</span>
                     );
                   })}
+                  <button type="button" onClick={() => exportBatch(b)} className="px-2 py-1 rounded-lg border border-slate-300 text-slate-700 font-bold flex items-center gap-1" title="院ごとの状況をCSVで書き出す">
+                    <Download className="w-3 h-3" />
+                    CSV
+                  </button>
                   {confirmDelete === b.id ? (
                     <span className="flex items-center gap-1.5">
                       <span className="text-rose-700 font-bold">この一括発注を消しますか？</span>
@@ -563,14 +605,13 @@ export const BulkDeliveriesView: React.FC<{ orders: Order[]; onSelectOrder: (ord
                     <tr className="text-left text-slate-600 bg-slate-50">
                       <th className="py-2 px-3">納品先</th>
                       <th className="py-2 px-3">商品・数量</th>
-                      <th className="py-2 px-3">配送業者</th>
-                      <th className="py-2 px-3">追跡番号</th>
+                      <th className="py-2 px-3">国際（DHL・FedEx）</th>
+                      <th className="py-2 px-3">国内（佐川）</th>
                       <th className="py-2 px-3">状況</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {rows.map((r) => {
-                      const url = trackingUrl(r);
                       const st = STATE_STYLE[r.status.state];
                       return (
                         <tr key={r.id} className="align-top">
@@ -582,26 +623,32 @@ export const BulkDeliveriesView: React.FC<{ orders: Order[]; onSelectOrder: (ord
                             {r.product || '—'}
                             {r.qty !== null && <span className="font-mono font-bold"> × {r.qty}</span>}
                           </td>
-                          <td className="py-2 px-3">
-                            <input
-                              key={`c-${r.id}-${r.carrier}`}
-                              defaultValue={r.carrier}
-                              list="bulk-carriers"
-                              onBlur={(e) => e.target.value !== r.carrier && saveRow(b.id, r, { carrier: e.target.value })}
-                              className="w-24 border border-slate-200 rounded px-1.5 py-0.5"
-                              placeholder="佐川など"
-                            />
-                          </td>
-                          <td className="py-2 px-3">
-                            <input
-                              key={`t-${r.id}-${r.trackingNo}`}
-                              defaultValue={r.trackingNo}
-                              onBlur={(e) => e.target.value !== r.trackingNo && saveRow(b.id, r, { trackingNo: e.target.value })}
-                              onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
-                              className="w-40 border border-slate-200 rounded px-1.5 py-0.5 font-mono"
-                              placeholder="番号を入力"
-                            />
-                          </td>
+                          {(['trackingNo', 'domesticNo'] as const).map((k) => {
+                            const leg = k === 'trackingNo' ? r.status.legs?.intl : r.status.legs?.domestic;
+                            const url = trackingUrl(r[k], leg, k === 'domesticNo');
+                            return (
+                              <td key={k} className="py-2 px-3">
+                                <input
+                                  key={`${k}-${r.id}-${r[k]}`}
+                                  defaultValue={r[k]}
+                                  onBlur={(e) => e.target.value !== r[k] && saveRow(b.id, r, { [k]: e.target.value })}
+                                  onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+                                  className="w-36 border border-slate-200 rounded px-1.5 py-0.5 font-mono"
+                                  placeholder={k === 'trackingNo' ? 'DHL・FedEx' : '佐川'}
+                                />
+                                {leg && (
+                                  <div className="text-[10px] text-slate-500 mt-0.5">
+                                    {[leg.carrier, leg.label].filter(Boolean).join(' ')}
+                                    {url && (
+                                      <a href={url} target="_blank" rel="noopener noreferrer" className="text-blue-700 inline-flex items-center gap-0.5 ml-1">
+                                        確認 <ExternalLink className="w-2.5 h-2.5" />
+                                      </a>
+                                    )}
+                                  </div>
+                                )}
+                              </td>
+                            );
+                          })}
                           <td className="py-2 px-3">
                             <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold ${st.cls}`}>{r.status.label}</span>
                             {(r.status.lastLocation || r.status.lastEventAt) && (
@@ -609,10 +656,8 @@ export const BulkDeliveriesView: React.FC<{ orders: Order[]; onSelectOrder: (ord
                                 {[r.status.carrier, r.status.lastLocation, ago(r.status.lastEventAt)].filter(Boolean).join('・')}
                               </div>
                             )}
-                            {url && (
-                              <a href={url} target="_blank" rel="noopener noreferrer" className="text-[10px] text-blue-700 inline-flex items-center gap-0.5 mt-0.5">
-                                配送状況 <ExternalLink className="w-2.5 h-2.5" />
-                              </a>
+                            {r.carrier && parseTrackingNumbers(`${r.trackingNo} ${r.domesticNo}`).length === 0 && (
+                              <div className="text-[10px] text-slate-500 mt-0.5">配送業者：{r.carrier}</div>
                             )}
                           </td>
                         </tr>

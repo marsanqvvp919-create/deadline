@@ -2267,7 +2267,10 @@ interface BulkRow {
   product: string;
   qty: number | null;
   carrier: string;
+  /** 国際追跡番号（DHL・FedEx） */
   trackingNo: string;
+  /** 国内追跡番号（佐川など） */
+  domesticNo: string;
   shipDate: string;
   note: string;
 }
@@ -2287,9 +2290,32 @@ const BULK_HAND = /手持ち|持参|手渡し/;
 const BULK_TRACK_DAYS = 45;
 
 function refreshBulkIndex() {
-  bulkDomesticNos = new Set(
-    bulkBatches.flatMap((b) => b.rows.flatMap((r) => parseTrackingNumbers(r.trackingNo).filter((d) => classifyNumber(d).domesticCandidate)))
-  );
+  bulkDomesticNos = new Set(bulkBatches.flatMap((b) => b.rows.flatMap((r) => parseTrackingNumbers(r.domesticNo))));
+}
+
+/** 番号の欄の中身を、国際（DHL・FedEx）と国内（12桁で 7・8 始まりでない＝佐川など）に分ける */
+function splitBulkNumbers(text: string): { intl: string; dom: string } {
+  const nums = parseTrackingNumbers(text);
+  if (nums.length === 0) return { intl: '', dom: '' };
+  const dom = nums.filter((d) => classifyNumber(d).domesticCandidate);
+  const intl = nums.filter((d) => !classifyNumber(d).domesticCandidate);
+  // 片方だけなら書き方（ハイフンなど）をそのまま残す
+  if (dom.length === 0) return { intl: text.trim(), dom: '' };
+  if (intl.length === 0) return { intl: '', dom: text.trim() };
+  return { intl: intl.join(' '), dom: dom.join(' ') };
+}
+
+/** 以前の形（追跡番号が1つの欄）で保存した行を、国際・国内に分ける */
+function migrateBulkRows() {
+  for (const b of bulkBatches) {
+    for (const r of b.rows) {
+      if (r.domesticNo === undefined) {
+        const sp = splitBulkNumbers(r.trackingNo || '');
+        r.trackingNo = sp.intl;
+        r.domesticNo = sp.dom;
+      }
+    }
+  }
 }
 
 function loadBulkDeliveries() {
@@ -2303,6 +2329,7 @@ function loadBulkDeliveries() {
       } catch (e: any) {
         if (e?.code !== 404) console.warn('[Bulk] Load failed:', e?.message || e);
       }
+      migrateBulkRows();
       refreshBulkIndex();
     })();
   }
@@ -2332,7 +2359,7 @@ function bulkActiveDigits(): string[] {
       const m = String(r.shipDate || '').match(/(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})/);
       const shipped = m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).getTime() : new Date(b.updatedAt).getTime();
       if (now - shipped > BULK_TRACK_DAYS * 86400000) continue;
-      for (const d of parseTrackingNumbers(r.trackingNo)) {
+      for (const d of [...parseTrackingNumbers(r.trackingNo), ...parseTrackingNumbers(r.domesticNo)]) {
         const rs = resolveDigits(d);
         if (rs.state === 'found' && rs.status!.status === 'delivered') continue;
         if (!out.includes(d)) out.push(d);
@@ -2342,11 +2369,8 @@ function bulkActiveDigits(): string[] {
   return out;
 }
 
-/** 院ごとの配送状況（箱が複数なら、全部届いたときだけ配達完了） */
-function bulkRowStatus(r: BulkRow) {
-  if (BULK_HAND.test(r.carrier)) return { state: 'delivered', label: '手持ちで配達済み' };
-  const digits = parseTrackingNumbers(r.trackingNo);
-  if (digits.length === 0) return { state: 'no_number', label: '番号未登録' };
+/** 番号の組（国際だけ・国内だけ）の状況。箱が複数なら、全部届いたときだけ配達完了 */
+function bulkLegStatus(digits: string[]) {
   const rs = digits.map(resolveDigits);
   const found = rs.filter((x) => x.state === 'found').map((x) => x.status!);
   const latest = found.slice().sort((a, b) => String(b.lastEventAt || '').localeCompare(String(a.lastEventAt || '')))[0];
@@ -2367,6 +2391,27 @@ function bulkRowStatus(r: BulkRow) {
     return { state: 'pending', label: retrying ? '配送会社の一時エラー（自動で取り直し）' : '状況の取得待ち' };
   }
   return { state: 'not_found', label: '番号が見つからない（番号の確認を）' };
+}
+
+/** 院ごとの配送状況：国内（佐川）の番号があれば、それが届いた時点で配達完了。国際（DHL・FedEx）だけなら国際の状況 */
+function bulkRowStatus(r: BulkRow): any {
+  if (BULK_HAND.test(r.carrier)) return { state: 'delivered', label: '手持ちで配達済み' };
+  const intlD = parseTrackingNumbers(r.trackingNo);
+  const domD = parseTrackingNumbers(r.domesticNo);
+  if (intlD.length === 0 && domD.length === 0) return { state: 'no_number', label: '番号未登録' };
+  const intl = intlD.length ? bulkLegStatus(intlD) : null;
+  const dom = domD.length ? bulkLegStatus(domD) : null;
+  const legs = { intl, domestic: dom };
+  if (!dom) return { ...intl, legs };
+  if (dom.state === 'delivered') return { ...dom, label: `${dom.label}（国内）`, legs };
+  if (dom.state === 'exception') return { ...dom, label: '要確認（国内）', legs };
+  if (intl?.state === 'exception') return { ...intl, label: '要確認（国際）', legs };
+  if (dom.state === 'in_transit' || dom.state === 'pickup') return { ...dom, state: 'in_transit', label: '国内配送中', legs };
+  // 国内の状況がまだ取れていないときは、国際の状況で見る（日本に着く前など）
+  if (intl && intl.state !== 'pending' && intl.state !== 'not_found') {
+    return { ...intl, state: intl.state === 'delivered' ? 'in_transit' : intl.state, label: intl.state === 'delivered' ? '国内配送の待ち' : `${intl.label}（国際）`, legs };
+  }
+  return { ...dom, legs };
 }
 
 function bulkBatchView(b: BulkBatch) {
@@ -2396,7 +2441,14 @@ app.post('/api/bulk-deliveries/import', async (req, res) => {
       product: bulkText(r.product, 120),
       qty: r.qty === '' || r.qty === null || r.qty === undefined || isNaN(Number(r.qty)) ? null : Number(r.qty),
       carrier: bulkText(r.carrier, 40),
-      trackingNo: bulkText(r.trackingNo, 200),
+      ...(() => {
+        // 国際・国内の列が分かれていればそのまま、1つの「追跡番号」列なら番号の形で振り分ける
+        const intl = bulkText(r.trackingNo, 200);
+        const dom = bulkText(r.domesticNo, 200);
+        if (dom) return { trackingNo: intl, domesticNo: dom };
+        const sp = splitBulkNumbers(intl);
+        return { trackingNo: sp.intl, domesticNo: sp.dom };
+      })(),
       shipDate: bulkText(r.shipDate, 20),
       note: bulkText(r.note, 300),
     }))
@@ -2415,7 +2467,7 @@ app.post('/api/bulk-deliveries/import', async (req, res) => {
   for (const r of rows) {
     const same = batch.rows.find((x) => bulkNorm(x.clinic) === bulkNorm(r.clinic) && bulkNorm(x.product) === bulkNorm(r.product));
     if (same) {
-      (['address', 'product', 'carrier', 'trackingNo', 'shipDate', 'note'] as const).forEach((k) => {
+      (['address', 'product', 'carrier', 'trackingNo', 'domesticNo', 'shipDate', 'note'] as const).forEach((k) => {
         if (r[k]) same[k] = r[k];
       });
       if (r.qty !== null) same.qty = r.qty;
@@ -2429,7 +2481,10 @@ app.post('/api/bulk-deliveries/import', async (req, res) => {
   if (req.body?.orderId !== undefined && !batch.orderId) batch.orderId = bulkText(req.body.orderId, 200);
   await saveBulkDeliveries();
   // 新しく入った番号は、その場で状況を取りに行く（国内配送の無料枠を使いすぎないよう、まだ一度も取っていない番号だけ）
-  const fresh = Array.from(new Set(batch.rows.flatMap((r) => parseTrackingNumbers(r.trackingNo)))).filter((d) => resolveDigits(d).state === 'pending');
+  refreshBulkIndex();
+  const fresh = Array.from(new Set(batch.rows.flatMap((r) => [...parseTrackingNumbers(r.trackingNo), ...parseTrackingNumbers(r.domesticNo)]))).filter(
+    (d) => resolveDigits(d).state === 'pending'
+  );
   if (fresh.length > 0) {
     effectiveCarrierCreds()
       .then(({ creds }) => resolveAndLookup(fresh.slice(0, 200), creds, { dhlLimit: 20 }))
@@ -2446,12 +2501,12 @@ app.post('/api/bulk-deliveries/:batchId/rows/:rowId', async (req, res) => {
   const batch = bulkBatches.find((b) => b.id === req.params.batchId);
   const row = batch?.rows.find((r) => r.id === req.params.rowId);
   if (!batch || !row) return res.status(404).json({ error: '見つかりません' });
-  (['trackingNo', 'carrier', 'shipDate', 'note'] as const).forEach((k) => {
+  (['trackingNo', 'domesticNo', 'carrier', 'shipDate', 'note'] as const).forEach((k) => {
     if (typeof req.body?.[k] === 'string') row[k] = bulkText(req.body[k], k === 'note' ? 300 : 200);
   });
   batch.updatedAt = new Date().toISOString();
   await saveBulkDeliveries();
-  const fresh = parseTrackingNumbers(row.trackingNo).filter((d) => resolveDigits(d).state === 'pending');
+  const fresh = [...parseTrackingNumbers(row.trackingNo), ...parseTrackingNumbers(row.domesticNo)].filter((d) => resolveDigits(d).state === 'pending');
   if (fresh.length > 0) {
     const { creds } = await effectiveCarrierCreds();
     await resolveAndLookup(fresh, creds, { dhlLimit: 5 }).catch(() => {});
