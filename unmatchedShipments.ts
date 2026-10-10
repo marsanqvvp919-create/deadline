@@ -24,6 +24,8 @@ export interface ShipmentLike {
   warehouse?: string;
   warehouseInvoiceNo?: string;
   courier?: string;
+  /** 自分の追跡番号が配送会社で見つかっている（＝その出荷は別の荷物として配送されている） */
+  ownTracked?: boolean;
 }
 
 export interface OrderLite {
@@ -405,6 +407,7 @@ export function findUnmatched(
     const sheetDate = parseDate(row.shipDate);
     const candidates: UnmatchedRow['candidates'] = [];
     const seen = new Set<string>();
+    let skippedTracked = 0;
     // クリニック名ごとにまとめた出荷から探す（出荷1件ずつ名前を比べると遅いため）
     const clinicShipments: ShipmentLike[] = [];
     const similarGroups: [string, ShipmentLike[]][] = [];
@@ -434,6 +437,11 @@ export function findUnmatched(
       }
       if (sheetDate && Math.abs(daysBetween(sd, sheetDate)) <= NEAR_SHIP_DAYS) {
         seen.add(s.shipmentId);
+        // 出荷済みで、自分の追跡番号がすでに配送会社で見つかっている出荷は、別の荷物なので候補にしない
+        if (s.ownTracked) {
+          skippedTracked++;
+          continue;
+        }
         candidates.push({ ...s, reason: '出荷日が近い' });
       }
     }
@@ -458,6 +466,8 @@ export function findUnmatched(
         const latest = clinicOrders[0];
         if (quotes.length > 0 && latest && (latest.status || '').includes('見積')) {
           noCandidateReason = `最新の受注 ${quotes.map((o) => `${o.orderId}（${o.status}）`).join('・')} が見積のままです（受注に進んでいないため出荷がありません）`;
+        } else if (skippedTracked > 0) {
+          noCandidateReason = `出荷日が近い出荷（${skippedTracked}件）は、どれも別の追跡番号で配送されています。この荷物の出荷が楽楽販売に登録されていない可能性があります`;
         } else {
           noCandidateReason = '出荷待ちの出荷も、出荷日が近い出荷もありません（楽楽販売に出荷が登録されていない可能性があります）';
         }

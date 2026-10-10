@@ -1978,6 +1978,7 @@ async function readShipmentStatusSheet(force = false): Promise<{ values: string[
 }
 
 app.get('/api/shipment-sheet/unmatched', async (req, res) => {
+  await loadCarrierStatusCache();
   const shipments = serverRakurakuStore.shipments;
   if (!shipments || shipments.length === 0) {
     return res.json({
@@ -2006,6 +2007,7 @@ app.get('/api/shipment-sheet/unmatched', async (req, res) => {
       warehouse: s.warehouse,
       warehouseInvoiceNo: s.warehouseInvoiceNo,
       courier: s.courier,
+      ownTracked: boxesOfShipment(s).some((d) => resolveDigits(d).state === 'found'),
     }));
     const ordersLite = (serverRakurakuStore.orders?.orders || []).map((o: any) => ({
       orderId: o.orderId,
