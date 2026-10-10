@@ -1,3 +1,5 @@
+// サーバーの時刻は日本時間で扱う（「今日」の判定・日付の読み取り・表示する時刻。Cloud Run は既定で UTC のため、朝0〜9時に1日ずれていた）
+process.env.TZ = process.env.TZ || 'Asia/Tokyo';
 import express from 'express';
 import compression from 'compression';
 import { createServer as createViteServer } from 'vite';
