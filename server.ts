@@ -2680,9 +2680,17 @@ async function runSheetImportDryRun(trigger: 'schedule' | 'manual', write = fals
     if (shipments.length === 0) throw new Error('楽楽販売の出荷管理データをまだ取得できていません');
     const customerOf = shipmentCustomerResolver();
     const sheet = await readShipmentStatusSheet(true);
+    // 配送会社の状況で書き戻した「現在地」が、まだこのサーバーのデータに反映されていないことがある。
+    // そのまま取り込むと古い現在地に戻してしまうので、書き戻した値の方が進んでいればそれを使う
+    await loadCarrierStatusCache();
+    const laterLocation = (sh: any) => {
+      const current = blankValue(sh.currentLocation) ? '' : String(sh.currentLocation).trim();
+      const written = String(carrierWritten[sh.shipmentId] || '').split('|')[0];
+      return written && locationIndex(written) > locationIndex(current) ? written : sh.currentLocation;
+    };
     const preview = buildImportPreview(
       sheet.values,
-      shipments.map((sh: any) => ({ ...sh, customerName: customerOf(sh) }))
+      shipments.map((sh: any) => ({ ...sh, customerName: customerOf(sh), currentLocation: laterLocation(sh) }))
     );
     let writeResult: any = null;
     let failedCount = 0;
