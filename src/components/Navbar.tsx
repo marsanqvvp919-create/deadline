@@ -88,7 +88,6 @@ export const Navbar: React.FC<NavbarProps> = ({
       errorType === 'ip_blocked' ||
       str.includes('コード7') ||
       str.includes('code 7') ||
-      str.includes('ip') ||
       str.includes('拒否')
     ) {
       return {
@@ -102,7 +101,6 @@ export const Navbar: React.FC<NavbarProps> = ({
       errorType === 'auth_error' ||
       str.includes('認証') ||
       str.includes('トークン') ||
-      str.includes('token') ||
       str.includes('401')
     ) {
       return {

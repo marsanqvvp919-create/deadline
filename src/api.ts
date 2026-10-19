@@ -602,8 +602,23 @@ export async function fetchData(): Promise<FetchResult> {
     let fetchedSuppliers: SupplierItem[] = getLocalSuppliers();
 
     try {
-      const res = await fetch('/api/rakuraku/all-data');
-      const json = await res.json();
+      // 再起動・反映の直後などはサーバーがJSONでなくエラーページを返すことがある。
+      // そのまま json() すると「Unexpected token '<'」になり、認証エラーと誤表示されていたため、1回だけ待って取り直す
+      const fetchAllData = async () => {
+        const r = await fetch('/api/rakuraku/all-data');
+        const ct = r.headers.get('content-type') || '';
+        if (!r.ok || !ct.includes('application/json')) {
+          throw Object.assign(new Error(`サーバーが一時的に応答できませんでした（HTTP ${r.status}）。少し待って「再試行」を押してください`), { errorCode: `SERVER_${r.status}` });
+        }
+        return r.json();
+      };
+      let json: any;
+      try {
+        json = await fetchAllData();
+      } catch {
+        await new Promise((resolve) => setTimeout(resolve, 5000));
+        json = await fetchAllData();
+      }
 
       const lastSuccessTime = json.lastSuccessTime || null;
       const rateLimitRemainingSec = json.rateLimitRemainingSec || 0;
