@@ -2011,6 +2011,8 @@ app.post('/api/rakuraku/sync-now', async (req, res) => {
   }
 
   serverRakurakuStore.lastManualSyncTime = now;
+  // full: true なら差分ではなく全件を取り直す（出荷数など、差分では古いレコードに入らない項目を揃えるとき）
+  if (req.body?.full === true) serverRakurakuStore.lastFullSyncTime = null;
   const isMasterRequested = Boolean(req.body.includeMasters);
   const syncSuccess = await syncAllRakurakuData(isMasterRequested);
 
