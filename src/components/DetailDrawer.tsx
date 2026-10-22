@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { Order, OrderLine, AlertItem } from '../types';
-import { formatDate, buildRakurakuUrl, getRemainingDaysInfo, isShippingOrFee } from '../utils';
+import { formatDate, buildRakurakuUrl, getRemainingDaysInfo, isShippingOrFee, orderStateLabel } from '../utils';
 import { getConfiguredUrls } from '../api';
 import { CarrierTrackingWidget } from './CarrierTrackingWidget';
 import {
@@ -77,7 +77,7 @@ export const DetailDrawer: React.FC<DetailDrawerProps> = ({
             <div>
               <div className="flex items-center gap-3 flex-wrap">
                 <span className="text-xs font-semibold px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-400/30">
-                  {order.orderState}
+                  {orderStateLabel(order)}
                 </span>
                 <span className="text-xs text-slate-400">ステータス: {order.status}</span>
               </div>

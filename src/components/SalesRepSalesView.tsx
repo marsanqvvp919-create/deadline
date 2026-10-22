@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Order } from '../types';
-import { formatCurrency, formatDate, recentYearMonths } from '../utils';
+import { formatCurrency, formatDate, recentYearMonths, orderStateLabel } from '../utils';
 import { getSalesRepsList } from '../utils/salesRepMapping';
 import {
   Users,
@@ -415,7 +415,7 @@ export const SalesRepSalesView: React.FC<SalesRepSalesViewProps> = ({
                         <div className="flex items-center gap-2">
                           <span className="font-mono font-bold text-slate-900">{ord.orderId}</span>
                           <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700">
-                            {ord.orderState}
+                            {orderStateLabel(ord)}
                           </span>
                           <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
                             ord.paymentStatus === '入金済' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'

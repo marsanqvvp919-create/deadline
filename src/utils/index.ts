@@ -454,3 +454,9 @@ export function getElapsedTimeInfo(
     };
   }
 }
+
+/** 伝票の状態の表示名。進行中のうち、出荷済みの商品がある伝票は「一部出荷済」と出す */
+export function orderStateLabel(order: { orderState: string; lines: { shippedQty?: number }[] }): string {
+  if (order.orderState === '進行中' && order.lines.some((l) => (l.shippedQty || 0) > 0)) return '一部出荷済';
+  return order.orderState;
+}

@@ -7,7 +7,7 @@ import {
   ProductItem,
   Stage,
 } from '../types';
-import { formatDate, buildRakurakuUrl, isShippingOrFee } from '../utils';
+import { formatDate, buildRakurakuUrl, isShippingOrFee, orderStateLabel } from '../utils';
 import { getConfiguredUrls, getLocalClinics } from '../api';
 import {
   Building2,
@@ -985,7 +985,7 @@ export const ClinicProductStatusDrawer: React.FC<ClinicProductStatusDrawerProps>
                                       : 'bg-indigo-100 text-indigo-800'
                                   }`}
                                 >
-                                  伝票状態: {order.orderState}
+                                  伝票状態: {orderStateLabel(order)}
                                 </span>
                                 {hasOverdue && (
                                   <span className="text-[11px] font-bold px-2 py-0.5 rounded bg-rose-100 text-rose-800 border border-rose-200 flex items-center gap-1 font-mono">
@@ -1423,7 +1423,7 @@ export const ClinicProductStatusDrawer: React.FC<ClinicProductStatusDrawerProps>
                                 <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
                                   ord.orderState === '納品完了' ? 'bg-slate-100 text-slate-600' : 'bg-emerald-100 text-emerald-800'
                                 }`}>
-                                  {ord.orderState}
+                                  {orderStateLabel(ord)}
                                 </span>
                               </div>
                               <div className="text-slate-500 text-[11px]">
