@@ -97,6 +97,19 @@ export async function fetchSheetUnmatched(refresh = false): Promise<UnmatchedRes
   return res.json();
 }
 
+/** 件数（バッジ）：一括発注と「対応済み」の印を付けた行は数えない */
+export async function fetchOpenUnmatchedCount(): Promise<number | null> {
+  const [json, done] = await Promise.all([
+    fetchSheetUnmatched(),
+    fetch('/api/shared-notes/unmatched_done')
+      .then((r) => r.json())
+      .catch(() => ({ notes: {} })),
+  ]);
+  if (!json.success) return null;
+  const marks = done?.notes || {};
+  return (json.rows || []).filter((r) => r.kind !== 'bulk' && !marks[(r.trackingNo || '').replace(/\D/g, '')]).length;
+}
+
 export const SheetUnmatchedView: React.FC<{ onCountChange?: (count: number | null) => void }> = ({ onCountChange }) => {
   const [data, setData] = useState<UnmatchedResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -105,6 +118,11 @@ export const SheetUnmatchedView: React.FC<{ onCountChange?: (count: number | nul
   // 対応済みの印（チームで共有）。キーは追跡番号（シートの行が並べ替わっても同じ行を指すように）
   const [doneMarks, setDoneMark] = useSharedNotes<{ by?: string; at: string }>('unmatched_done');
   const [showDone, setShowDone] = useState(false);
+  // 件数（バッジ）：一括発注（湘南美容など）と対応済みの行は数えない
+  useEffect(() => {
+    if (!data?.success) return;
+    onCountChange?.((data.rows || []).filter((r) => r.kind !== 'bulk' && !doneMarks[doneKey(r)]).length);
+  }, [data, doneMarks]);
   const doneKey = (r: { trackingNo: string }) => (r.trackingNo || '').replace(/\D/g, '');
   const [query, setQuery] = useState('');
   const [copied, setCopied] = useState<string | null>(null);
@@ -114,8 +132,7 @@ export const SheetUnmatchedView: React.FC<{ onCountChange?: (count: number | nul
     try {
       const json = await fetchSheetUnmatched(refresh);
       setData(json);
-      // 一括発注（湘南美容など）は追跡番号で照合できない前提なので、未照合の件数には数えない
-      onCountChange?.(json.success ? (json.rows || []).filter((r) => r.kind !== 'bulk').length : null);
+      if (!json.success) onCountChange?.(null);
     } catch (e: any) {
       setData({ success: false, error: e?.message || '照合結果を取得できませんでした' });
       onCountChange?.(null);
@@ -402,6 +419,7 @@ export const SheetUnmatchedView: React.FC<{ onCountChange?: (count: number | nul
                       >
                         {doneMarks[doneKey(r)] ? '対応済み（取り消す）' : '対応済みにする'}
                       </button>
+                      {doneMarks[doneKey(r)]?.by && <div className="text-[11px] text-emerald-800">メモ: {doneMarks[doneKey(r)]!.by}</div>}
                       {r.nameVariants && r.nameVariants.length > 0 ? (
                         <div className="text-[11px] bg-amber-50 border border-amber-200 rounded-lg px-2 py-1 space-y-0.5">
                           <span className="px-1.5 py-0.5 rounded bg-amber-500 text-white font-bold mr-1">表記ゆれ</span>

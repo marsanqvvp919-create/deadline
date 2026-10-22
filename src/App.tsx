@@ -32,7 +32,7 @@ import { ArrivalTrackingView } from './components/ArrivalTrackingView';
 import { CustomsManagementView } from './components/CustomsManagementView';
 import { CoolMissingView } from './components/CoolMissingView';
 import { KantoCustomsNgView } from './components/KantoCustomsNgView';
-import { SheetUnmatchedView, fetchSheetUnmatched } from './components/SheetUnmatchedView';
+import { SheetUnmatchedView, fetchOpenUnmatchedCount } from './components/SheetUnmatchedView';
 import { SheetImportView } from './components/SheetImportView';
 import { ActionListView } from './components/ActionListView';
 import { CarrierSettingsView } from './components/CarrierSettingsView';
@@ -227,10 +227,9 @@ export default function App() {
   useEffect(() => {
     let cancelled = false;
     const loadCount = () =>
-      fetchSheetUnmatched()
-        .then((json) => {
-          // 一括発注（湘南美容など）は未照合の件数に数えない
-          if (!cancelled) setSheetUnmatchedCount(json.success ? (json.rows || []).filter((r) => r.kind !== 'bulk').length : null);
+      fetchOpenUnmatchedCount()
+        .then((n) => {
+          if (!cancelled) setSheetUnmatchedCount(n);
         })
         .catch(() => {});
     loadCount();
