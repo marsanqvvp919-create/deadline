@@ -264,7 +264,9 @@ export const ArrivalTrackingView: React.FC<{
         const stage = stageOf(s, c);
         const boxes = boxesOf(s);
         const lookup = lookupKindOf(boxes, carrierStatus);
-        const carrier = carrierOf(s, c, boxes);
+        // 照会が一時エラー（佐川のお問い合わせサービス停止中など）でも、どの運送会社の番号かは結果からわかる
+        // （FedEx で出荷して国内は佐川に引き継ぐ番号を、配送業者の欄どおり FedEx と表示しないため）
+        const carrier = carrierOf(s, c || boxes.map((d) => carrierStatus[d]).find((x) => x?.carrier), boxes);
         const rep = repByOrder.get(s.orderId) || '';
         const bulk = boxes.length === 0 && (s.shipStatus || '').includes('出荷済') ? bulkByOrder.get(s.orderId) : undefined;
         // 一括発注：全院に届いたら配達完了、それまでは国内配送中として扱う
@@ -647,7 +649,9 @@ export const ArrivalTrackingView: React.FC<{
                         {now === 'no_info' && boxes.some((d) => carrierStatus[d]?.lookup === 'retrying')
                           ? (() => {
                               const r = boxes.map((d) => carrierStatus[d]).find((c) => c?.lookup === 'retrying')!;
-                              return `${carrierName(r.carrier)}の照会が、運送会社側の一時的な不具合（メンテナンスなど）で失敗しました。時間をおいて自動で取り直します`;
+                              return r.carrier === 'sagawa'
+                                ? '佐川急便のお問い合わせサービスが停止中のため、配送状況を取得できません（佐川のサイトでも確認できません）。再開したら自動で取得します。急ぐときは佐川の営業所へ追跡番号でお問い合わせください'
+                                : `${carrierName(r.carrier)}の照会が、運送会社側の一時的な不具合（メンテナンスなど）で失敗しました。時間をおいて自動で取り直します`;
                             })()
                           : now === 'no_info'
                           ? carrier.label === 'DHL'
