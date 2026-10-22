@@ -185,6 +185,7 @@ export type ViewTab =
   | 'sheet_import'
   | 'carrier_settings'
   | 'bulk_deliveries'
+  | 'portal_admin'
   | 'morning_meeting';
 
 export interface WarehouseStockRecord {

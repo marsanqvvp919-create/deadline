@@ -1,6 +1,7 @@
 // サーバーの時刻は日本時間で扱う（「今日」の判定・日付の読み取り・表示する時刻。Cloud Run は既定で UTC のため、朝0〜9時に1日ずれていた）
 process.env.TZ = process.env.TZ || 'Asia/Tokyo';
 import express from 'express';
+import crypto from 'crypto';
 import compression from 'compression';
 import { createServer as createViteServer } from 'vite';
 import path from 'path';
@@ -32,6 +33,134 @@ const PORT = Number(process.env.PORT) || 8080;
 // 応答を圧縮する（注文・出荷データは約10MBあり、圧縮しないと読み込みに時間がかかる）
 app.use(compression());
 app.use(express.json());
+
+// ----------------------------------------------------------------------
+// ログイン（社内：社員共通パスワード／お客様：グループごとのURL＋パスワード）
+// /api/auth/* と /api/portal/* 以外の /api は社内ログインが必要。お客様のセッションでは社内のAPIは呼べない
+// ----------------------------------------------------------------------
+const STAFF_PASSWORD_SALT = process.env.STAFF_PASSWORD_SALT || 'dadca450c1a16aee68787a010c226eb8';
+const STAFF_PASSWORD_HASH =
+  process.env.STAFF_PASSWORD_HASH ||
+  '3972134d6f30d3ba41ee4a499211def593b05193c62260e17028fb3e326ff62b9ae5cc9077cf44281b21a92e6dbf19354fe7487a5c3df4f1431c761e4de56610';
+const STAFF_COOKIE = 'nk_staff';
+const PORTAL_COOKIE = 'nk_portal';
+const STAFF_SESSION_DAYS = 30;
+const PORTAL_SESSION_DAYS = 30;
+
+const hashPassword = (password: string, salt: string) => crypto.scryptSync(password, salt, 64).toString('hex');
+const safeEqualHex = (a: string, b: string) => {
+  const x = Buffer.from(a, 'hex');
+  const y = Buffer.from(b, 'hex');
+  return x.length === y.length && crypto.timingSafeEqual(x, y);
+};
+
+// セッションの署名鍵：環境変数か、Cloud Storage に1度作って保存したもの（再起動・複数台でも同じ鍵）
+let sessionSecretPromise: Promise<string> | null = null;
+function getSessionSecret(): Promise<string> {
+  if (!sessionSecretPromise) {
+    sessionSecretPromise = (async () => {
+      if (process.env.SESSION_SECRET) return process.env.SESSION_SECRET;
+      const bucketName = process.env.RAKURAKU_CACHE_BUCKET || '';
+      if (!bucketName) return crypto.randomBytes(32).toString('hex');
+      const file = new Storage().bucket(bucketName).file('auth-secret.json');
+      try {
+        const [buf] = await file.download();
+        const s = JSON.parse(buf.toString('utf-8'))?.secret;
+        if (s) return s;
+      } catch (e: any) {
+        if (e?.code !== 404) throw e;
+      }
+      const secret = crypto.randomBytes(32).toString('hex');
+      try {
+        // 同時に起動した別の台が先に作っていたら、そちらを使う
+        await file.save(JSON.stringify({ secret }), { contentType: 'application/json', resumable: false, preconditionOpts: { ifGenerationMatch: 0 } });
+        return secret;
+      } catch {
+        const [buf] = await file.download();
+        return JSON.parse(buf.toString('utf-8')).secret;
+      }
+    })().catch((e) => {
+      sessionSecretPromise = null;
+      throw e;
+    });
+  }
+  return sessionSecretPromise;
+}
+
+type Session = { t: 'staff' } | { t: 'portal'; g: string; v: number };
+async function signSession(s: Session, days: number): Promise<string> {
+  const body = Buffer.from(JSON.stringify({ ...s, exp: Date.now() + days * 86400000 })).toString('base64url');
+  const sig = crypto.createHmac('sha256', await getSessionSecret()).update(body).digest('base64url');
+  return `${body}.${sig}`;
+}
+async function readSession(token: string | undefined): Promise<(Session & { exp: number }) | null> {
+  if (!token || !token.includes('.')) return null;
+  const [body, sig] = token.split('.');
+  const want = crypto.createHmac('sha256', await getSessionSecret()).update(body).digest('base64url');
+  if (sig.length !== want.length || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(want))) return null;
+  try {
+    const s = JSON.parse(Buffer.from(body, 'base64url').toString('utf-8'));
+    return s && s.exp > Date.now() ? s : null;
+  } catch {
+    return null;
+  }
+}
+function readCookie(req: express.Request, name: string): string | undefined {
+  const raw = req.headers.cookie || '';
+  for (const part of raw.split(';')) {
+    const i = part.indexOf('=');
+    if (i > 0 && part.slice(0, i).trim() === name) return decodeURIComponent(part.slice(i + 1).trim());
+  }
+  return undefined;
+}
+function setCookie(res: express.Response, name: string, value: string, days: number) {
+  const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
+  res.append('Set-Cookie', `${name}=${encodeURIComponent(value)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${days * 86400}${secure}`);
+}
+function clearCookie(res: express.Response, name: string) {
+  res.append('Set-Cookie', `${name}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
+}
+const isStaffRequest = async (req: express.Request) => (await readSession(readCookie(req, STAFF_COOKIE)))?.t === 'staff';
+
+// パスワードの総当たりを防ぐ：同じ接続元から10分に10回まで失敗できる
+const loginFailures = new Map<string, number[]>();
+const clientKey = (req: express.Request, scope: string) =>
+  `${scope}:${String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim()}`;
+function tooManyFailures(key: string) {
+  const recent = (loginFailures.get(key) || []).filter((t) => Date.now() - t < 10 * 60 * 1000);
+  loginFailures.set(key, recent);
+  return recent.length >= 10;
+}
+const recordFailure = (key: string) => loginFailures.set(key, [...(loginFailures.get(key) || []), Date.now()]);
+
+app.use(async (req, res, next) => {
+  if (!req.path.startsWith('/api/') || req.path.startsWith('/api/auth/') || req.path.startsWith('/api/portal/')) return next();
+  try {
+    if (await isStaffRequest(req)) return next();
+  } catch (e: any) {
+    console.error('[Auth] session check failed:', e?.message || e);
+  }
+  return res.status(401).json({ error: 'login_required', message: 'ログインが必要です' });
+});
+
+app.get('/api/auth/me', async (req, res) => {
+  res.json({ staff: await isStaffRequest(req).catch(() => false) });
+});
+app.post('/api/auth/login', async (req, res) => {
+  const key = clientKey(req, 'staff');
+  if (tooManyFailures(key)) return res.status(429).json({ error: 'パスワードを続けて間違えたため、10分ほど待ってからお試しください' });
+  const password = String(req.body?.password || '');
+  if (!password || !safeEqualHex(hashPassword(password, STAFF_PASSWORD_SALT), STAFF_PASSWORD_HASH)) {
+    recordFailure(key);
+    return res.status(401).json({ error: 'パスワードが違います' });
+  }
+  setCookie(res, STAFF_COOKIE, await signSession({ t: 'staff' }, STAFF_SESSION_DAYS), STAFF_SESSION_DAYS);
+  res.json({ ok: true });
+});
+app.post('/api/auth/logout', (_req, res) => {
+  clearCookie(res, STAFF_COOKIE);
+  res.json({ ok: true });
+});
 
 // 楽楽販売 項目マッピング定義（dbSchemaId: 101248 ご注文管理）
 const FIELD_MAP: Record<string, string[]> = {
@@ -807,6 +936,8 @@ function parseOrdersFromCsv(csvText: string): any[] | null {
         status: rawStatus,
         salesRep: getVal(row, 'salesRep') || '未設定',
         customerName: getVal(row, 'customerName') || '未設定',
+        // お客様の管理画面で、グループに入っている院の注文だけを出すのに使う
+        clinicId: getVal(row, 'clinicId') || '',
         orderDate,
         requestedDate: getVal(row, 'requestedDate') || null,
         deliveredDate: getVal(row, 'deliveredDate') || null,
@@ -3822,6 +3953,262 @@ setTimeout(() => {
 setTimeout(() => {
   runCarrierWriteback().catch((e) => console.warn('[Carriers] Write-back failed:', e?.message || e));
 }, 11 * 60 * 1000);
+
+// ----------------------------------------------------------------------
+// お客様の管理画面（グループごとのURL＋パスワード）
+// グループ = 1社・1法人。複数の院（楽楽販売の顧客マスタのクリニックID）をまとめて見られる
+// お客様には仕入先・仕入値・利益など社内の情報は返さない
+// ----------------------------------------------------------------------
+interface PortalGroup {
+  id: string;
+  slug: string; // URL の一部（推測されにくいランダムな文字列）
+  name: string;
+  clinicIds: string[];
+  salt: string;
+  hash: string;
+  pwVersion: number; // パスワードを再発行すると上がり、古いログインは使えなくなる
+  disabled?: boolean;
+  createdAt: string;
+  updatedAt: string;
+  lastLoginAt?: string;
+}
+const PORTAL_OBJECT = 'portal-groups.json';
+let portalGroups: PortalGroup[] = [];
+let portalLoadPromise: Promise<void> | null = null;
+function loadPortalGroups() {
+  if (!portalLoadPromise) {
+    portalLoadPromise = (async () => {
+      if (!CACHE_BUCKET) return;
+      try {
+        const [buf] = await new Storage().bucket(CACHE_BUCKET).file(PORTAL_OBJECT).download();
+        const j = JSON.parse(buf.toString('utf-8'));
+        portalGroups = Array.isArray(j?.groups) ? j.groups : [];
+      } catch (e: any) {
+        if (e?.code !== 404) {
+          portalLoadPromise = null;
+          throw e;
+        }
+      }
+    })();
+  }
+  return portalLoadPromise;
+}
+async function savePortalGroups() {
+  if (!CACHE_BUCKET) return;
+  await new Storage()
+    .bucket(CACHE_BUCKET)
+    .file(PORTAL_OBJECT)
+    .save(JSON.stringify({ groups: portalGroups }), { contentType: 'application/json', resumable: false });
+}
+const randomFrom = (alphabet: string, n: number) => Array.from(crypto.randomBytes(n), (b) => alphabet[b % alphabet.length]).join('');
+// 読み間違えやすい文字（0/O・1/l/I）を除く
+const newPortalPassword = () => {
+  const p = randomFrom('ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789', 12);
+  return `${p.slice(0, 4)}-${p.slice(4, 8)}-${p.slice(8)}`;
+};
+const portalGroupView = (g: PortalGroup) => ({
+  id: g.id,
+  slug: g.slug,
+  name: g.name,
+  clinicIds: g.clinicIds,
+  clinics: g.clinicIds.map((id) => ({ clinicId: id, clinicName: masterClinicById(id)?.clinicName || '（顧客マスタにない院）' })),
+  disabled: !!g.disabled,
+  createdAt: g.createdAt,
+  updatedAt: g.updatedAt,
+  lastLoginAt: g.lastLoginAt || null,
+});
+const cleanClinicIds = (v: any): string[] =>
+  Array.from(new Set((Array.isArray(v) ? v : []).map((x: any) => String(x || '').trim()).filter(Boolean))).slice(0, 500);
+
+// --- 社内用：グループの発行・管理（社内ログインが必要。上の共通チェックで守られている）
+app.get('/api/portal-admin/groups', async (_req, res) => {
+  await loadPortalGroups();
+  res.json({ groups: portalGroups.map(portalGroupView) });
+});
+app.get('/api/portal-admin/clinics', (req, res) => {
+  const q = String(req.query.q || '').trim().toLowerCase();
+  const all = serverRakurakuStore.clinics || [];
+  const hits = (q ? all.filter((c: any) => `${c.clinicId} ${c.clinicName} ${c.address || ''} ${c.branchName || ''}`.toLowerCase().includes(q)) : all)
+    .slice(0, 50)
+    .map((c: any) => ({ clinicId: c.clinicId, clinicName: c.clinicName, address: c.address || '' }));
+  res.json({ clinics: hits, total: all.length });
+});
+app.post('/api/portal-admin/groups', async (req, res) => {
+  await loadPortalGroups();
+  const name = String(req.body?.name || '').trim().slice(0, 100);
+  const clinicIds = cleanClinicIds(req.body?.clinicIds);
+  if (!name) return res.status(400).json({ error: 'グループ名を入れてください' });
+  if (clinicIds.length === 0) return res.status(400).json({ error: '院を1つ以上選んでください' });
+  const password = newPortalPassword();
+  const salt = crypto.randomBytes(16).toString('hex');
+  const now = new Date().toISOString();
+  const g: PortalGroup = {
+    id: randomFrom('abcdefghijkmnpqrstuvwxyz23456789', 10),
+    slug: randomFrom('abcdefghijkmnpqrstuvwxyz23456789', 16),
+    name,
+    clinicIds,
+    salt,
+    hash: hashPassword(password, salt),
+    pwVersion: 1,
+    createdAt: now,
+    updatedAt: now,
+  };
+  portalGroups.push(g);
+  await savePortalGroups();
+  res.json({ group: portalGroupView(g), password });
+});
+app.post('/api/portal-admin/groups/:id', async (req, res) => {
+  await loadPortalGroups();
+  const g = portalGroups.find((x) => x.id === req.params.id);
+  if (!g) return res.status(404).json({ error: 'グループが見つかりません' });
+  if (typeof req.body?.name === 'string' && req.body.name.trim()) g.name = req.body.name.trim().slice(0, 100);
+  if (Array.isArray(req.body?.clinicIds)) {
+    const ids = cleanClinicIds(req.body.clinicIds);
+    if (ids.length === 0) return res.status(400).json({ error: '院を1つ以上選んでください' });
+    g.clinicIds = ids;
+  }
+  if (typeof req.body?.disabled === 'boolean') g.disabled = req.body.disabled;
+  g.updatedAt = new Date().toISOString();
+  await savePortalGroups();
+  res.json({ group: portalGroupView(g) });
+});
+app.post('/api/portal-admin/groups/:id/reset-password', async (req, res) => {
+  await loadPortalGroups();
+  const g = portalGroups.find((x) => x.id === req.params.id);
+  if (!g) return res.status(404).json({ error: 'グループが見つかりません' });
+  const password = newPortalPassword();
+  g.salt = crypto.randomBytes(16).toString('hex');
+  g.hash = hashPassword(password, g.salt);
+  g.pwVersion = (g.pwVersion || 1) + 1;
+  g.updatedAt = new Date().toISOString();
+  await savePortalGroups();
+  res.json({ group: portalGroupView(g), password });
+});
+app.delete('/api/portal-admin/groups/:id', async (req, res) => {
+  await loadPortalGroups();
+  const before = portalGroups.length;
+  portalGroups = portalGroups.filter((x) => x.id !== req.params.id);
+  if (portalGroups.length === before) return res.status(404).json({ error: 'グループが見つかりません' });
+  await savePortalGroups();
+  res.json({ ok: true });
+});
+
+// --- お客様用
+async function portalGroupFromRequest(req: express.Request): Promise<PortalGroup | null> {
+  const s = await readSession(readCookie(req, PORTAL_COOKIE));
+  if (!s || s.t !== 'portal') return null;
+  await loadPortalGroups();
+  const g = portalGroups.find((x) => x.id === s.g);
+  if (!g || g.disabled || (g.pwVersion || 1) !== s.v) return null;
+  return g;
+}
+
+const PORTAL_HIDDEN_ORDER_STATUS = ['見積作成中', '見積済み'];
+function buildPortalData(g: PortalGroup) {
+  const ids = new Set(g.clinicIds);
+  const clinics = g.clinicIds.map((id) => {
+    const m = masterClinicById(id);
+    return { clinicId: id, clinicName: m?.clinicName || '', address: m?.address || '' };
+  });
+  const orders = ((serverRakurakuStore.orders?.orders || []) as any[])
+    .filter((o) => ids.has(o.clinicId) && !PORTAL_HIDDEN_ORDER_STATUS.includes(String(o.status || '').trim()))
+    .map((o) => ({
+      orderId: o.orderId,
+      clinicId: o.clinicId,
+      clinicName: o.customerName,
+      orderDate: o.orderDate,
+      status: o.status,
+      orderState: o.orderState,
+      paymentStatus: o.paymentStatus,
+      totalAmount: o.totalAmount || 0,
+      lines: (o.lines || []).map((l: any) => ({
+        productId: l.productId || '',
+        productName: l.productName,
+        quantity: l.quantity,
+        unitPrice: l.unitPrice ?? null,
+        lineAmount: l.lineAmount ?? null,
+        earliestDate: l.earliestDate || null,
+        latestDate: l.latestDate || null,
+        shippedDate: l.shippedDate || null,
+        shippedQty: l.shippedQty ?? null,
+        stage: l.stage || '',
+      })),
+    }));
+  const orderIds = new Set(orders.map((o) => o.orderId));
+  const productNameOf = new Map<string, string>();
+  orders.forEach((o) => o.lines.forEach((l: any) => l.productId && productNameOf.set(`${o.orderId}:${l.productId}`, l.productName)));
+  const shipments = ((serverRakurakuStore.shipments || []) as any[])
+    .filter((s) => orderIds.has(s.orderId))
+    .map((s) => {
+      const boxes = boxesOfShipment(s);
+      const tracking = boxes
+        .map((d) => resolvedStatusForClient(d))
+        .filter(Boolean)
+        .map((st: any) => ({
+          trackingNo: st.trackingNo,
+          carrier: st.carrier,
+          status: st.status,
+          statusText: st.statusText,
+          lastEventAt: st.lastEventAt || null,
+          lastLocation: st.lastLocation || null,
+          deliveredAt: st.deliveredAt || null,
+          estimatedDelivery: st.estimatedDelivery || null,
+          customsCleared: !!st.customsCleared,
+          arrivedJapan: !!st.arrivedJapan,
+        }));
+      return {
+        shipmentId: s.shipmentId,
+        orderId: s.orderId,
+        shipStatus: s.shipStatus || '',
+        shippedDate: s.shippedDate && s.shippedDate !== '—' ? s.shippedDate : null,
+        deliveredDate: s.deliveredDate || null,
+        courier: s.courier || '',
+        trackingNos: boxes,
+        tracking,
+        items: (s.lineRefs || []).map((r: any) => productNameOf.get(`${r.orderId}:${r.productId}`)).filter(Boolean),
+      };
+    });
+  return {
+    group: { name: g.name },
+    clinics,
+    orders,
+    shipments,
+    generatedAt: serverRakurakuStore.lastSuccessTime || null,
+  };
+}
+
+app.get('/api/portal/info/:slug', async (req, res) => {
+  await loadPortalGroups();
+  const g = portalGroups.find((x) => x.slug === req.params.slug && !x.disabled);
+  if (!g) return res.status(404).json({ error: 'このURLは使えません。担当者にお問い合わせください' });
+  res.json({ name: g.name });
+});
+app.post('/api/portal/login', async (req, res) => {
+  const key = clientKey(req, 'portal');
+  if (tooManyFailures(key)) return res.status(429).json({ error: 'パスワードを続けて間違えたため、10分ほど待ってからお試しください' });
+  await loadPortalGroups();
+  const g = portalGroups.find((x) => x.slug === String(req.body?.slug || '') && !x.disabled);
+  const password = String(req.body?.password || '').trim();
+  if (!g || !password || !safeEqualHex(hashPassword(password, g.salt), g.hash)) {
+    recordFailure(key);
+    return res.status(401).json({ error: 'パスワードが違います' });
+  }
+  g.lastLoginAt = new Date().toISOString();
+  savePortalGroups().catch((e) => console.warn('[Portal] save failed:', e?.message || e));
+  setCookie(res, PORTAL_COOKIE, await signSession({ t: 'portal', g: g.id, v: g.pwVersion || 1 }, PORTAL_SESSION_DAYS), PORTAL_SESSION_DAYS);
+  res.json({ ok: true, name: g.name });
+});
+app.post('/api/portal/logout', (_req, res) => {
+  clearCookie(res, PORTAL_COOKIE);
+  res.json({ ok: true });
+});
+app.get('/api/portal/data', async (req, res) => {
+  const g = await portalGroupFromRequest(req);
+  // 別のグループのURLを開いたときは、そのグループのパスワードでログインし直してもらう
+  if (!g || (req.query.slug && req.query.slug !== g.slug)) return res.status(401).json({ error: 'login_required' });
+  await loadCarrierStatusCache();
+  res.json(buildPortalData(g));
+});
 
 async function startServer() {
   const distPath = path.resolve(process.cwd(), 'dist');

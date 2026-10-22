@@ -42,6 +42,7 @@ import { attentionCounts } from './utils/meeting';
 import { boxesOf } from './utils/shipmentTracking';
 import { BudgetSettingsModal } from './components/BudgetSettingsModal';
 import { BulkDeliveriesView } from './components/BulkDeliveriesView';
+import { PortalAdminView } from './components/PortalAdminView';
 import { DailyDigestModal } from './components/DailyDigestModal';
 import { ClinicProductStatusDrawer } from './components/ClinicProductStatusDrawer';
 import { getLocalClinics, getLocalShipments } from './api';
@@ -87,7 +88,7 @@ import {
 const KNOWN_TABS: ViewTab[] = [
   'dashboard', 'morning_meeting', 'alerts', 'procurement', 'unshipped_clinics', 'partial_shipment', 'overdue',
   'customs_management', 'cool_missing', 'kanto_customs_ng', 'unmatched_sheets', 'inventory_management',
-  'sheet_import', 'arrival_tracking', 'products', 'clinics', 'carrier_settings', 'bulk_deliveries',
+  'sheet_import', 'arrival_tracking', 'products', 'clinics', 'carrier_settings', 'bulk_deliveries', 'portal_admin',
   'sales_dashboard', 'sales_rep_sales', 'sales_clinic_master', 'reorder_prediction', 'rep_ranking',
 ];
 
@@ -786,6 +787,13 @@ export default function App() {
       icon: Truck,
       badge: null,
     },
+    {
+      id: 'portal_admin',
+      group: 'admin',
+      label: 'お客様の管理画面',
+      icon: Building2,
+      badge: null,
+    },
   ];
 
   return (
@@ -1154,6 +1162,8 @@ export default function App() {
           {activeTab === 'sheet_import' && <SheetImportView />}
 
           {activeTab === 'carrier_settings' && <CarrierSettingsView />}
+
+          {activeTab === 'portal_admin' && <PortalAdminView />}
 
           {activeTab === 'bulk_deliveries' && (
             <BulkDeliveriesView orders={deliveryData.orders} clinics={clinics} onSelectOrder={handleOpenDetail} />
