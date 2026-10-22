@@ -19,10 +19,10 @@ export const MonthSelectorBar: React.FC<MonthSelectorBarProps> = ({
         <div className="flex items-center gap-2">
           <Calendar className="w-4 h-4 text-blue-600" />
           <span className="text-xs font-bold text-slate-800">
-            受注月別アーカイブ（個別受注）
+            ご発注月別アーカイブ
           </span>
           <span className="text-[11px] text-slate-500 hidden sm:inline">
-            ※ 9月以前の受注はすべて配送完了済み（過去伝票・受領記録確認可能）
+            ※ 9月以前のご発注はすべて配送完了済み（過去伝票・受領記録確認可能）
           </span>
         </div>
         <span className="text-[11px] font-bold text-slate-400">

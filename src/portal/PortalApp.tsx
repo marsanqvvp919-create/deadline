@@ -62,7 +62,7 @@ function PortalLogin({ slug, onDone }: { slug: string; onDone: () => void }) {
                 {name.endsWith('様') ? name : `${name}様`}
               </span>
             )}
-            <h1 className="text-base sm:text-lg font-bold text-slate-900 tracking-tight mt-0.5">配送・受注ステータス管理システム</h1>
+            <h1 className="text-base sm:text-lg font-bold text-slate-900 tracking-tight mt-0.5">ご発注・配送状況</h1>
           </div>
         </div>
       </header>
@@ -153,8 +153,8 @@ function PortalDashboard({ slug, onLogout }: { slug: string; onLogout: () => voi
   );
 
   const handleExportCsv = useCallback(() => {
-    const headers = ['管理番号', '受注ID / 出荷ID', '受注月', '受注日', 'クリニック名', '院長名', '郵便番号', '住所', '電話番号', '入港空港', 'ステータス', '国際便業者', '国際便追跡番号', '国内追跡番号', '商品', '総数量', '金額（商品代金）', '到着予定/完了日'];
-    const rows = currentBatchOrders.map((o) => [o.id, o.invoiceNo, o.batchName, o.orderDate, o.clinicName, o.doctor, o.zip, o.address, o.tel, o.hub, o.status, o.intlCarrier, o.fedexTracking, o.sagawaTracking, o.items.map((i) => `${i.name}×${i.qty}`).join(' / '), o.totalQty, o.amountTotal ?? '', o.actualDelivery || o.estimatedDelivery]);
+    const headers = ['管理番号', 'ご注文番号 / 出荷番号', 'ご発注月', 'ご発注日', 'クリニック名', '院長名', '郵便番号', '住所', '電話番号', '入港空港', 'ステータス', '国際便業者', '国際便追跡番号', '国内追跡番号', '商品', '総数量', '到着予定/完了日'];
+    const rows = currentBatchOrders.map((o) => [o.id, o.invoiceNo, o.batchName, o.orderDate, o.clinicName, o.doctor, o.zip, o.address, o.tel, o.hub, o.status, o.intlCarrier, o.fedexTracking, o.sagawaTracking, o.items.map((i) => `${i.name}×${i.qty}`).join(' / '), o.totalQty, o.actualDelivery || o.estimatedDelivery]);
     const csv = '﻿' + [headers, ...rows].map((r) => r.map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
     const link = document.createElement('a');
@@ -234,9 +234,9 @@ function PortalDashboard({ slug, onLogout }: { slug: string; onLogout: () => voi
       <footer className="bg-white border-t border-slate-200 py-6 text-xs text-slate-500">
         <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-3">
           <div className="flex items-center gap-2">
-            <span className="font-bold text-slate-700">{portalGroupName()} 配送・受注ステータス管理システム</span>
+            <span className="font-bold text-slate-700">{portalGroupName()} ご発注・配送状況</span>
             <span>•</span>
-            <span>SG倉庫・韓国仕入先 ➔ DHL / FedEx国際空輸 ➔ 通関 ➔ 国内配送</span>
+            <span>海外倉庫 ➔ DHL / FedEx国際空輸 ➔ 通関 ➔ 国内配送</span>
           </div>
           <div className="text-slate-400">株式会社Number1</div>
         </div>
@@ -264,7 +264,7 @@ function PortalDashboard({ slug, onLogout }: { slug: string; onLogout: () => voi
 export function PortalApp({ slug }: { slug: string }) {
   const [state, setState] = useState<'checking' | 'in' | 'out'>('checking');
   useEffect(() => {
-    document.title = '配送・受注ステータス管理システム';
+    document.title = 'ご発注・配送状況';
   }, []);
   useEffect(() => {
     fetch(`/api/portal/data?slug=${slug}`, { method: 'HEAD' })

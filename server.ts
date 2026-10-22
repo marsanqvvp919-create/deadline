@@ -4032,7 +4032,7 @@ setTimeout(() => {
 // ----------------------------------------------------------------------
 // お客様の管理画面（グループごとのURL＋パスワード）
 // グループ = 1社・1法人。複数の院（楽楽販売の顧客マスタのクリニックID）をまとめて見られる
-// お客様には仕入先・仕入値・利益など社内の情報は返さない
+// お客様には仕入先・仕入値・利益・販売金額など社内の情報は返さない
 // ----------------------------------------------------------------------
 interface PortalGroup {
   id: string;
@@ -4215,13 +4215,10 @@ function buildPortalData(g: PortalGroup) {
       status: o.status,
       orderState: o.orderState,
       paymentStatus: o.paymentStatus,
-      totalAmount: o.totalAmount || 0,
       lines: (o.lines || []).map((l: any) => ({
         productId: l.productId || '',
         productName: l.productName,
         quantity: l.quantity,
-        unitPrice: l.unitPrice ?? null,
-        lineAmount: l.lineAmount ?? null,
         earliestDate: l.earliestDate || null,
         latestDate: l.latestDate || null,
         shippedDate: l.shippedDate || null,

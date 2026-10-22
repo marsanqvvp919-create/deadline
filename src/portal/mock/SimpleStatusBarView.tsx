@@ -1,5 +1,4 @@
 import React, { useState, useMemo } from 'react';
-import { yen } from '../portalData';
 import {
   OrderRecord,
   OrderStatus,
@@ -130,7 +129,7 @@ export const SimpleStatusBarView: React.FC<SimpleStatusBarViewProps> = ({
   };
 
   const STAGES_HEADER = [
-    { label: '① SG発注・梱包', desc: 'シンガポール' },
+    { label: '① 出荷準備・梱包', desc: 'シンガポール' },
     { label: '② FedEx・DHL 国際空輸', desc: '航空便輸送' },
     { label: '③ 日本通関審査', desc: '成田 / 関西保税' },
     { label: '④ 佐川急便', desc: '国内配送' },
@@ -233,7 +232,7 @@ export const SimpleStatusBarView: React.FC<SimpleStatusBarViewProps> = ({
               </span>
             </div>
             <h2 className="text-base sm:text-lg font-bold text-slate-900 mt-0.5">
-              受注別 配送進捗ステータス
+              ご注文別 配送進捗ステータス
             </h2>
           </div>
 
@@ -509,11 +508,6 @@ export const SimpleStatusBarView: React.FC<SimpleStatusBarViewProps> = ({
                       <span className="text-blue-700 font-bold bg-blue-50 px-1.5 py-0.2 rounded border border-blue-200/50">
                         数量: {order.totalQty}箱
                       </span>
-                      {order.amountTotal != null && (
-                        <span className="text-slate-700 font-bold bg-slate-100 px-1.5 py-0.2 rounded border border-slate-200 font-mono">
-                          {yen(order.amountTotal)}
-                        </span>
-                      )}
                     </div>
 
                     {/* Quick Tracking Links */}

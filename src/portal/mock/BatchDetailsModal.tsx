@@ -40,7 +40,7 @@ export const BatchDetailsModal: React.FC<BatchDetailsModalProps> = ({
   const batchInfo = BATCHES_LIST.find((b) => b.id === batchId) || {
     id: batchId,
     name: batchId,
-    orderDate: '受注日',
+    orderDate: 'ご発注日',
     description: '',
     isCurrent: false,
   };
@@ -58,7 +58,7 @@ export const BatchDetailsModal: React.FC<BatchDetailsModalProps> = ({
   const deliveredCount = orders.filter((o) => o.status === 'DELIVERED').length;
 
   const handleExportBatchCsv = () => {
-    const headers = ['発注ID', 'クリニック名', 'エリア', '担当医', '数量(箱)', 'ステータス', '国際便業者', '国際便追跡番号', '佐川番号', '納品予定日'];
+    const headers = ['ご注文番号', 'クリニック名', 'エリア', '担当医', '数量(箱)', 'ステータス', '国際便業者', '国際便追跡番号', '佐川番号', '納品予定日'];
     const rows = orders.map((o) => [
       `"${o.id}"`,
       `"${o.clinicName}"`,
@@ -91,7 +91,7 @@ export const BatchDetailsModal: React.FC<BatchDetailsModalProps> = ({
           <div>
             <div className="flex items-center gap-2 text-xs text-sky-200 font-mono">
               <Calendar className="w-3.5 h-3.5" />
-              <span>初回受注 {batchInfo.orderDate}</span>
+              <span>初回ご発注 {batchInfo.orderDate}</span>
               <span>•</span>
               <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${batchInfo.isCurrent ? 'bg-sky-500/30 text-sky-200 border border-sky-400/30' : 'bg-emerald-500/30 text-emerald-200 border border-emerald-400/30'}`}>
                 {batchInfo.isCurrent ? '進行中' : '完了便'}
@@ -127,7 +127,7 @@ export const BatchDetailsModal: React.FC<BatchDetailsModalProps> = ({
             </span>
             <span className="text-slate-300">|</span>
             <span className="font-bold text-slate-700">
-              受注件数: <span className="text-slate-900 font-bold">{orders.length} 件</span>
+              ご発注件数: <span className="text-slate-900 font-bold">{orders.length} 件</span>
             </span>
             <span className="text-slate-300">|</span>
             <span className="font-bold text-emerald-700">

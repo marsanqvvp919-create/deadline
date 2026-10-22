@@ -56,10 +56,10 @@ export const VisualLogisticsMap: React.FC<VisualLogisticsMapProps> = ({
         <div>
           <div className="flex items-center gap-2 flex-wrap">
             <span className="inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded bg-blue-500/20 text-cyan-300 border border-cyan-500/30">
-              <Sparkles className="w-3 h-3" /> 美容医療薬剤 個別受注配送
+              <Sparkles className="w-3 h-3" /> 美容医療薬剤 ご注文ごとの配送
             </span>
             <span className="text-xs text-indigo-300">
-              受注ごとに個別出荷・成田着
+              ご注文ごとに個別出荷・成田着
             </span>
           </div>
           <h3 className="text-base sm:text-lg font-bold text-white mt-1.5 flex items-center gap-2">
@@ -143,7 +143,7 @@ export const VisualLogisticsMap: React.FC<VisualLogisticsMapProps> = ({
               </div>
               <div>
                 <div className="text-xs font-bold text-white">🇸🇬 シンガポール調達ハブ</div>
-                <div className="text-[10px] text-slate-400">受注ごと 検品</div>
+                <div className="text-[10px] text-slate-400">ご注文ごと 検品</div>
               </div>
             </div>
 

@@ -1,5 +1,4 @@
 import React, { useState, useMemo } from 'react';
-import { yen } from '../portalData';
 import {
   OrderRecord,
   CLINICS_MASTER,
@@ -154,12 +153,12 @@ export const OverallHistoryView: React.FC<OverallHistoryViewProps> = ({
 
         <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs flex items-center justify-between">
           <div>
-            <div className="text-xs font-semibold text-slate-500">累計販売金額（商品代金）</div>
+            <div className="text-xs font-semibold text-slate-500">ご発注月（アーカイブ）</div>
             <div className="text-2xl font-black text-slate-900 mt-1 font-mono">
-              {yen(allOrdersList.reduce((acc, o) => acc + (o.amountTotal || 0), 0))}
+              {totalBatchesCount} <span className="text-sm font-normal text-slate-500">か月</span>
             </div>
             <div className="text-[11px] text-slate-500 font-medium mt-1">
-              {totalBatchesCount}か月分の合計
+              全期間アーカイブ
             </div>
           </div>
           <div className="w-12 h-12 rounded-xl bg-amber-50 text-amber-700 border border-amber-100 flex items-center justify-center shrink-0">
@@ -187,10 +186,10 @@ export const OverallHistoryView: React.FC<OverallHistoryViewProps> = ({
       <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-5 sm:p-6 space-y-4">
         <div>
           <h2 className="text-base sm:text-lg font-bold text-slate-900">
-            受注月ごとの実績一覧（履歴含む）
+            ご発注月ごとの実績一覧（履歴含む）
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            各月のカードをクリックすると、その月の受注明細・ステータス画面に切り替わります。
+            各月のカードをクリックすると、その月のご発注明細・ステータス画面に切り替わります。
           </p>
         </div>
 
@@ -198,7 +197,6 @@ export const OverallHistoryView: React.FC<OverallHistoryViewProps> = ({
           {BATCHES_LIST.map((batch) => {
             const batchOrders = batchOrdersMap[batch.id] || [];
             const bUnits = batchOrders.reduce((acc, o) => acc + o.totalQty, 0);
-            const bAmount = batchOrders.reduce((acc, o) => acc + (o.amountTotal || 0), 0);
             const bDelivered = batchOrders.filter((o) => o.status === 'DELIVERED').length;
 
             return (
@@ -209,7 +207,7 @@ export const OverallHistoryView: React.FC<OverallHistoryViewProps> = ({
               >
                 <div>
                   <div className="flex items-center justify-between text-xs">
-                    <span className="font-mono text-slate-500 font-semibold group-hover:text-blue-600 transition-colors">初回受注 {batch.orderDate}</span>
+                    <span className="font-mono text-slate-500 font-semibold group-hover:text-blue-600 transition-colors">初回ご発注 {batch.orderDate}</span>
                     <span
                       className={`px-2 py-0.5 rounded text-[10px] font-bold ${
                         batch.isCurrent
@@ -231,10 +229,6 @@ export const OverallHistoryView: React.FC<OverallHistoryViewProps> = ({
                   <div>
                     <span className="text-slate-400 text-[10px] block">発注数量</span>
                     <span className="font-bold text-slate-900 text-sm">{bUnits} 箱</span>
-                  </div>
-                  <div className="text-center">
-                    <span className="text-slate-400 text-[10px] block">販売金額</span>
-                    <span className="font-bold text-slate-900 text-sm">{yen(bAmount)}</span>
                   </div>
                   <div className="text-right">
                     <span className="text-slate-400 text-[10px] block">配達状況</span>

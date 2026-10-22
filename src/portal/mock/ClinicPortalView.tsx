@@ -1,5 +1,4 @@
 import React from 'react';
-import { yen } from '../portalData';
 import {
   Clinic,
   OrderRecord,
@@ -102,7 +101,7 @@ export const ClinicPortalView: React.FC<ClinicPortalViewProps> = ({
           <div className="bg-slate-800 text-white p-4 sm:p-5 flex flex-wrap items-center justify-between gap-3">
             <div>
               <span className="text-xs font-bold uppercase tracking-wider text-sky-200 bg-slate-700 border border-slate-600 px-2 py-0.5 rounded">
-                {isDelivered ? '最新のご注文' : '配送中のご注文'} (受注日 {currentOrder.orderDate.split(' ')[0]})
+                {isDelivered ? '最新のご注文' : '配送中のご注文'} (ご発注日 {currentOrder.orderDate.split(' ')[0]})
               </span>
               <h2 className="text-lg sm:text-xl font-bold mt-1 text-white">
                 自院宛 美容医療薬剤 配送状況
@@ -214,7 +213,7 @@ export const ClinicPortalView: React.FC<ClinicPortalViewProps> = ({
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-200">
                 <div>
                   <h4 className="text-sm font-bold text-slate-800">
-                    今回の納品予定品目 (合計: {currentOrder.totalQty} 箱/本・{yen(currentOrder.amountTotal)})
+                    今回の納品予定品目 (合計: {currentOrder.totalQty} 箱/本)
                   </h4>
                   <p className="text-xs text-slate-500">
                     シンガポール調達ハブより直接出荷された医療用製剤
@@ -247,13 +246,8 @@ export const ClinicPortalView: React.FC<ClinicPortalViewProps> = ({
                     <div>
                       <span className="font-bold text-slate-900">{item.name}</span>
                     </div>
-                    <div className="flex items-center gap-3">
-                      <span className="text-[11px] text-slate-500 font-mono">
-                        {yen(item.unitPrice)} × {item.qty} = <b className="text-slate-800">{yen(item.amount)}</b>
-                      </span>
-                      <span className="font-bold text-blue-700 text-sm">
-                        数量: {item.qty} {item.unit}
-                      </span>
+                    <div className="font-bold text-blue-700 text-sm">
+                      数量: {item.qty} {item.unit}
                     </div>
                   </div>
                 ))}
@@ -288,7 +282,7 @@ export const ClinicPortalView: React.FC<ClinicPortalViewProps> = ({
           当院宛 過去の納品伝票・発注履歴アーカイブ
         </h3>
         <p className="text-xs text-slate-500 mb-4">
-          過去のご注文（受注ID別）の伝票、受領記録を確認・再印刷できます。
+          過去のご注文（ご注文番号別）の伝票、受領記録を確認・再印刷できます。
         </p>
 
         {clinicOrders.length === 0 ? (

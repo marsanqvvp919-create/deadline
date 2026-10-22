@@ -112,7 +112,7 @@ export const STATUS_STEPS: {
     "step": 0,
     "label": "注文済み",
     "shortLabel": "注文受付",
-    "desc": "ご注文を受け付け、仕入先へ手配しています",
+    "desc": "ご注文を受け付け、商品を手配しています",
     "color": "bg-slate-400",
     "bgLight": "bg-slate-50",
     "borderLight": "border-slate-200",
@@ -383,7 +383,7 @@ export function buildPortalModel(data: PortalApiData): PortalModel {
     const month = ymd(o.orderDate).slice(0, 7).replace('/', '-');
     const base = {
       batchId: month,
-      batchName: `${Number(month.slice(5))}月受注分`,
+      batchName: `${Number(month.slice(5))}月ご発注分`,
       orderDate: ymd(o.orderDate),
       clinicId: clinic.id,
       clinicName: clinic.name,
@@ -410,8 +410,8 @@ export function buildPortalModel(data: PortalApiData): PortalModel {
       time: ymd(o.orderDate),
       location: 'ご注文受付',
       title: 'ご注文確定',
-      desc: `受注ID: ${o.orderId}`,
-      operator: '株式会社Number1 受注担当',
+      desc: `ご注文番号: ${o.orderId}`,
+      operator: '株式会社Number1',
     };
 
     // 出荷済みの出荷を古い順に、注文数を超えないように数量を割り当てる（出荷数の分からない古い出荷で二重に数えない）
@@ -517,12 +517,12 @@ export function buildPortalModel(data: PortalApiData): PortalModel {
         tl.push({
           step: intlCarrier === '国内発送' ? 'OUT_FOR_DELIVERY' : 'FEDEX_DISPATCHED',
           time: ymd(s.shippedDate) || '—',
-          location: intlCarrier === '国内発送' ? '国内倉庫' : 'SG倉庫 / 韓国仕入先',
+          location: intlCarrier === '国内発送' ? '国内倉庫' : '海外倉庫',
           title: intlCarrier === '国内発送' ? '国内倉庫から発送' : `${intlCarrier} 集荷・発送`,
           desc: intlNo || domNo ? `追跡番号: ${intlNo || domNo}` : '発送しました',
           operator: intlCarrier === '国内発送' ? domCarrier : intlCarrier,
         });
-      tl.push({ step: 'PREPARING', time: '—', location: '出荷管理', title: status === 'PREPARING' ? '出荷準備中' : '検品・梱包', desc: status === 'PREPARING' ? '出荷の準備をしています' : '検品・梱包完了', operator: 'Number1 出荷担当' });
+      tl.push({ step: 'PREPARING', time: '—', location: '出荷準備', title: status === 'PREPARING' ? '出荷準備中' : '検品・梱包', desc: status === 'PREPARING' ? '出荷の準備をしています' : '検品・梱包完了', operator: '株式会社Number1' });
       tl.push(orderedEvent);
 
       records.push({
@@ -576,7 +576,7 @@ export function buildPortalModel(data: PortalApiData): PortalModel {
         items: priced(rest.map(({ l, qty }) => ({ name: l.productName, qty, unit: '本', lotNo: '', expDate: '', unitPrice: l.unitPrice ?? null }))),
         totalQty: rest.reduce((a, b) => a + b.qty, 0),
         timeline: [
-          ...(ordered ? [] : [{ step: 'PREPARING' as OrderStatus, time: '—', location: '仕入先・出荷管理', title: '手配中（出荷準備中）', desc: '仕入先へ発注済み・入荷後に発送します', operator: 'Number1 出荷担当' }]),
+          ...(ordered ? [] : [{ step: 'PREPARING' as OrderStatus, time: '—', location: '商品手配', title: '手配中（出荷準備中）', desc: '商品を手配中です。入荷後に発送します', operator: '株式会社Number1' }]),
           orderedEvent,
         ],
       });
@@ -594,13 +594,13 @@ export function buildPortalModel(data: PortalApiData): PortalModel {
     const orderCount = new Set(list.map((r) => r.invoiceNo.split(' / ')[0])).size;
     return {
       id: m,
-      name: `${m.slice(0, 4)}年${Number(m.slice(5))}月 受注分`,
+      name: `${m.slice(0, 4)}年${Number(m.slice(5))}月 ご発注分`,
       orderDate: list.map((r) => r.orderDate).sort()[0] || '',
       status: done ? 'COMPLETED' : 'IN_PROGRESS',
       totalOrders: list.length,
       totalUnits: list.reduce((a, r) => a + r.totalQty, 0),
       isCurrent: i === 0,
-      description: `${Number(m.slice(5))}月の受注 ${orderCount}件／出荷 ${list.length}件。${done ? '全出荷完了。' : '進行中の出荷あり。'}`,
+      description: `${Number(m.slice(5))}月のご発注 ${orderCount}件／出荷 ${list.length}件。${done ? '全出荷完了。' : '進行中の出荷あり。'}`,
     };
   });
   CLINICS_MASTER = clinics;

@@ -1,5 +1,4 @@
 import React from 'react';
-import { yen } from '../portalData';
 import { OrderRecord } from '../portalData';
 import {
   X,
@@ -88,7 +87,7 @@ export const DeliverySlipModal: React.FC<DeliverySlipModalProps> = ({
                     発行日: {order.orderDate.split(' ')[0]}
                   </div>
                   <div className="text-slate-500 mt-0.5">
-                    受注ID: {order.invoiceNo}
+                    ご注文番号: {order.invoiceNo}
                   </div>
                 </div>
               </div>
@@ -123,10 +122,7 @@ export const DeliverySlipModal: React.FC<DeliverySlipModalProps> = ({
                   発送元 (Shipper) & 輸送業者
                 </div>
                 <div className="font-bold text-slate-900">
-                  Singapore Logistics Pte. Ltd.
-                </div>
-                <div className="text-slate-600 text-[11px]">
-                  Changi South Street 1, Singapore 486781
+                  株式会社Number1
                 </div>
 
                 <div className="mt-2.5 pt-2 border-t border-slate-200 space-y-1">
@@ -161,8 +157,6 @@ export const DeliverySlipModal: React.FC<DeliverySlipModalProps> = ({
                     <th className="py-2 px-2.5 text-center w-10">No.</th>
                     <th className="py-2 px-2.5 text-left">品名</th>
                     <th className="py-2 px-2.5 text-center whitespace-nowrap w-24">数量</th>
-                    <th className="py-2 px-2.5 text-right whitespace-nowrap w-24">単価</th>
-                    <th className="py-2 px-2.5 text-right whitespace-nowrap w-28">金額</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200">
@@ -177,8 +171,6 @@ export const DeliverySlipModal: React.FC<DeliverySlipModalProps> = ({
                       <td className="py-2 px-2.5 text-center font-bold text-slate-900 text-sm">
                         {it.qty} {it.unit}
                       </td>
-                      <td className="py-2 px-2.5 text-right font-mono text-slate-700">{yen(it.unitPrice)}</td>
-                      <td className="py-2 px-2.5 text-right font-mono font-bold text-slate-900">{yen(it.amount)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -190,13 +182,6 @@ export const DeliverySlipModal: React.FC<DeliverySlipModalProps> = ({
                     <td className="py-2 px-2.5 text-center text-blue-700 text-sm font-black">
                       {order.totalQty} 箱
                     </td>
-                    <td className="py-2 px-2.5 text-right text-slate-700 whitespace-nowrap">合計金額:</td>
-                    <td className="py-2 px-2.5 text-right font-mono text-blue-700 text-sm font-black">{yen(order.amountTotal)}</td>
-                  </tr>
-                  <tr>
-                    <td colSpan={5} className="py-1.5 px-2.5 text-right text-[10px] text-slate-500 font-normal">
-                      ※ 商品代金（送料・手数料を除く）
-                    </td>
                   </tr>
                 </tfoot>
               </table>
@@ -205,11 +190,9 @@ export const DeliverySlipModal: React.FC<DeliverySlipModalProps> = ({
             {/* Signatures & Seal Section */}
             <div className="grid grid-cols-2 gap-4 pt-4 mt-2 border-t-2 border-slate-800 text-xs">
               <div className="border border-slate-300 rounded p-3 text-center">
-                <div className="font-bold text-slate-700 mb-1">出荷検品者印 (Singapore QA)</div>
+                <div className="font-bold text-slate-700 mb-1">出荷検品者印</div>
                 <div className="w-16 h-16 border border-dashed border-slate-300 rounded-full mx-auto flex items-center justify-center font-bold text-red-600 text-xs">
                   検品済
-                  <br />
-                  SG-QA
                 </div>
                 <div className="text-[10px] text-slate-400 mt-1">出荷責任者サイン済</div>
               </div>

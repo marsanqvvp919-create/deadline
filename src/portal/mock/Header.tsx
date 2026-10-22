@@ -56,7 +56,7 @@ export const Header: React.FC<HeaderProps> = ({
                 </span>
               </div>
               <h1 className="text-base sm:text-lg font-bold text-slate-900 tracking-tight mt-0.5">
-                配送・受注ステータス管理システム
+                ご発注・配送状況
               </h1>
             </div>
           </div>
@@ -67,7 +67,7 @@ export const Header: React.FC<HeaderProps> = ({
             <div className="flex items-center bg-slate-50 rounded-lg p-1 border border-slate-200">
               <span className="text-xs text-slate-500 px-2 font-medium flex items-center gap-1">
                 <Layers className="w-3.5 h-3.5 text-slate-400" />
-                受注月:
+                ご発注月:
               </span>
               <select
                 value={selectedBatchId}
