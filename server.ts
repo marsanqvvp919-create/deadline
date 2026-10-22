@@ -3924,8 +3924,10 @@ async function runCarrierAutoRefresh(force = false) {
           const every = r.carrier === 'dhl' ? DHL_REFRESH_AFTER_MS : DOMESTIC_CARRIERS.includes(r.carrier!) ? 12 * 60 * 60 * 1000 : 2 * 60 * 60 * 1000;
           return ageMs(r.status) > every;
         }
-        // 作ったばかりの送り状は、まだ運送会社に登録されていないことがある
-        return recent.has(r.digits) && ageMs(r.status) > 12 * 60 * 60 * 1000;
+        // 作ったばかりの送り状は、まだ運送会社に登録されていないことがある。
+        // 出荷から7日以内は12時間ごと、それ以降も追跡期間中は1日1回取り直す
+        // （前は7日を過ぎると取り直さず、あとから運送会社に登録された番号が「番号の誤り」のまま残っていた）
+        return ageMs(r.status) > (recent.has(r.digits) ? 12 : 24) * 60 * 60 * 1000;
       },
       dhlLimit: Math.max(0, DHL_DAILY_BUDGET - DHL_MANUAL_RESERVE - dhlUsedToday()),
     });
