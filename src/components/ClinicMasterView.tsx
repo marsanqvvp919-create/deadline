@@ -500,7 +500,6 @@ export const ClinicMasterView: React.FC<ClinicMasterViewProps> = ({
                 <th className="py-3 px-3.5">電話番号</th>
                 <th className="py-3 px-3.5 text-center">商品ステータス進捗</th>
                 <th className="py-3 px-3.5">支払方法</th>
-                <th className="py-3 px-3.5 text-center">お客様画面</th>
                 <th className="py-3 px-3.5 text-center">操作</th>
               </tr>
             </thead>
@@ -606,9 +605,6 @@ export const ClinicMasterView: React.FC<ClinicMasterViewProps> = ({
                       </span>
                     </td>
                     <td className="py-3 px-3.5 text-center whitespace-nowrap">
-                      <ClinicPortalCell group={portalGroupByClinic.get(c.clinicId) || null} onOpen={() => setPortalClinic(c)} />
-                    </td>
-                    <td className="py-3 px-3.5 text-center whitespace-nowrap">
                       <div className="flex items-center justify-center gap-1.5">
                         <button
                           type="button"
@@ -626,6 +622,7 @@ export const ClinicMasterView: React.FC<ClinicMasterViewProps> = ({
                           <Package className="w-3.5 h-3.5" />
                           <span>商品進捗</span>
                         </button>
+                        <ClinicPortalCell group={portalGroupByClinic.get(c.clinicId) || null} onOpen={() => setPortalClinic(c)} />
                       </div>
                     </td>
                   </tr>

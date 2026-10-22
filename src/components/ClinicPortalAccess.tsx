@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Ban, ExternalLink, Eye, EyeOff, Globe, KeyRound, RotateCcw, Trash2, X } from 'lucide-react';
+import { Ban, ExternalLink, Eye, EyeOff, Globe, KeyRound, RotateCcw, Share2, Trash2, X } from 'lucide-react';
 import { api, ClinicPicker, ClinicRef, CopyButton, Group, portalUrl } from './PortalAdminView';
 
 /** パスワードの決め方：自動で作るか、社内で決めた文字を入れるか */
@@ -260,22 +260,9 @@ export function ClinicPortalModal({
   );
 }
 
-/** 一覧の1セル：発行状況とボタン */
+/** 一覧の右端の小さな共有ボタン（押すと発行・管理の画面が開く。ここで発行はしない） */
 export function ClinicPortalCell({ group, onOpen }: { group: Group | null; onOpen: () => void }) {
-  if (!group)
-    return (
-      <button
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          onOpen();
-        }}
-        className="px-2.5 py-1.5 bg-white hover:bg-indigo-50 text-indigo-700 font-bold rounded-xl text-xs inline-flex items-center gap-1 border border-dashed border-indigo-300 cursor-pointer"
-      >
-        <Globe className="w-3.5 h-3.5" />
-        発行する
-      </button>
-    );
+  const title = !group ? 'お客様画面を共有（未発行）' : group.disabled ? `お客様画面：停止中（${group.name}）` : `お客様画面：発行済み（${group.name}・${group.clinics.length}院）`;
   return (
     <button
       type="button"
@@ -283,14 +270,18 @@ export function ClinicPortalCell({ group, onOpen }: { group: Group | null; onOpe
         e.stopPropagation();
         onOpen();
       }}
-      title={`${group.name}（${group.clinics.length}院）`}
-      className={`px-2.5 py-1.5 font-bold rounded-xl text-xs inline-flex items-center gap-1 border cursor-pointer ${
-        group.disabled ? 'bg-slate-100 text-slate-600 border-slate-300' : 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
+      title={title}
+      aria-label={title}
+      className={`relative p-1.5 rounded-lg border transition cursor-pointer ${
+        !group
+          ? 'border-transparent text-slate-300 hover:text-slate-600 hover:bg-slate-100'
+          : group.disabled
+            ? 'border-slate-200 text-slate-400 hover:bg-slate-100'
+            : 'border-emerald-200 text-emerald-600 bg-emerald-50 hover:bg-emerald-100'
       }`}
     >
-      <Globe className="w-3.5 h-3.5" />
-      {group.disabled ? '停止中' : '発行済み'}
-      {group.clinics.length > 1 && <span className="font-normal">・{group.clinics.length}院</span>}
+      <Share2 className="w-4 h-4" />
+      {group && !group.disabled && <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-500 ring-2 ring-white" />}
     </button>
   );
 }
