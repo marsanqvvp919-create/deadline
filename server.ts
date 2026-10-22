@@ -1406,6 +1406,61 @@ function countOverdueOrders(orders: any[]): number {
   }).length;
 }
 
+// 分割出荷：楽楽販売は出荷レコードを出荷済みにすると、その出荷で「出荷数」0や一部だった明細にも
+// ご注文管理の出荷日を入れる（残りは新しい出荷レコードに移る）。出荷日だけ見ると出荷完了に見えるので、
+// 出荷済みの出荷レコードの「出荷数」の合計で、ご注文管理の明細の出荷数を直す。
+// 出荷数の分からない出荷済みレコードがある明細と、同じ商品が複数行ある明細はそのままにする。
+function applyShipmentQuantities() {
+  const store = serverRakurakuStore.orders;
+  const shipments = serverRakurakuStore.shipments;
+  if (!store?.orders || !shipments) return;
+  const sums = new Map<string, { qty: number; unknown: boolean }>();
+  shipments.forEach((sh: any) => {
+    if (!/出荷済|納品済|配達完了/.test(sh.shipStatus || '')) return;
+    // 出荷数がすべて0の出荷済みレコード（出荷数を入れていない古いレコード）は数量不明として扱う
+    const noneEntered = (sh.lineRefs || []).every((ref: any) => !(parseInt(ref.shipQty, 10) > 0));
+    (sh.lineRefs || []).forEach((ref: any) => {
+      if (!ref.productId) return;
+      const key = `${ref.orderId}|${ref.productId}`;
+      const cur = sums.get(key) || { qty: 0, unknown: false };
+      const n = parseInt(ref.shipQty, 10);
+      if (noneEntered || isNaN(n)) cur.unknown = true;
+      else cur.qty += n;
+      sums.set(key, cur);
+    });
+  });
+  let changed = 0;
+  store.orders.forEach((o: any) => {
+    const perProduct = new Map<string, number>();
+    o.lines.forEach((l: any) => perProduct.set(l.productId, (perProduct.get(l.productId) || 0) + 1));
+    o.lines.forEach((l: any) => {
+      if (l.baseShippedQty === undefined) {
+        l.baseShippedQty = l.shippedQty;
+        l.baseStage = l.stage;
+        l.baseShippedDate = l.shippedDate;
+      }
+      const sum = sums.get(`${o.orderId}|${l.productId}`);
+      const shortfall = perProduct.get(l.productId) === 1 && sum && !sum.unknown && sum.qty < l.baseShippedQty;
+      if (shortfall) {
+        l.shippedQty = Math.max(0, sum!.qty);
+        l.remainingQty = Math.max(0, l.quantity - l.shippedQty);
+        l.stage = l.shippedQty > 0 ? '一部出荷' : l.poDate ? '発注済・入荷待ち' : '未発注';
+        if (l.shippedQty === 0) l.shippedDate = null;
+        l.splitShortfall = true;
+        changed++;
+      } else if (l.splitShortfall) {
+        l.shippedQty = l.baseShippedQty;
+        l.remainingQty = Math.max(0, l.quantity - l.shippedQty);
+        l.stage = l.baseStage;
+        l.shippedDate = l.baseShippedDate;
+        l.splitShortfall = false;
+      }
+    });
+  });
+  serverRakurakuStore.orders = { ...store, ...finalizeDeliveryData(store.orders), generatedAt: store.generatedAt };
+  if (changed) console.log(`[Rakuraku Sync] Split shipments: ${changed} lines not fully shipped despite a ship date`);
+}
+
 // 出荷管理の「倉庫出荷日」を、受注ID＋商品IDでご注文管理の明細に付ける。
 // 納期超過・遵守率は「倉庫出荷日」があればそれを、なければ楽楽販売の「出荷日」を使う。
 function applyWarehouseShipDates() {
@@ -1579,6 +1634,11 @@ async function loadStoreSnapshot(): Promise<boolean> {
       }
     }
     serverRakurakuStore.shipments = snap.shipments ?? null;
+    try {
+      applyShipmentQuantities();
+    } catch (e: any) {
+      console.warn('[Rakuraku Cache] Split shipment check failed:', e?.message || e);
+    }
     serverRakurakuStore.suppliers = snap.suppliers ?? null;
     serverRakurakuStore.products = snap.products ?? null;
     serverRakurakuStore.clinics = snap.clinics ?? null;
@@ -1779,6 +1839,7 @@ async function syncAllRakurakuData(isManual = false): Promise<boolean> {
     if (!useIncremental) serverRakurakuStore.lastFullSyncTime = Date.now();
     lastSyncMode = useIncremental ? 'incremental' : 'full';
     applyWarehouseShipDates();
+    applyShipmentQuantities();
 
     // 成功処理
     serverRakurakuStore.lastSuccessTime = new Date().toISOString();
