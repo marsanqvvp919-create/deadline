@@ -4188,7 +4188,17 @@ function buildPortalData(g: PortalGroup) {
   const ids = new Set(g.clinicIds);
   const clinics = g.clinicIds.map((id) => {
     const m = masterClinicById(id);
-    return { clinicId: id, clinicName: m?.clinicName || '', address: m?.address || '' };
+    return {
+      clinicId: id,
+      clinicName: m?.clinicName || '',
+      clinicNameEn: m?.clinicNameEn || '',
+      directorName: m?.directorName || '',
+      phone: m?.phone || '',
+      postalCode: m?.postalCode || '',
+      prefecture: m?.prefecture || '',
+      address: m?.address || '',
+      addressEn: m?.addressEn || '',
+    };
   });
   const orders = ((serverRakurakuStore.orders?.orders || []) as any[])
     .filter((o) => ids.has(o.clinicId) && !PORTAL_HIDDEN_ORDER_STATUS.includes(String(o.status || '').trim()))
@@ -4234,7 +4244,9 @@ function buildPortalData(g: PortalGroup) {
           deliveredAt: st.deliveredAt || null,
           estimatedDelivery: st.estimatedDelivery || null,
           customsCleared: !!st.customsCleared,
+          customsClearedAt: st.customsClearedAt || null,
           arrivedJapan: !!st.arrivedJapan,
+          domestic: !!st.domestic,
         }));
       // 配送状況は出荷から CARRIER_TRACK_DAYS 日だけ取りに行く。それより前に出荷して、配送中・保留の記録もないものは
       // お届け済みとして表示する（楽楽販売に配達完了日が入っていない古い出荷が「発送済み」で止まって見えないように）
@@ -4255,6 +4267,15 @@ function buildPortalData(g: PortalGroup) {
         trackingNos: boxes,
         tracking,
         items: (s.lineRefs || []).map((r: any) => productNameOf.get(`${r.orderId}:${r.productId}`)).filter(Boolean),
+        // この出荷の商品と数量（楽楽販売の出荷数。入っていなければ注文数）
+        itemLines: (s.lineRefs || [])
+          .filter((r: any) => productNameOf.has(`${r.orderId}:${r.productId}`))
+          .map((r: any) => {
+            const n = parseInt(r.shipQty, 10);
+            const line = orders.find((o) => o.orderId === r.orderId)?.lines.find((l: any) => l.productId === r.productId);
+            return { productId: r.productId, name: productNameOf.get(`${r.orderId}:${r.productId}`), qty: n > 0 ? n : line?.quantity ?? null };
+          }),
+        arrivalAirport: s.arrivalAirport && s.arrivalAirport !== '—' ? s.arrivalAirport : '',
       };
     });
   return {
