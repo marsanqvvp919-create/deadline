@@ -438,9 +438,15 @@ export function buildPortalModel(data: PortalApiData): PortalModel {
         if (!p) return 0;
         return waitingShip ? Math.max(0, p.quantity - (p.shippedQty ?? 0)) || p.quantity : p.quantity;
       };
+      // 出荷待ちの出荷の「出荷数」は注文数のままのことがあるので、注文の残りを超えないようにする
+      const capWaiting = (name: string, qty: number) => {
+        const p = products.find((x) => x.productName === name);
+        const rest = p ? p.quantity - (p.shippedQty ?? 0) : 0;
+        return waitingShip && rest > 0 ? Math.min(qty, rest) : qty;
+      };
       const items: OrderItem[] = lines.map((l) => ({
         name: l.name,
-        qty: l.qty ?? fallbackQty(l.name),
+        qty: l.qty != null ? capWaiting(l.name, l.qty) : fallbackQty(l.name),
         unit: '本',
         lotNo: '',
         expDate: '',
