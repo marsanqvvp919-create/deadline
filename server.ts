@@ -1389,13 +1389,15 @@ const serverRakurakuStore: RakurakuServerStore = {
 function countOverdueOrders(orders: any[]): number {
   const jstToday = new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
   const excluded = ['見積作成中', '見積済み', '出荷済み'];
+  // 画面と同じく、最長納品予定日から90日以上たったまま出荷日がない伝票は納品済みとみなして数えない
+  const staleCutoff = new Date(Date.now() + 9 * 60 * 60 * 1000 - 90 * 86400000).toISOString().slice(0, 10);
   return orders.filter((o) => {
     if (excluded.includes((o.status || '').trim())) return false;
-    return (o.overdueBasis || []).some((b: any) => {
-      if (b.warehouseShippedDate || b.shippedDate || !b.latestDate) return false;
-      const d = String(b.latestDate).replace(/\//g, '-').slice(0, 10);
-      return /^\d{4}-\d{2}-\d{2}$/.test(d) && d < jstToday;
-    });
+    const overdue = (o.overdueBasis || [])
+      .filter((b: any) => !(b.warehouseShippedDate || b.shippedDate) && b.latestDate)
+      .map((b: any) => String(b.latestDate).replace(/\//g, '-').slice(0, 10))
+      .filter((d: string) => /^\d{4}-\d{2}-\d{2}$/.test(d) && d < jstToday);
+    return overdue.some((d: string) => d > staleCutoff);
   }).length;
 }
 

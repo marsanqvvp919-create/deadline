@@ -60,7 +60,8 @@ export function isLineDelayed(line: OrderLine, order?: Order, referenceDate?: Da
 /**
  * 伝票が納期超過しているかを判定（送料・手数料を含む全明細で判定し、楽楽販売の件数と一致させる）
  */
-export function isOrderDelayed(order: Order, referenceDate?: Date): boolean {
+/** 楽楽販売「①超過」の条件に当たる伝票か（古さは問わない） */
+function matchesRakurakuOverdue(order: Order, referenceDate?: Date): boolean {
   if (isOverdueExcludedStatus(order.status)) return false;
   if (order.overdueBasis && order.overdueBasis.length > 0) {
     return order.overdueBasis.some(
@@ -68,6 +69,42 @@ export function isOrderDelayed(order: Order, referenceDate?: Date): boolean {
     );
   }
   return order.lines.some((l) => isLineDelayed(l, order, referenceDate));
+}
+
+/**
+ * 最長納品予定日から90日以上たっても出荷日が入っていない伝票は、実際には納品済みで
+ * 楽楽販売の直し漏れ（出荷済みにしていない）とみなし、納期超過の一覧・件数に出さない
+ */
+export const STALE_OVERDUE_DAYS = 90;
+
+/** 伝票のいちばん新しい「期限切れの最長納品予定日」から何日たったか */
+function newestOverdueAgeDays(order: Order, referenceDate?: Date): number {
+  const ref = startOfDay(referenceDate || new Date());
+  const dates: string[] = [];
+  if (order.overdueBasis && order.overdueBasis.length > 0) {
+    order.overdueBasis.forEach((b) => {
+      if (!(b.warehouseShippedDate || b.shippedDate) && isBeforeToday(b.latestDate, referenceDate) && b.latestDate) dates.push(b.latestDate);
+    });
+  } else {
+    order.lines.forEach((l) => {
+      if (isLineDelayed(l, order, referenceDate) && l.latestDate) dates.push(l.latestDate);
+    });
+  }
+  const newest = Math.max(...dates.map((d) => startOfDay(new Date(d))).filter((t) => !isNaN(t)));
+  return Number.isFinite(newest) ? Math.floor((ref - newest) / 86400000) : 0;
+}
+
+/** 楽楽販売では①超過に出るが、古すぎるため納品済みとみなして非表示にする伝票 */
+export function isStaleOverdueOrder(order: Order, referenceDate?: Date): boolean {
+  return matchesRakurakuOverdue(order, referenceDate) && newestOverdueAgeDays(order, referenceDate) >= STALE_OVERDUE_DAYS;
+}
+
+/**
+ * 伝票が納期超過しているかを判定（送料・手数料を含む全明細で判定し、楽楽販売の件数と一致させる。
+ * ただし90日以上前に期限が切れたままの伝票は除く）
+ */
+export function isOrderDelayed(order: Order, referenceDate?: Date): boolean {
+  return matchesRakurakuOverdue(order, referenceDate) && newestOverdueAgeDays(order, referenceDate) < STALE_OVERDUE_DAYS;
 }
 
 /**

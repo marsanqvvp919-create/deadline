@@ -17,6 +17,8 @@ import {
   isOrderDelayed,
   getOverdueCategory,
   RAKURAKU_OVERDUE_LIST_URL,
+  isStaleOverdueOrder,
+  STALE_OVERDUE_DAYS,
   isLineApproaching,
   getLineDelayDays,
   getDelayCounts,
@@ -367,6 +369,9 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
       },
     };
   }, [orders, activeScope, followups, clinicNotes, clinicMasterMap]);
+
+  // 古すぎて納品済みとみなした伝票（一覧には出さず、件名だけ下に書く）
+  const staleOverdue = useMemo(() => orders.filter((o) => isStaleOverdueOrder(o)), [orders]);
 
   // Filtered list of orders
   const filteredOverdueOrders = useMemo(() => {
@@ -727,6 +732,13 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
             </a>
           </div>
         </div>
+
+        {activeScope === 'overdue' && staleOverdue.length > 0 && (
+          <p className="text-[11px] text-slate-500">
+            最長納品予定日から{STALE_OVERDUE_DAYS}日以上たった{staleOverdue.length}件は、納品済みで楽楽販売の直し漏れとみなして表示していません（楽楽販売の①超過には残っています。出荷済みにすると消えます）：
+            {staleOverdue.map((o) => `${o.orderId} ${o.customerName}`).join('、')}
+          </p>
+        )}
 
         {/* Top KPI Cards Row */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 pt-3 border-t border-slate-100">
