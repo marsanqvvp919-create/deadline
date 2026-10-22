@@ -95,8 +95,20 @@ function newestOverdueAgeDays(order: Order, referenceDate?: Date): number {
 }
 
 /** 楽楽販売では①超過に出るが、古すぎるため納品済みとみなして非表示にする伝票 */
+/** 未発注（受注済み）のまま受注日から STALE_OVERDUE_DAYS 日以上たった伝票（立ち消えた受注）も同じく出さない */
+function isAbandonedUnordered(order: Order, referenceDate?: Date): boolean {
+  if (!(order.status || '').trim().startsWith('受注済')) return false;
+  const ordered = startOfDay(new Date((order.orderDate || '').replace(/\//g, '-')));
+  if (isNaN(ordered)) return false;
+  return Math.floor((startOfDay(referenceDate || new Date()) - ordered) / 86400000) >= STALE_OVERDUE_DAYS;
+}
+
+function isStale(order: Order, referenceDate?: Date): boolean {
+  return newestOverdueAgeDays(order, referenceDate) >= STALE_OVERDUE_DAYS || isAbandonedUnordered(order, referenceDate);
+}
+
 export function isStaleOverdueOrder(order: Order, referenceDate?: Date): boolean {
-  return matchesRakurakuOverdue(order, referenceDate) && newestOverdueAgeDays(order, referenceDate) >= STALE_OVERDUE_DAYS;
+  return matchesRakurakuOverdue(order, referenceDate) && isStale(order, referenceDate);
 }
 
 /**
@@ -104,7 +116,7 @@ export function isStaleOverdueOrder(order: Order, referenceDate?: Date): boolean
  * ただし90日以上前に期限が切れたままの伝票は除く）
  */
 export function isOrderDelayed(order: Order, referenceDate?: Date): boolean {
-  return matchesRakurakuOverdue(order, referenceDate) && newestOverdueAgeDays(order, referenceDate) < STALE_OVERDUE_DAYS;
+  return matchesRakurakuOverdue(order, referenceDate) && !isStale(order, referenceDate);
 }
 
 /**

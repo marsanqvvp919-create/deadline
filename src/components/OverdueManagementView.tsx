@@ -735,7 +735,7 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
 
         {activeScope === 'overdue' && staleOverdue.length > 0 && (
           <p className="text-[11px] text-slate-500">
-            最長納品予定日から{STALE_OVERDUE_DAYS}日以上たった{staleOverdue.length}件は、納品済みで楽楽販売の直し漏れとみなして表示していません（楽楽販売の①超過には残っています。出荷済みにすると消えます）：
+            最長納品予定日から{STALE_OVERDUE_DAYS}日以上たった伝票と、未発注のまま受注から{STALE_OVERDUE_DAYS}日以上たった伝票の計{staleOverdue.length}件は、完了・立ち消えとみなして表示していません（楽楽販売の①超過には残っています。出荷済み・キャンセルにすると消えます）：
             {staleOverdue.map((o) => `${o.orderId} ${o.customerName}`).join('、')}
           </p>
         )}

@@ -1398,6 +1398,9 @@ function countOverdueOrders(orders: any[]): number {
   const staleCutoff = new Date(Date.now() + 9 * 60 * 60 * 1000 - 90 * 86400000).toISOString().slice(0, 10);
   return orders.filter((o) => {
     if (excluded.includes((o.status || '').trim())) return false;
+    // 未発注（受注済み）のまま受注から90日以上たった伝票（立ち消えた受注）も数えない
+    const orderDay = String(o.orderDate || '').replace(/\//g, '-').slice(0, 10);
+    if ((o.status || '').trim().startsWith('受注済') && orderDay && orderDay <= staleCutoff) return false;
     const overdue = (o.overdueBasis || [])
       .filter((b: any) => !(b.warehouseShippedDate || b.shippedDate) && b.latestDate)
       .map((b: any) => String(b.latestDate).replace(/\//g, '-').slice(0, 10))
