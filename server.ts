@@ -4236,9 +4236,18 @@ function buildPortalData(g: PortalGroup) {
           customsCleared: !!st.customsCleared,
           arrivedJapan: !!st.arrivedJapan,
         }));
+      // 配送状況は出荷から CARRIER_TRACK_DAYS 日だけ取りに行く。それより前に出荷して、配送中・保留の記録もないものは
+      // お届け済みとして表示する（楽楽販売に配達完了日が入っていない古い出荷が「発送済み」で止まって見えないように）
+      const shippedMs = s.shippedDate && s.shippedDate !== '—' ? Date.parse(String(s.shippedDate).replace(/\//g, '-')) : NaN;
+      const deliveredAssumed =
+        /出荷済|納品済/.test(s.shipStatus || '') &&
+        !Number.isNaN(shippedMs) &&
+        Date.now() - shippedMs > CARRIER_TRACK_DAYS * 86400000 &&
+        !tracking.some((t: any) => t.status === 'in_transit' || t.status === 'exception');
       return {
         shipmentId: s.shipmentId,
         orderId: s.orderId,
+        deliveredAssumed,
         shipStatus: s.shipStatus || '',
         shippedDate: s.shippedDate && s.shippedDate !== '—' ? s.shippedDate : null,
         deliveredDate: s.deliveredDate || null,

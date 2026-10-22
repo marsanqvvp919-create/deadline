@@ -42,6 +42,8 @@ interface PortalShipment {
   shipStatus: string;
   shippedDate: string | null;
   deliveredDate: string | null;
+  /** 発送から日数がたち、配送中の記録もないのでお届け済みとみなしたもの */
+  deliveredAssumed?: boolean;
   courier: string;
   trackingNos: string[];
   tracking: PortalTracking[];
@@ -74,7 +76,7 @@ const STEPS: Step[] = [
 ];
 
 function shipmentStep(s: PortalShipment): number {
-  if (s.deliveredDate || s.tracking.some((t) => t.status === 'delivered')) return 4;
+  if (s.deliveredDate || s.deliveredAssumed || s.tracking.some((t) => t.status === 'delivered')) return 4;
   if (s.tracking.some((t) => t.status === 'in_transit' || t.status === 'exception' || t.arrivedJapan)) return 3;
   if (s.shippedDate || s.shipStatus === '出荷済み') return 2;
   return 1;
@@ -198,7 +200,9 @@ function ShipmentCard({ s }: { s: PortalShipment }) {
         発送日 {day(s.shippedDate)}
         {s.deliveredDate ? `・お届け日 ${day(s.deliveredDate)}` : ''}
       </div>
-      {s.tracking.length > 0 ? (
+      {s.deliveredAssumed && !s.deliveredDate && !s.tracking.some((t) => t.status === 'delivered') ? (
+        s.trackingNos.length > 0 && <div className="text-[11px] text-slate-500">追跡番号：{s.trackingNos.join('、')}</div>
+      ) : s.tracking.length > 0 ? (
         <div className="space-y-1.5">
           {s.tracking.map((t) => (
             <div key={t.trackingNo} className="rounded-md bg-white border border-slate-200 px-2.5 py-1.5">
