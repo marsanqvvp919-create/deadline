@@ -1,4 +1,5 @@
 import React from 'react';
+import { yen } from '../portalData';
 import {
   Clinic,
   OrderRecord,
@@ -213,7 +214,7 @@ export const ClinicPortalView: React.FC<ClinicPortalViewProps> = ({
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-200">
                 <div>
                   <h4 className="text-sm font-bold text-slate-800">
-                    今回の納品予定品目 (合計: {currentOrder.totalQty} 箱/本)
+                    今回の納品予定品目 (合計: {currentOrder.totalQty} 箱/本・{yen(currentOrder.amountTotal)})
                   </h4>
                   <p className="text-xs text-slate-500">
                     シンガポール調達ハブより直接出荷された医療用製剤
@@ -246,8 +247,13 @@ export const ClinicPortalView: React.FC<ClinicPortalViewProps> = ({
                     <div>
                       <span className="font-bold text-slate-900">{item.name}</span>
                     </div>
-                    <div className="font-bold text-blue-700 text-sm">
-                      数量: {item.qty} {item.unit}
+                    <div className="flex items-center gap-3">
+                      <span className="text-[11px] text-slate-500 font-mono">
+                        {yen(item.unitPrice)} × {item.qty} = <b className="text-slate-800">{yen(item.amount)}</b>
+                      </span>
+                      <span className="font-bold text-blue-700 text-sm">
+                        数量: {item.qty} {item.unit}
+                      </span>
                     </div>
                   </div>
                 ))}

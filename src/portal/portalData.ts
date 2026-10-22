@@ -34,6 +34,9 @@ export interface OrderItem {
   unit: string;
   lotNo: string;
   expDate: string;
+  /** 販売単価と金額（数量×単価） */
+  unitPrice?: number | null;
+  amount?: number | null;
 }
 
 export interface TimelineEvent {
@@ -77,6 +80,8 @@ export interface OrderRecord {
   domesticNote: string;
   items: OrderItem[];
   totalQty: number;
+  /** 商品代金の合計（送料・手数料を除く） */
+  amountTotal?: number | null;
   timeline: TimelineEvent[];
 }
 
@@ -317,6 +322,10 @@ const regionOf = (text: string) => REGION.find(([re]) => re.test(text))?.[1] || 
 const hubOf = (airports: string[]): 'NRT' | 'KIX' => (airports.some((a) => /KIX|関西/i.test(a)) ? 'KIX' : 'NRT');
 const HUB_NAME = { NRT: '成田国際空港 (NRT)', KIX: '関西国際空港 (KIX)' };
 const isFee = (name: string) => /送料|手数料/.test(name || '');
+export const yen = (n: number | null | undefined) => (n == null ? '—' : `¥${Math.round(n).toLocaleString('ja-JP')}`);
+const priced = (items: OrderItem[]): OrderItem[] =>
+  items.map((it) => ({ ...it, amount: it.unitPrice != null ? it.unitPrice * it.qty : null }));
+const sumAmount = (items: OrderItem[]) => (items.some((it) => it.amount != null) ? items.reduce((a, it) => a + (it.amount || 0), 0) : null);
 
 /** 出荷1件の今のステップ */
 function shipmentStatus(s: ApiShipment): OrderStatus {
@@ -405,7 +414,16 @@ export function buildPortalModel(data: PortalApiData): PortalModel {
       operator: '株式会社Number1 受注担当',
     };
 
-    const ships = shipsByOrder.get(o.orderId) || [];
+    // 出荷済みの出荷を古い順に、注文数を超えないように数量を割り当てる（出荷数の分からない古い出荷で二重に数えない）
+    const ships = [...(shipsByOrder.get(o.orderId) || [])].sort((a, b) => (a.shippedDate || '9999').localeCompare(b.shippedDate || '9999') || a.shipmentId.localeCompare(b.shipmentId));
+    const leftToShip = new Map(products.map((p) => [p.productName, p.quantity]));
+    const allot = (name: string, qty: number) => {
+      const left = leftToShip.get(name);
+      if (left == null) return qty;
+      const q = Math.max(0, Math.min(qty, left));
+      leftToShip.set(name, left - q);
+      return q;
+    };
     for (const s of ships) {
       const status = shipmentStatus(s);
       const hub = hubOf([s.arrivalAirport || '']);
@@ -444,13 +462,17 @@ export function buildPortalModel(data: PortalApiData): PortalModel {
         const rest = p ? p.quantity - (p.shippedQty ?? 0) : 0;
         return waitingShip && rest > 0 ? Math.min(qty, rest) : qty;
       };
-      const items: OrderItem[] = lines.map((l) => ({
-        name: l.name,
-        qty: l.qty != null ? capWaiting(l.name, l.qty) : fallbackQty(l.name),
-        unit: '本',
-        lotNo: '',
-        expDate: '',
-      }));
+      const priceOf = (name: string) => products.find((x) => x.productName === name)?.unitPrice ?? null;
+      const items: OrderItem[] = priced(
+        lines.map((l) => ({
+          name: l.name,
+          qty: waitingShip ? (l.qty != null ? capWaiting(l.name, l.qty) : fallbackQty(l.name)) : allot(l.name, l.qty ?? fallbackQty(l.name)),
+          unit: '本',
+          lotNo: '',
+          expDate: '',
+          unitPrice: priceOf(l.name),
+        }))
+      );
       const deliveredAt = s.deliveredDate || s.tracking.find((t) => t.deliveredAt)?.deliveredAt || null;
       const eta = s.tracking.find((t) => t.estimatedDelivery)?.estimatedDelivery || latestOf(lines.map((l) => l.productId));
       const latest = [...intl, ...dom].sort((a, b) => (b.lastEventAt || '').localeCompare(a.lastEventAt || ''))[0];
@@ -520,6 +542,7 @@ export function buildPortalModel(data: PortalApiData): PortalModel {
         recipientName: null,
         items,
         totalQty: items.reduce((a, b) => a + (b.qty || 0), 0),
+        amountTotal: sumAmount(items),
         timeline: tl,
       });
     }
@@ -550,7 +573,7 @@ export function buildPortalModel(data: PortalApiData): PortalModel {
         estimatedDelivery: ymd(latestOf(rest.map(({ l }) => l.productId))) || '未定',
         actualDelivery: null,
         recipientName: null,
-        items: rest.map(({ l, qty }) => ({ name: l.productName, qty, unit: '本', lotNo: '', expDate: '' })),
+        items: priced(rest.map(({ l, qty }) => ({ name: l.productName, qty, unit: '本', lotNo: '', expDate: '', unitPrice: l.unitPrice ?? null }))),
         totalQty: rest.reduce((a, b) => a + b.qty, 0),
         timeline: [
           ...(ordered ? [] : [{ step: 'PREPARING' as OrderStatus, time: '—', location: '仕入先・出荷管理', title: '手配中（出荷準備中）', desc: '仕入先へ発注済み・入荷後に発送します', operator: 'Number1 出荷担当' }]),
@@ -560,6 +583,7 @@ export function buildPortalModel(data: PortalApiData): PortalModel {
     }
   }
 
+  records.forEach((r) => (r.amountTotal = sumAmount(r.items)));
   const orders: Record<string, OrderRecord[]> = {};
   records.forEach((r) => (orders[r.batchId] = [...(orders[r.batchId] || []), r]));
   Object.values(orders).forEach((list) => list.sort((a, b) => stepOf(a.status) - stepOf(b.status) || b.orderDate.localeCompare(a.orderDate)));

@@ -153,8 +153,8 @@ function PortalDashboard({ slug, onLogout }: { slug: string; onLogout: () => voi
   );
 
   const handleExportCsv = useCallback(() => {
-    const headers = ['管理番号', '受注ID / 出荷ID', '受注月', '受注日', 'クリニック名', '院長名', '郵便番号', '住所', '電話番号', '入港空港', 'ステータス', '国際便業者', '国際便追跡番号', '国内追跡番号', '商品', '総数量', '到着予定/完了日'];
-    const rows = currentBatchOrders.map((o) => [o.id, o.invoiceNo, o.batchName, o.orderDate, o.clinicName, o.doctor, o.zip, o.address, o.tel, o.hub, o.status, o.intlCarrier, o.fedexTracking, o.sagawaTracking, o.items.map((i) => `${i.name}×${i.qty}`).join(' / '), o.totalQty, o.actualDelivery || o.estimatedDelivery]);
+    const headers = ['管理番号', '受注ID / 出荷ID', '受注月', '受注日', 'クリニック名', '院長名', '郵便番号', '住所', '電話番号', '入港空港', 'ステータス', '国際便業者', '国際便追跡番号', '国内追跡番号', '商品', '総数量', '金額（商品代金）', '到着予定/完了日'];
+    const rows = currentBatchOrders.map((o) => [o.id, o.invoiceNo, o.batchName, o.orderDate, o.clinicName, o.doctor, o.zip, o.address, o.tel, o.hub, o.status, o.intlCarrier, o.fedexTracking, o.sagawaTracking, o.items.map((i) => `${i.name}×${i.qty}`).join(' / '), o.totalQty, o.amountTotal ?? '', o.actualDelivery || o.estimatedDelivery]);
     const csv = '﻿' + [headers, ...rows].map((r) => r.map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
     const link = document.createElement('a');

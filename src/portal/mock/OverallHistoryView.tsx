@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { yen } from '../portalData';
 import {
   OrderRecord,
   CLINICS_MASTER,
@@ -153,12 +154,12 @@ export const OverallHistoryView: React.FC<OverallHistoryViewProps> = ({
 
         <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs flex items-center justify-between">
           <div>
-            <div className="text-xs font-semibold text-slate-500">対象受注月（アーカイブ）</div>
+            <div className="text-xs font-semibold text-slate-500">累計販売金額（商品代金）</div>
             <div className="text-2xl font-black text-slate-900 mt-1 font-mono">
-              {totalBatchesCount} <span className="text-sm font-normal text-slate-500">便</span>
+              {yen(allOrdersList.reduce((acc, o) => acc + (o.amountTotal || 0), 0))}
             </div>
             <div className="text-[11px] text-slate-500 font-medium mt-1">
-              全期間アーカイブ
+              {totalBatchesCount}か月分の合計
             </div>
           </div>
           <div className="w-12 h-12 rounded-xl bg-amber-50 text-amber-700 border border-amber-100 flex items-center justify-center shrink-0">
@@ -197,6 +198,7 @@ export const OverallHistoryView: React.FC<OverallHistoryViewProps> = ({
           {BATCHES_LIST.map((batch) => {
             const batchOrders = batchOrdersMap[batch.id] || [];
             const bUnits = batchOrders.reduce((acc, o) => acc + o.totalQty, 0);
+            const bAmount = batchOrders.reduce((acc, o) => acc + (o.amountTotal || 0), 0);
             const bDelivered = batchOrders.filter((o) => o.status === 'DELIVERED').length;
 
             return (
@@ -229,6 +231,10 @@ export const OverallHistoryView: React.FC<OverallHistoryViewProps> = ({
                   <div>
                     <span className="text-slate-400 text-[10px] block">発注数量</span>
                     <span className="font-bold text-slate-900 text-sm">{bUnits} 箱</span>
+                  </div>
+                  <div className="text-center">
+                    <span className="text-slate-400 text-[10px] block">販売金額</span>
+                    <span className="font-bold text-slate-900 text-sm">{yen(bAmount)}</span>
                   </div>
                   <div className="text-right">
                     <span className="text-slate-400 text-[10px] block">配達状況</span>

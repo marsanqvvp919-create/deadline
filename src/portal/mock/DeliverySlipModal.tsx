@@ -1,4 +1,5 @@
 import React from 'react';
+import { yen } from '../portalData';
 import { OrderRecord } from '../portalData';
 import {
   X,
@@ -160,6 +161,8 @@ export const DeliverySlipModal: React.FC<DeliverySlipModalProps> = ({
                     <th className="py-2 px-2.5 text-center w-10">No.</th>
                     <th className="py-2 px-2.5 text-left">品名</th>
                     <th className="py-2 px-2.5 text-center whitespace-nowrap w-24">数量</th>
+                    <th className="py-2 px-2.5 text-right whitespace-nowrap w-24">単価</th>
+                    <th className="py-2 px-2.5 text-right whitespace-nowrap w-28">金額</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200">
@@ -174,6 +177,8 @@ export const DeliverySlipModal: React.FC<DeliverySlipModalProps> = ({
                       <td className="py-2 px-2.5 text-center font-bold text-slate-900 text-sm">
                         {it.qty} {it.unit}
                       </td>
+                      <td className="py-2 px-2.5 text-right font-mono text-slate-700">{yen(it.unitPrice)}</td>
+                      <td className="py-2 px-2.5 text-right font-mono font-bold text-slate-900">{yen(it.amount)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -184,6 +189,13 @@ export const DeliverySlipModal: React.FC<DeliverySlipModalProps> = ({
                     </td>
                     <td className="py-2 px-2.5 text-center text-blue-700 text-sm font-black">
                       {order.totalQty} 箱
+                    </td>
+                    <td className="py-2 px-2.5 text-right text-slate-700 whitespace-nowrap">合計金額:</td>
+                    <td className="py-2 px-2.5 text-right font-mono text-blue-700 text-sm font-black">{yen(order.amountTotal)}</td>
+                  </tr>
+                  <tr>
+                    <td colSpan={5} className="py-1.5 px-2.5 text-right text-[10px] text-slate-500 font-normal">
+                      ※ 商品代金（送料・手数料を除く）
                     </td>
                   </tr>
                 </tfoot>

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { yen } from '../portalData';
 import {
   OrderRecord,
   STATUS_STEPS,
@@ -201,7 +202,7 @@ export const TrackingTimelineModal: React.FC<TrackingTimelineModalProps> = ({
           {/* Delivery Items Detail */}
           <div className="border border-slate-200 rounded-xl overflow-hidden">
             <div className="bg-slate-100/70 px-4 py-2.5 text-xs font-bold text-slate-700 flex items-center justify-between">
-              <span>同梱商品明細 (計 {order.totalQty} 箱)</span>
+              <span>同梱商品明細 (計 {order.totalQty} 箱・{yen(order.amountTotal)})</span>
               <span className="text-[11px] font-normal text-slate-500">シンガポール供給ハブ梱包</span>
             </div>
             <div className="divide-y divide-slate-100 p-3 bg-white space-y-2">
@@ -210,8 +211,13 @@ export const TrackingTimelineModal: React.FC<TrackingTimelineModalProps> = ({
                   <div>
                     <div className="text-sm font-bold text-slate-800">{item.name}</div>
                   </div>
-                  <div className="text-sm font-bold text-blue-700 self-end sm:self-auto shrink-0 bg-blue-50 px-2.5 py-1 rounded-md border border-blue-200">
-                    数量: {item.qty} {item.unit}
+                  <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
+                    <span className="text-[11px] text-slate-500 font-mono">
+                      {yen(item.unitPrice)} × {item.qty} = <b className="text-slate-800">{yen(item.amount)}</b>
+                    </span>
+                    <span className="text-sm font-bold text-blue-700 bg-blue-50 px-2.5 py-1 rounded-md border border-blue-200">
+                      数量: {item.qty} {item.unit}
+                    </span>
                   </div>
                 </div>
               ))}

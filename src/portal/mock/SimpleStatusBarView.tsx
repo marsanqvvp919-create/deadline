@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { yen } from '../portalData';
 import {
   OrderRecord,
   OrderStatus,
@@ -508,6 +509,11 @@ export const SimpleStatusBarView: React.FC<SimpleStatusBarViewProps> = ({
                       <span className="text-blue-700 font-bold bg-blue-50 px-1.5 py-0.2 rounded border border-blue-200/50">
                         数量: {order.totalQty}箱
                       </span>
+                      {order.amountTotal != null && (
+                        <span className="text-slate-700 font-bold bg-slate-100 px-1.5 py-0.2 rounded border border-slate-200 font-mono">
+                          {yen(order.amountTotal)}
+                        </span>
+                      )}
                     </div>
 
                     {/* Quick Tracking Links */}
