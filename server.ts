@@ -458,9 +458,12 @@ const SHIPMENT_FIELD_MAP: Record<string, string[]> = {
   // 明細の受注ID・商品ID（ご注文管理の明細と結びつけるため）
   lineOrderId: ['受注ID（明細）'],
   lineProductId: ['商品ID'],
+  // 明細の数量（分割出荷では、出荷した明細でも「出荷数」が0や一部のことがある）
+  lineOrderQty: ['発注数量'],
+  lineShipQty: ['出荷数'],
 };
 
-const SHIPMENT_EXACT_ONLY_KEYS = new Set(['shipStatus']);
+const SHIPMENT_EXACT_ONLY_KEYS = new Set(['shipStatus', 'lineOrderQty', 'lineShipQty']);
 
 function transformCsvToShipments(csvText: string): any[] {
   const rows = parseCsv(csvText);
@@ -549,6 +552,8 @@ function transformCsvToShipments(csvText: string): any[] {
       // 明細の受注IDは「000002950-1」のように行番号が付くので外す
       orderId: (getVal(row, 'lineOrderId') || orderId).replace(/-\d+$/, ''),
       productId: getVal(row, 'lineProductId'),
+      orderQty: getVal(row, 'lineOrderQty'),
+      shipQty: getVal(row, 'lineShipQty'),
     };
 
     // クール手配漏れの条件: クール申請・委任状・伝票のどれかが「未」
