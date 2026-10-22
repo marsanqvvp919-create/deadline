@@ -33,6 +33,8 @@ import { RakurakuSchemaModal } from './RakurakuSchemaModal';
 import { CsvImportModal } from './CsvImportModal';
 import { ClinicProductStatusDrawer } from './ClinicProductStatusDrawer';
 import { getSalesRepsList } from '../utils/salesRepMapping';
+import { api as portalApi, Group as PortalGroup } from './PortalAdminView';
+import { ClinicPortalCell, ClinicPortalModal } from './ClinicPortalAccess';
 
 interface ClinicMasterViewProps {
   orders: Order[];
@@ -67,6 +69,21 @@ export const ClinicMasterView: React.FC<ClinicMasterViewProps> = ({
   const [editForm, setEditForm] = useState<Partial<ClinicItem>>({});
   const [clinicToDelete, setClinicToDelete] = useState<ClinicItem | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  // お客様画面（グループごとのURL・パスワード）
+  const [portalGroups, setPortalGroups] = useState<PortalGroup[]>([]);
+  const [portalClinic, setPortalClinic] = useState<ClinicItem | null>(null);
+  const loadPortalGroups = () =>
+    portalApi('/api/portal-admin/groups')
+      .then((j) => setPortalGroups(j.groups || []))
+      .catch(() => {});
+  useEffect(() => {
+    loadPortalGroups();
+  }, []);
+  const portalGroupByClinic = useMemo(() => {
+    const m = new Map<string, PortalGroup>();
+    portalGroups.forEach((g) => g.clinicIds.forEach((id) => !m.has(id) && m.set(id, g)));
+    return m;
+  }, [portalGroups]);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -483,6 +500,7 @@ export const ClinicMasterView: React.FC<ClinicMasterViewProps> = ({
                 <th className="py-3 px-3.5">電話番号</th>
                 <th className="py-3 px-3.5 text-center">商品ステータス進捗</th>
                 <th className="py-3 px-3.5">支払方法</th>
+                <th className="py-3 px-3.5 text-center">お客様画面</th>
                 <th className="py-3 px-3.5 text-center">操作</th>
               </tr>
             </thead>
@@ -588,6 +606,9 @@ export const ClinicMasterView: React.FC<ClinicMasterViewProps> = ({
                       </span>
                     </td>
                     <td className="py-3 px-3.5 text-center whitespace-nowrap">
+                      <ClinicPortalCell group={portalGroupByClinic.get(c.clinicId) || null} onOpen={() => setPortalClinic(c)} />
+                    </td>
+                    <td className="py-3 px-3.5 text-center whitespace-nowrap">
                       <div className="flex items-center justify-center gap-1.5">
                         <button
                           type="button"
@@ -629,6 +650,16 @@ export const ClinicMasterView: React.FC<ClinicMasterViewProps> = ({
           if (found) setSelectedClinic(found);
         }}
       />
+
+      {portalClinic && (
+        <ClinicPortalModal
+          key={portalClinic.clinicId}
+          clinic={portalClinic}
+          group={portalGroupByClinic.get(portalClinic.clinicId) || null}
+          onClose={() => setPortalClinic(null)}
+          onChanged={loadPortalGroups}
+        />
+      )}
 
       {/* Edit Clinic Modal */}
       {isEditModalOpen && (

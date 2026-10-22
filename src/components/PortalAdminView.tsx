@@ -1,12 +1,12 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Building2, Copy, Check, KeyRound, Plus, Search, Trash2, X, ExternalLink, Ban, RotateCcw } from 'lucide-react';
 
-interface ClinicRef {
+export interface ClinicRef {
   clinicId: string;
   clinicName: string;
   address?: string;
 }
-interface Group {
+export interface Group {
   id: string;
   slug: string;
   name: string;
@@ -18,17 +18,17 @@ interface Group {
   lastLoginAt: string | null;
 }
 
-const portalUrl = (slug: string) => `${window.location.origin}/portal/${slug}`;
+export const portalUrl = (slug: string) => `${window.location.origin}/portal/${slug}`;
 const fmt = (iso: string | null) => (iso ? new Date(iso).toLocaleString('ja-JP', { dateStyle: 'short', timeStyle: 'short' }) : '—');
 
-async function api(path: string, init?: RequestInit) {
+export async function api(path: string, init?: RequestInit) {
   const r = await fetch(path, { ...init, headers: { 'Content-Type': 'application/json', ...(init?.headers || {}) } });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(j?.error || `エラー（${r.status}）`);
   return j;
 }
 
-function CopyButton({ text, label }: { text: string; label: string }) {
+export function CopyButton({ text, label }: { text: string; label: string }) {
   const [done, setDone] = useState(false);
   return (
     <button
@@ -47,7 +47,7 @@ function CopyButton({ text, label }: { text: string; label: string }) {
 }
 
 /** 院を検索して選ぶ */
-function ClinicPicker({ selected, onChange }: { selected: ClinicRef[]; onChange: (v: ClinicRef[]) => void }) {
+export function ClinicPicker({ selected, onChange }: { selected: ClinicRef[]; onChange: (v: ClinicRef[]) => void }) {
   const [q, setQ] = useState('');
   const [hits, setHits] = useState<ClinicRef[]>([]);
   useEffect(() => {

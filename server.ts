@@ -4076,6 +4076,14 @@ const newPortalPassword = () => {
   const p = randomFrom('ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789', 12);
   return `${p.slice(0, 4)}-${p.slice(4, 8)}-${p.slice(8)}`;
 };
+// 社内で決めたパスワード（8〜64文字）があればそれを、なければ自動で作る
+const portalPasswordFromBody = (body: any): { password?: string; error?: string } => {
+  const v = typeof body?.password === 'string' ? body.password.trim() : '';
+  if (!v) return { password: newPortalPassword() };
+  if (v.length < 8) return { error: 'パスワードは8文字以上にしてください' };
+  if (v.length > 64) return { error: 'パスワードは64文字以内にしてください' };
+  return { password: v };
+};
 const portalGroupView = (g: PortalGroup) => ({
   id: g.id,
   slug: g.slug,
@@ -4109,7 +4117,8 @@ app.post('/api/portal-admin/groups', async (req, res) => {
   const clinicIds = cleanClinicIds(req.body?.clinicIds);
   if (!name) return res.status(400).json({ error: 'グループ名を入れてください' });
   if (clinicIds.length === 0) return res.status(400).json({ error: '院を1つ以上選んでください' });
-  const password = newPortalPassword();
+  const { password, error } = portalPasswordFromBody(req.body);
+  if (!password) return res.status(400).json({ error });
   const salt = crypto.randomBytes(16).toString('hex');
   const now = new Date().toISOString();
   const g: PortalGroup = {
@@ -4146,7 +4155,8 @@ app.post('/api/portal-admin/groups/:id/reset-password', async (req, res) => {
   await loadPortalGroups();
   const g = portalGroups.find((x) => x.id === req.params.id);
   if (!g) return res.status(404).json({ error: 'グループが見つかりません' });
-  const password = newPortalPassword();
+  const { password, error } = portalPasswordFromBody(req.body);
+  if (!password) return res.status(400).json({ error });
   g.salt = crypto.randomBytes(16).toString('hex');
   g.hash = hashPassword(password, g.salt);
   g.pwVersion = (g.pwVersion || 1) + 1;
