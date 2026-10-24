@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { InvoicePdfButtons } from '../invoice/InvoiceDialog';
 import { CheckCircle2, ClipboardList, History, Loader2, Lock, LogOut, PackageCheck, PackageMinus, RefreshCw, Search, Send, Truck, Warehouse } from 'lucide-react';
 
 // 倉庫の担当者の画面（/warehouse/:slug）。自分の倉庫の入荷予定だけを見て、届いた実数を入れて承認・出庫する。
@@ -44,6 +45,7 @@ interface Instruction {
   trackingNos: string[];
   createdAt: string;
   shippedAt?: string;
+  invoiceNo?: string;
   destination: { name: string; nameEn: string; director: string; postalCode: string; address: string; addressEn: string; phone: string };
 }
 interface Move {
@@ -303,6 +305,14 @@ function InstructionCard({ si, slug, onDone }: { si: Instruction; slug: string; 
         </tbody>
       </table>
       {si.memo && <div className="text-[11px] text-slate-600">メモ / Note: {si.memo}</div>}
+      {si.invoiceNo ? (
+        <div className="flex flex-wrap items-center gap-2 text-[11px]">
+          <span className="font-bold text-indigo-800">Invoice {si.invoiceNo}</span>
+          <InvoicePdfButtons source={`/api/warehouse/invoice/${si.id}?slug=${slug}`} />
+        </div>
+      ) : (
+        si.status === 'open' && <div className="text-[11px] text-amber-700">インボイスは本社で作成中です / Invoice will be issued by our office.</div>
+      )}
       {si.status === 'open' ? (
         <div className="space-y-2">
           <div className="flex flex-wrap gap-2">

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Boxes, CheckCircle2, Copy, Check, ExternalLink, KeyRound, PackageCheck, RefreshCw, Search, Truck, Upload, X, Ban, RotateCcw, History, Warehouse, ClipboardList, Send } from 'lucide-react';
 import { PasswordChooser, passwordOk } from './ClinicPortalAccess';
 import { Order } from '../types';
+import { InvoiceDialog, InvoicePdfButtons } from '../invoice/InvoiceDialog';
 
 // 入荷・在庫（国内倉庫・韓国倉庫・シンガポール倉庫）。楽楽販売の発注（発注済み）から入荷予定を作り、
 // 入荷先倉庫・配送方法・追跡番号・数量をここで入れる。倉庫の担当者が実数を入れて承認すると在庫に加わる（国内倉庫は社内で承認）。
@@ -91,6 +92,7 @@ interface Instruction {
   createdAt: string;
   shippedAt?: string;
   shippedBy?: string;
+  invoiceNo?: string;
   destination: { name: string; director: string; postalCode: string; address: string; phone: string };
 }
 interface Move {
@@ -649,6 +651,7 @@ function AllocationPanel({ data, onSaved }: { data: InventoryData; onSaved: () =
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [ship, setShip] = useState<{ id: string; carrier: string; tracking: string } | null>(null);
+  const [invoiceFor, setInvoiceFor] = useState<string | null>(null);
   const rowKey = (c: Candidate) => `${c.orderId}|${c.productId}`;
 
   const loadCands = useCallback(() => {
@@ -860,6 +863,18 @@ function AllocationPanel({ data, onSaved }: { data: InventoryData; onSaved: () =
                 )}
               </div>
               <div className="text-slate-600">{i.lines.map((l) => `${l.productName} × ${l.qty}`).join('、')}</div>
+              <div className="flex flex-wrap items-center gap-2">
+                {i.invoiceNo ? (
+                  <>
+                    <span className="text-[11px] font-bold text-indigo-800">インボイス {i.invoiceNo}</span>
+                    <InvoicePdfButtons source={`/api/invoice/doc/${i.id}`} />
+                  </>
+                ) : (
+                  <button onClick={() => setInvoiceFor(i.id)} className="rounded border border-indigo-300 bg-white px-2.5 py-1 text-[11px] font-bold text-indigo-700 hover:bg-indigo-50">
+                    インボイスを作成
+                  </button>
+                )}
+              </div>
               <div className="text-[11px] text-slate-500">
                 届け先：{i.destination.name}
                 {i.destination.postalCode && ` 〒${i.destination.postalCode}`} {i.destination.address} {i.destination.phone && `TEL ${i.destination.phone}`}
@@ -885,6 +900,7 @@ function AllocationPanel({ data, onSaved }: { data: InventoryData; onSaved: () =
           ))}
         </div>
       </section>
+      {invoiceFor && <InvoiceDialog instructionId={invoiceFor} onClose={() => setInvoiceFor(null)} onIssued={onSaved} />}
     </div>
   );
 }

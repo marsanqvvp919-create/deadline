@@ -9,6 +9,7 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { Storage } from '@google-cloud/storage';
+import { Firestore } from '@google-cloud/firestore';
 import { GoogleAuth } from 'google-auth-library';
 import { parseSheetRows, findUnmatched, isTargetRow, trackingDigits, BULK_ORDER_GROUPS } from './unmatchedShipments';
 import { buildImportPreview } from './sheetImport';
@@ -4441,6 +4442,8 @@ interface ShipInstruction {
   createdAt: string;
   shippedAt?: string;
   shippedBy?: 'staff' | 'warehouse';
+  invoiceNo?: string; // INVOICEアプリの発送データに保存したインボイス番号
+  invoiceDocId?: string;
 }
 interface WarehouseAccess {
   slug: string;
@@ -5145,6 +5148,223 @@ app.post('/api/inventory/outbound', async (req, res) => {
   res.json({ stock: stockList(warehouse) });
 });
 
+// --- インボイス（INVOICEアプリと同じ Firestore のマスタ・発送データを使う）
+// 製剤（インボイス単価・HSコード・原産国・重量）・クリニック（英語名・英語住所）・倉庫（発送元）・設定はINVOICEアプリで管理する。
+// 出荷指示からインボイスを作ると、INVOICEアプリの発送データ（shipments）にも同じ番号体系（INV-日付-連番）で入る
+let invoiceDbInstance: Firestore | null = null;
+const invoiceDb = () =>
+  (invoiceDbInstance ||= new Firestore({
+    projectId: process.env.INVOICE_FIRESTORE_PROJECT || 'gen-lang-client-0380911225',
+    databaseId: process.env.INVOICE_FIRESTORE_DATABASE || 'ai-studio-8e29c8d6-3916-46d7-97f3-727e186cd1e1',
+  }));
+let invoiceMasters: { at: number; products: any[]; clinics: any[]; warehouses: any[]; settings: any } | null = null;
+async function loadInvoiceMasters(force = false) {
+  if (!force && invoiceMasters && Date.now() - invoiceMasters.at < 5 * 60 * 1000) return invoiceMasters;
+  const db = invoiceDb();
+  const [p, c, w, s] = await Promise.all([db.collection('products').get(), db.collection('clinics').get(), db.collection('warehouses').get(), db.doc('systemSettings/default').get()]);
+  invoiceMasters = {
+    at: Date.now(),
+    products: p.docs.map((d) => ({ id: d.id, ...d.data() })),
+    clinics: c.docs.map((d) => ({ id: d.id, ...d.data() })),
+    warehouses: w.docs.map((d) => ({ id: d.id, ...d.data() })),
+    settings: s.exists ? s.data() : {},
+  };
+  return invoiceMasters;
+}
+const normName = (v: any) =>
+  String(v || '')
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/[\s　・()（）\-_/.,、。'"’]/g, '');
+const WAREHOUSE_HINT: Record<WarehouseId, RegExp> = { domestic: /japan|日本|国内|^jp$/i, korea: /korea|韓国|^kr$/i, singapore: /singapore|シンガポール|^sg$/i };
+function matchInvoiceWarehouse(w: WarehouseId, list: any[]) {
+  const re = WAREHOUSE_HINT[w];
+  return list.find((x) => re.test(String(x.country || '')) || re.test(String(x.name || '')) || re.test(String(x.nameEn || ''))) || list.find((x) => x.isDefault) || null;
+}
+function matchInvoiceClinic(clinicId: string, names: string[], list: any[]) {
+  const byId = list.find((c) => c.clinicId && String(c.clinicId) === clinicId);
+  if (byId) return byId;
+  const wanted = names.map(normName).filter(Boolean);
+  return list.find((c) => wanted.includes(normName(c.name)) || wanted.includes(normName(c.nameEn))) || null;
+}
+function matchInvoiceProduct(name: string, list: any[]) {
+  const n = normName(name);
+  return list.find((p) => p.active !== false && (normName(p.nameJa) === n || normName(p.nameEn) === n)) || null;
+}
+/** INVOICEアプリと同じ形の発送データ（インボイス番号は発行時に付ける） */
+function buildInvoiceShipment(si: ShipInstruction, m: NonNullable<typeof invoiceMasters>, opts: { productMap?: Record<string, string>; clinicDocId?: string; date: string }) {
+  const problems: string[] = [];
+  const order = ((serverRakurakuStore.orders?.orders || []) as any[]).find((o) => o.orderId === si.orderId);
+  const rk = masterClinicById(si.clinicId) as any;
+  const clinic = (opts.clinicDocId && m.clinics.find((c) => c.id === opts.clinicDocId)) || matchInvoiceClinic(si.clinicId, [si.clinicName, rk?.clinicName, order?.customerName, rk?.clinicNameEn].filter(Boolean), m.clinics);
+  if (!clinic) problems.push(`クリニック「${si.clinicName}」がインボイスのクリニックマスタにありません`);
+  else {
+    const miss = [!clinic.nameEn && 'クリニック名英語表記', !(clinic.doctorNameEn || clinic.contactPersonEn) && '医師名英語表記', !clinic.phone && '電話番号', !clinic.addressEn && 'インボイス用英語住所'].filter(Boolean);
+    if (miss.length) problems.push(`クリニック「${clinic.name}」のマスタに未入力：${miss.join('・')}`);
+  }
+  const warehouse = matchInvoiceWarehouse(si.warehouse, m.warehouses);
+  if (!warehouse) problems.push(`発送元の倉庫（${WAREHOUSES[si.warehouse]}）がインボイスの倉庫マスタにありません`);
+  const unmatched: { index: number; productName: string }[] = [];
+  const items = si.lines.map((l, i) => {
+    const p = (opts.productMap?.[String(i)] && m.products.find((x) => x.id === opts.productMap![String(i)])) || matchInvoiceProduct(l.productName, m.products);
+    if (!p) {
+      unmatched.push({ index: i, productName: l.productName });
+      return null;
+    }
+    const unitPrice = typeof p.invoicePrice === 'number' && p.invoicePrice > 0 ? p.invoicePrice : Number(p.purchasePrice) || 0;
+    if (!unitPrice) problems.push(`「${p.nameJa || p.nameEn}」のインボイス単価が0です`);
+    if (!p.hsCode) problems.push(`「${p.nameJa || p.nameEn}」のHSコードが未入力です`);
+    const weight = Number(p.weight) || 0;
+    return {
+      productId: p.id,
+      sku: p.sku || '',
+      nameEn: p.nameEn || p.nameJa || l.productName,
+      nameJa: p.nameJa || l.productName,
+      lotNo: p.lotNo || '',
+      expiryDate: p.expiryDate || '',
+      qty: l.qty,
+      unit: p.unit || 'vial',
+      unitPrice,
+      amount: unitPrice * l.qty,
+      weight,
+      totalWeight: Math.round(weight * l.qty * 1000) / 1000,
+      hsCode: p.hsCode || '',
+      countryOfOrigin: p.countryOfOrigin || '',
+    };
+  });
+  if (unmatched.length) problems.push(`インボイスの製剤マスタで見つからない商品：${unmatched.map((u) => u.productName).join('、')}`);
+  const okItems = items.filter(Boolean) as any[];
+  const total = okItems.reduce((n, x) => n + x.amount, 0);
+  const nowIso = new Date().toISOString();
+  const shipment = {
+    date: opts.date,
+    warehouseId: warehouse?.id || '',
+    warehouseSnapshot: warehouse || {},
+    clinicId: clinic?.id || '',
+    clinicSnapshot: clinic || { name: si.clinicName, nameEn: '', doctorName: '', doctorNameEn: '', address: '', addressEn: '', phone: '', zip: '' },
+    currency: m.settings?.currency || 'JPY',
+    courier: si.carrier || 'DHL Express',
+    trackingNo: si.trackingNos.join(', '),
+    shippingCost: 0,
+    insurance: 0,
+    otherCharges: 0,
+    notes: `納期管理システムの出荷指示 ${si.id}（受注 ${si.orderId}）から作成`,
+    items: okItems,
+    totalQty: okItems.reduce((n, x) => n + x.qty, 0),
+    totalWeight: Math.round(okItems.reduce((n, x) => n + x.totalWeight, 0) * 1000) / 1000,
+    totalItemsAmount: total,
+    totalInvoiceAmount: total,
+    status: 'CONFIRMED',
+    createdBy: 'deadline',
+    createdByName: '納期管理システム',
+    updatedBy: 'deadline',
+    updatedByName: '納期管理システム',
+    createdAt: nowIso,
+    updatedAt: nowIso,
+    history: [{ date: nowIso.substring(0, 16).replace('T', ' '), user: '納期管理システム', action: 'CREATED_FROM_DEADLINE', detail: `出荷指示 ${si.id} からインボイス作成（${okItems.length}品目, 合計${okItems.reduce((n, x) => n + x.qty, 0)}点）` }],
+  };
+  return { shipment, problems, unmatched, clinic, warehouse };
+}
+const jstToday = () => new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+
+// インボイスのマスタにつながるかの確認（件数と倉庫だけ）
+app.get('/api/invoice/status', async (_req, res) => {
+  try {
+    const m = await loadInvoiceMasters(true);
+    res.json({
+      ok: true,
+      products: m.products.length,
+      clinics: m.clinics.length,
+      warehouses: m.warehouses.map((w) => ({ name: w.name, nameEn: w.nameEn, country: w.country, isDefault: !!w.isDefault })),
+      match: { domestic: matchInvoiceWarehouse('domestic', m.warehouses)?.name || null, korea: matchInvoiceWarehouse('korea', m.warehouses)?.name || null, singapore: matchInvoiceWarehouse('singapore', m.warehouses)?.name || null },
+      prefix: m.settings?.prefix || 'INV-',
+      currency: m.settings?.currency || 'JPY',
+    });
+  } catch (e: any) {
+    res.status(500).json({ ok: false, error: e?.message || String(e) });
+  }
+});
+
+// インボイスの下書き（マスタとの突き合わせ結果）
+app.get('/api/invoice/draft/:siId', async (req, res) => {
+  await loadInventory();
+  const si = inventory.instructions.find((x) => x.id === req.params.siId);
+  if (!si) return res.status(404).json({ error: '出荷指示が見つかりません' });
+  try {
+    const m = await loadInvoiceMasters(req.query.refresh === '1');
+    const d = buildInvoiceShipment(si, m, { date: jstToday() });
+    res.json({
+      issued: si.invoiceNo ? { invoiceNo: si.invoiceNo, docId: si.invoiceDocId } : null,
+      draft: d.shipment,
+      problems: d.problems,
+      unmatched: d.unmatched,
+      productOptions: m.products.filter((p) => p.active !== false).map((p) => ({ id: p.id, nameJa: p.nameJa || '', nameEn: p.nameEn || '', sku: p.sku || '', invoicePrice: p.invoicePrice ?? null })),
+      clinicOptions: m.clinics.filter((c) => c.active !== false).map((c) => ({ id: c.id, name: c.name || '', nameEn: c.nameEn || '' })),
+    });
+  } catch (e: any) {
+    console.error('[Invoice] draft failed:', e?.message || e);
+    res.status(500).json({ error: `インボイスのデータベースに接続できませんでした（${e?.message || e}）` });
+  }
+});
+
+// インボイスの発行：番号（INV-日付-連番）を付けて INVOICEアプリの発送データに保存する
+app.post('/api/invoice/issue/:siId', async (req, res) => {
+  await loadInventory();
+  const si = inventory.instructions.find((x) => x.id === req.params.siId);
+  if (!si) return res.status(404).json({ error: '出荷指示が見つかりません' });
+  if (si.invoiceNo) return res.status(400).json({ error: `すでにインボイス ${si.invoiceNo} を発行済みです` });
+  try {
+    const m = await loadInvoiceMasters(true);
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.body?.date || '')) ? String(req.body.date) : jstToday();
+    const d = buildInvoiceShipment(si, m, { date, productMap: req.body?.productMap || {}, clinicDocId: req.body?.clinicDocId });
+    if (d.unmatched.length || !d.clinic || !d.warehouse) return res.status(400).json({ error: d.problems.join(' / ') });
+    const db = invoiceDb();
+    const prefix = m.settings?.prefix || 'INV-';
+    const digits = date.replace(/-/g, '');
+    const result = await db.runTransaction(async (tx) => {
+      const same = await tx.get(db.collection('shipments').where('date', '==', date));
+      let maxSeq = 0;
+      same.docs.forEach((doc) => {
+        const mm = String(doc.get('invoiceNo') || '').match(/[-_/](\d+)$/);
+        if (mm) maxSeq = Math.max(maxSeq, parseInt(mm[1], 10));
+      });
+      maxSeq = Math.max(maxSeq, same.size);
+      const invoiceNo = `${prefix}${digits}-${String(maxSeq + 1).padStart(3, '0')}`;
+      const ref = db.collection('shipments').doc();
+      tx.set(ref, { ...d.shipment, invoiceNo });
+      return { invoiceNo, docId: ref.id };
+    });
+    si.invoiceNo = result.invoiceNo;
+    si.invoiceDocId = result.docId;
+    await saveInventory();
+    res.json({ invoiceNo: result.invoiceNo, shipment: { id: result.docId, ...d.shipment, invoiceNo: result.invoiceNo }, settings: m.settings });
+  } catch (e: any) {
+    console.error('[Invoice] issue failed:', e?.message || e);
+    res.status(500).json({ error: `インボイスを発行できませんでした（${e?.message || e}）` });
+  }
+});
+
+/** 発行済みインボイスの発送データ（PDFを作り直す用） */
+async function issuedInvoice(si: ShipInstruction) {
+  if (!si.invoiceDocId) return null;
+  const db = invoiceDb();
+  const [doc, settings] = await Promise.all([db.collection('shipments').doc(si.invoiceDocId).get(), db.doc('systemSettings/default').get()]);
+  if (!doc.exists) return null;
+  return { shipment: { id: doc.id, ...doc.data() }, settings: settings.exists ? settings.data() : {} };
+}
+app.get('/api/invoice/doc/:siId', async (req, res) => {
+  await loadInventory();
+  const si = inventory.instructions.find((x) => x.id === req.params.siId);
+  if (!si) return res.status(404).json({ error: '出荷指示が見つかりません' });
+  try {
+    const r = await issuedInvoice(si);
+    if (!r) return res.status(404).json({ error: 'インボイスはまだ発行していません' });
+    res.json(r);
+  } catch (e: any) {
+    res.status(500).json({ error: `インボイスを読み込めませんでした（${e?.message || e}）` });
+  }
+});
+
 // 手元の動作確認用：発注管理のCSVを渡して入荷予定に取り込む（本番では使えない）
 if (process.env.NODE_ENV !== 'production') {
   app.post('/api/inventory/dev-import-po', async (req, res) => {
@@ -5229,6 +5449,20 @@ app.post('/api/warehouse/inbound/:poId/receive', async (req, res) => {
   if (err) return res.status(400).json({ error: err });
   await saveInventory();
   res.json({ inbound: inboundView(rec, true), stock: stockList(w) });
+});
+// 発行済みインボイス（倉庫の担当者が印刷して荷物に入れる）
+app.get('/api/warehouse/invoice/:id', async (req, res) => {
+  const w = await warehouseFromRequest(req);
+  if (!w) return res.status(401).json({ error: 'login_required' });
+  const si = inventory.instructions.find((x) => x.id === req.params.id && x.warehouse === w);
+  if (!si) return res.status(404).json({ error: '出荷指示が見つかりません / Not found' });
+  try {
+    const r = await issuedInvoice(si);
+    if (!r) return res.status(404).json({ error: 'インボイスはまだ発行されていません / Invoice not issued yet' });
+    res.json(r);
+  } catch (e: any) {
+    res.status(500).json({ error: `インボイスを読み込めませんでした / Could not load the invoice (${e?.message || e})` });
+  }
 });
 // 出荷指示の出荷完了（倉庫の担当者）
 app.post('/api/warehouse/instructions/:id/ship', async (req, res) => {
