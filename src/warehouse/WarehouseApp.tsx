@@ -46,6 +46,9 @@ interface Instruction {
   createdAt: string;
   shippedAt?: string;
   invoiceNo?: string;
+  awbNo?: string;
+  awbCarrier?: string;
+  awbLabel?: boolean;
   destination: { name: string; nameEn: string; director: string; postalCode: string; address: string; addressEn: string; phone: string };
 }
 interface Move {
@@ -244,8 +247,8 @@ function InboundCard({ rec, slug, onDone }: { rec: Inbound; slug: string; onDone
 }
 
 function InstructionCard({ si, slug, onDone }: { si: Instruction; slug: string; onDone: () => void }) {
-  const [carrier, setCarrier] = useState('');
-  const [tracking, setTracking] = useState('');
+  const [carrier, setCarrier] = useState(si.awbCarrier || '');
+  const [tracking, setTracking] = useState(si.awbNo || '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const d = si.destination;
@@ -305,6 +308,18 @@ function InstructionCard({ si, slug, onDone }: { si: Instruction; slug: string; 
         </tbody>
       </table>
       {si.memo && <div className="text-[11px] text-slate-600">メモ / Note: {si.memo}</div>}
+      {si.awbNo && (
+        <div className="flex flex-wrap items-center gap-2 text-[11px]">
+          <span className="font-bold text-amber-800">
+            AWB {si.awbCarrier} {si.awbNo}
+          </span>
+          {si.awbLabel && (
+            <a href={`/api/warehouse/awb-label/${si.id}?slug=${slug}`} target="_blank" rel="noreferrer" className="rounded border border-amber-300 bg-amber-50 px-2 py-1 font-bold text-amber-800">
+              ラベルを印刷 / Print label
+            </a>
+          )}
+        </div>
+      )}
       {si.invoiceNo ? (
         <div className="flex flex-wrap items-center gap-2 text-[11px]">
           <span className="font-bold text-indigo-800">Invoice {si.invoiceNo}</span>

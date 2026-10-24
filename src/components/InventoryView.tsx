@@ -3,6 +3,7 @@ import { Boxes, CheckCircle2, Copy, Check, ExternalLink, KeyRound, PackageCheck,
 import { PasswordChooser, passwordOk } from './ClinicPortalAccess';
 import { Order } from '../types';
 import { InvoiceDialog, InvoicePdfButtons } from '../invoice/InvoiceDialog';
+import { AwbDialog, DhlSettings } from '../invoice/AwbDialog';
 
 // 入荷・在庫（国内倉庫・韓国倉庫・シンガポール倉庫）。楽楽販売の発注（発注済み）から入荷予定を作り、
 // 入荷先倉庫・配送方法・追跡番号・数量をここで入れる。倉庫の担当者が実数を入れて承認すると在庫に加わる（国内倉庫は社内で承認）。
@@ -93,6 +94,11 @@ interface Instruction {
   shippedAt?: string;
   shippedBy?: string;
   invoiceNo?: string;
+  awbNo?: string;
+  awbCarrier?: string;
+  awbMode?: 'api' | 'manual';
+  awbLabel?: boolean;
+  delivery?: { code: string; label: string } | null;
   destination: { name: string; director: string; postalCode: string; address: string; phone: string };
 }
 interface Move {
@@ -644,14 +650,194 @@ function WarehouseAccessPanel({ data, onSaved }: { data: InventoryData; onSaved:
 }
 
 /** 引当と出荷指示：未発注の明細を在庫から引き当て、倉庫ごとに出荷指示を出す */
-function AllocationPanel({ data, onSaved }: { data: InventoryData; onSaved: () => void }) {
+/** 出荷指示のステータス：指示 → インボイス → AWB → 出荷 → 配達 */
+function InstructionBoard({ instructions, onSaved }: { instructions: Instruction[]; onSaved: () => void }) {
+  const [filter, setFilter] = useState<'open' | 'shipped' | 'all'>('open');
+  const [wh, setWh] = useState<'all' | WarehouseId>('all');
+  const [invoiceFor, setInvoiceFor] = useState<string | null>(null);
+  const [awbFor, setAwbFor] = useState<string | null>(null);
+  const [ship, setShip] = useState<{ id: string; carrier: string; tracking: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const run = async (fn: () => Promise<any>) => {
+    setBusy(true);
+    setError('');
+    try {
+      await fn();
+      onSaved();
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const list = instructions.filter((i) => (filter === 'all' || i.status === filter) && (wh === 'all' || i.warehouse === wh));
+  const count = (st: string) => instructions.filter((i) => i.status === st).length;
+  const step = (done: boolean, label: string, sub?: React.ReactNode, warn = false) => (
+    <div className={`rounded-lg border px-2 py-1 min-w-24 ${done ? 'border-emerald-200 bg-emerald-50' : warn ? 'border-amber-300 bg-amber-50' : 'border-slate-200 bg-slate-50'}`}>
+      <div className={`text-[10px] font-bold ${done ? 'text-emerald-700' : warn ? 'text-amber-800' : 'text-slate-400'}`}>
+        {done ? '✓ ' : ''}
+        {label}
+      </div>
+      {sub && <div className="text-[11px] text-slate-700">{sub}</div>}
+    </div>
+  );
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white">
+      <div className="p-3 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <div className="font-bold text-sm text-slate-900">出荷指示のステータス</div>
+          <div className="text-[11px] text-slate-500">指示 → インボイス → AWB → 出荷 → 配達。国内倉庫の国内発送はインボイス・AWBが要りません。楽楽販売の出荷管理への入力は別途お願いします。</div>
+        </div>
+        <div className="flex flex-wrap gap-1.5 text-xs">
+          {([['open', `出荷待ち（${count('open')}）`], ['shipped', `出荷済み（${count('shipped')}）`], ['all', 'すべて']] as const).map(([id, label]) => (
+            <button key={id} onClick={() => setFilter(id)} className={`rounded-lg border px-2.5 py-1 font-bold ${filter === id ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-slate-200 text-slate-700'}`}>
+              {label}
+            </button>
+          ))}
+          <select value={wh} onChange={(e) => setWh(e.target.value as any)} className="rounded-lg border border-slate-200 px-2 py-1">
+            <option value="all">すべての倉庫</option>
+            {WH_IDS.map((w) => (
+              <option key={w} value={w}>
+                {WH_NAME[w]}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+      {error && <div className="m-3 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs px-3 py-2">{error}</div>}
+      <div className="divide-y divide-slate-100">
+        {list.length === 0 && <div className="p-6 text-center text-xs text-slate-400">該当する出荷指示はありません</div>}
+        {list.map((i) => {
+          const intl = i.warehouse !== 'domestic';
+          return (
+            <div key={i.id} className={`p-3 text-xs space-y-2 ${i.status === 'shipped' ? 'bg-slate-50/50' : ''}`}>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="font-bold">
+                  <span className="font-mono text-indigo-700">{i.id}</span>
+                  <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5">{i.warehouseName}</span>
+                  <span className="ml-2">
+                    {i.orderId} {i.clinicName}
+                  </span>
+                </div>
+                {i.status === 'open' && (
+                  <button disabled={busy} onClick={() => confirm('出荷指示を取り消して、引当済みに戻します。よろしいですか？') && run(() => api(`/api/inventory/instructions/${i.id}/cancel`, { method: 'POST' }))} className="text-[11px] text-slate-500 hover:text-rose-600">
+                    指示を取り消す
+                  </button>
+                )}
+              </div>
+              <div className="text-slate-600">{i.lines.map((l) => `${l.productName} × ${l.qty}`).join('、')}</div>
+              <div className="flex flex-wrap items-stretch gap-1.5">
+                {step(true, '出荷指示', fmt(i.createdAt))}
+                {intl
+                  ? step(
+                      !!i.invoiceNo,
+                      'インボイス',
+                      i.invoiceNo ? (
+                        <span className="flex flex-col gap-1">
+                          <span className="font-mono">{i.invoiceNo}</span>
+                          <InvoicePdfButtons source={`/api/invoice/doc/${i.id}`} label={false} />
+                        </span>
+                      ) : (
+                        <button onClick={() => setInvoiceFor(i.id)} className="mt-0.5 rounded bg-indigo-600 text-white px-2 py-0.5 font-bold">
+                          作成する
+                        </button>
+                      ),
+                      !i.invoiceNo
+                    )
+                  : step(true, 'インボイス', <span className="text-slate-400">国内のため不要</span>)}
+                {intl
+                  ? step(
+                      !!i.awbNo,
+                      'AWB',
+                      i.awbNo ? (
+                        <span className="flex flex-col gap-0.5">
+                          <span className="font-mono">
+                            {i.awbCarrier} {i.awbNo}
+                          </span>
+                          {i.awbLabel && (
+                            <a href={`/api/awb/label/${i.id}`} target="_blank" rel="noreferrer" className="text-indigo-700 font-bold underline">
+                              ラベルPDF
+                            </a>
+                          )}
+                          {i.awbMode === 'manual' && i.status === 'open' && (
+                            <button onClick={() => confirm('AWB番号を消しますか？') && run(() => api(`/api/awb/manual/${i.id}`, { method: 'POST', body: JSON.stringify({ awbNo: '' }) }))} className="text-[10px] text-slate-400 text-left">
+                              番号を消す
+                            </button>
+                          )}
+                        </span>
+                      ) : i.invoiceNo ? (
+                        <button onClick={() => setAwbFor(i.id)} className="mt-0.5 rounded bg-amber-600 text-white px-2 py-0.5 font-bold">
+                          作成する
+                        </button>
+                      ) : (
+                        <span className="text-slate-400">インボイスの後</span>
+                      ),
+                      !!i.invoiceNo && !i.awbNo
+                    )
+                  : step(true, 'AWB', <span className="text-slate-400">国内のため不要</span>)}
+                {step(
+                  i.status === 'shipped',
+                  '出荷',
+                  i.status === 'shipped' ? (
+                    <span>
+                      {fmt(i.shippedAt || null)}
+                      {i.shippedBy === 'warehouse' ? '（倉庫）' : '（社内）'}
+                    </span>
+                  ) : i.warehouse === 'domestic' ? (
+                    <button onClick={() => setShip({ id: i.id, carrier: '', tracking: '' })} className="mt-0.5 rounded bg-emerald-600 text-white px-2 py-0.5 font-bold">
+                      出荷完了にする
+                    </button>
+                  ) : (
+                    <span className="flex flex-col gap-0.5">
+                      <span className="text-slate-500">倉庫の出荷待ち</span>
+                      <button onClick={() => setShip({ id: i.id, carrier: i.awbCarrier || '', tracking: i.awbNo || '' })} className="text-[10px] text-slate-400 text-left">
+                        社内で完了にする
+                      </button>
+                    </span>
+                  ),
+                  i.status === 'open' && (!intl || (!!i.invoiceNo && !!i.awbNo))
+                )}
+                {step(
+                  i.delivery?.code === 'delivered',
+                  '配達',
+                  i.delivery ? <span className={i.delivery.code === 'exception' ? 'text-rose-700 font-bold' : ''}>{i.delivery.label}</span> : <span className="text-slate-400">{i.status === 'shipped' ? '確認中' : '—'}</span>,
+                  i.delivery?.code === 'exception'
+                )}
+              </div>
+              <div className="text-[11px] text-slate-500">
+                届け先：{i.destination.name}
+                {i.destination.postalCode && ` 〒${i.destination.postalCode}`} {i.destination.address} {i.destination.phone && `TEL ${i.destination.phone}`}
+                {i.trackingNos.length > 0 && <span className="ml-2 font-mono text-slate-700">追跡 {i.carrier} {i.trackingNos.join('、')}</span>}
+              </div>
+              {ship?.id === i.id && (
+                <div className="flex flex-wrap items-center gap-2 rounded bg-emerald-50 border border-emerald-200 p-2">
+                  <input value={ship.carrier} onChange={(e) => setShip({ ...ship, carrier: e.target.value })} placeholder="配送業者（佐川・ヤマト・DHL など）" className="rounded border border-slate-300 px-2 py-1 w-52" />
+                  <input value={ship.tracking} onChange={(e) => setShip({ ...ship, tracking: e.target.value })} placeholder="追跡番号（複数は「、」区切り）" className="rounded border border-slate-300 px-2 py-1 w-64 font-mono" />
+                  <button disabled={busy} onClick={() => run(() => api(`/api/inventory/instructions/${i.id}/ship`, { method: 'POST', body: JSON.stringify({ carrier: ship.carrier, trackingNos: ship.tracking }) })).then(() => setShip(null))} className="rounded bg-emerald-600 text-white px-3 py-1 font-bold">
+                    出荷完了（在庫から引く）
+                  </button>
+                  <button onClick={() => setShip(null)} className="rounded border border-slate-300 px-3 py-1 font-bold">
+                    やめる
+                  </button>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {invoiceFor && <InvoiceDialog instructionId={invoiceFor} onClose={() => setInvoiceFor(null)} onIssued={onSaved} />}
+      {awbFor && <AwbDialog instructionId={awbFor} onClose={() => setAwbFor(null)} onDone={onSaved} />}
+    </section>
+  );
+}
+
+export function AllocationPanel({ data, onSaved }: { data: InventoryData; onSaved: () => void }) {
   const [cands, setCands] = useState<Candidate[] | null>(null);
   const [pick, setPick] = useState<Record<string, Record<string, string>>>({}); // 行キー → 倉庫 → 数
   const [checked, setChecked] = useState<Record<string, boolean>>({});
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const [ship, setShip] = useState<{ id: string; carrier: string; tracking: string } | null>(null);
-  const [invoiceFor, setInvoiceFor] = useState<string | null>(null);
   const rowKey = (c: Candidate) => `${c.orderId}|${c.productId}`;
 
   const loadCands = useCallback(() => {
@@ -699,13 +885,13 @@ function AllocationPanel({ data, onSaved }: { data: InventoryData; onSaved: () =
       });
     return Array.from(m.values());
   }, [data.allocations]);
-  const openInstr = data.instructions.filter((i) => i.status === 'open');
-  const doneInstr = data.instructions.filter((i) => i.status === 'shipped');
   const nChecked = Object.values(checked).filter(Boolean).length;
 
   return (
     <div className="space-y-4">
       {error && <div className="rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs px-3 py-2">{error}</div>}
+
+      <InstructionBoard instructions={data.instructions} onSaved={onSaved} />
 
       <section className="rounded-xl border border-slate-200 bg-white">
         <div className="p-3 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2">
@@ -799,7 +985,7 @@ function AllocationPanel({ data, onSaved }: { data: InventoryData; onSaved: () =
       <section className="rounded-xl border border-slate-200 bg-white">
         <div className="p-3 border-b border-slate-100">
           <div className="font-bold text-sm text-slate-900">② 引当済み（出荷指示前）</div>
-          <div className="text-[11px] text-slate-500">ご注文・倉庫ごとにまとめています。「出荷指示を出す」と、倉庫の担当者画面に出ます（国内倉庫は下の③で社内が出荷します）。</div>
+          <div className="text-[11px] text-slate-500">ご注文・倉庫ごとにまとめています。「出荷指示を出す」と上の一覧と倉庫の担当者画面に出ます（国内倉庫は社内で出荷します）。</div>
         </div>
         {groups.length === 0 ? (
           <div className="p-6 text-center text-xs text-slate-400">引当済みで出荷指示前のものはありません</div>
@@ -833,74 +1019,44 @@ function AllocationPanel({ data, onSaved }: { data: InventoryData; onSaved: () =
         )}
       </section>
 
-      <section className="rounded-xl border border-slate-200 bg-white">
-        <div className="p-3 border-b border-slate-100">
-          <div className="font-bold text-sm text-slate-900">③ 出荷指示（出荷待ち {openInstr.length}件）</div>
-          <div className="text-[11px] text-slate-500">韓国・シンガポールは倉庫の担当者が出荷して完了にします。国内倉庫は社内で「出荷完了」を押してください（在庫から引かれます）。楽楽販売の出荷管理への入力は別途お願いします。</div>
+    </div>
+  );
+}
+
+/** 引当・出荷指示ページ（サイドバーの「未発注」の下）。出荷指示ごとにインボイス・AWB・出荷・配達まで追う */
+export function ShippingInstructionsPage() {
+  const [data, setData] = useState<InventoryData | null>(null);
+  const [error, setError] = useState('');
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const load = useCallback(() => {
+    api('/api/inventory')
+      .then(setData)
+      .catch((e) => setError(e.message));
+  }, []);
+  useEffect(load, [load]);
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+            <ClipboardList className="w-6 h-6 text-indigo-600" />
+            引当・出荷指示
+          </h1>
+          <p className="text-xs text-slate-500 mt-1">在庫から引き当てた明細を倉庫ごとの出荷指示にし、インボイス・AWBの作成から出荷・配達まで追います。</p>
         </div>
-        <div className="divide-y divide-slate-100">
-          {[...openInstr, ...doneInstr].length === 0 && <div className="p-6 text-center text-xs text-slate-400">出荷指示はまだありません</div>}
-          {[...openInstr, ...doneInstr].map((i) => (
-            <div key={i.id} className={`p-3 text-xs space-y-1 ${i.status === 'shipped' ? 'bg-slate-50/60' : ''}`}>
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="font-bold">
-                  <span className="font-mono text-indigo-700">{i.id}</span>
-                  <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5">{i.warehouseName}</span>
-                  <span className="ml-2">
-                    {i.orderId} {i.clinicName}
-                  </span>
-                  <span className={`ml-2 rounded px-1.5 py-0.5 ${i.status === 'open' ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}`}>{i.status === 'open' ? '出荷待ち' : `出荷済み ${fmt(i.shippedAt || null)}`}</span>
-                </div>
-                {i.status === 'open' && (
-                  <div className="flex gap-1.5">
-                    <button onClick={() => setShip({ id: i.id, carrier: '', tracking: '' })} className="rounded bg-emerald-600 text-white px-2.5 py-1 font-bold">
-                      出荷完了にする
-                    </button>
-                    <button disabled={busy} onClick={() => confirm('出荷指示を取り消して、引当済みに戻します。よろしいですか？') && run(() => api(`/api/inventory/instructions/${i.id}/cancel`, { method: 'POST' }))} className="rounded border border-slate-300 px-2.5 py-1 font-bold text-slate-600">
-                      取り消す
-                    </button>
-                  </div>
-                )}
-              </div>
-              <div className="text-slate-600">{i.lines.map((l) => `${l.productName} × ${l.qty}`).join('、')}</div>
-              <div className="flex flex-wrap items-center gap-2">
-                {i.invoiceNo ? (
-                  <>
-                    <span className="text-[11px] font-bold text-indigo-800">インボイス {i.invoiceNo}</span>
-                    <InvoicePdfButtons source={`/api/invoice/doc/${i.id}`} />
-                  </>
-                ) : i.warehouse === 'domestic' ? null : (
-                  <button onClick={() => setInvoiceFor(i.id)} className="rounded border border-indigo-300 bg-white px-2.5 py-1 text-[11px] font-bold text-indigo-700 hover:bg-indigo-50">
-                    インボイスを作成
-                  </button>
-                )}
-              </div>
-              <div className="text-[11px] text-slate-500">
-                届け先：{i.destination.name}
-                {i.destination.postalCode && ` 〒${i.destination.postalCode}`} {i.destination.address} {i.destination.phone && `TEL ${i.destination.phone}`}
-              </div>
-              {i.trackingNos.length > 0 && (
-                <div className="text-[11px] font-mono">
-                  {i.carrier} {i.trackingNos.join('、')}
-                </div>
-              )}
-              {ship?.id === i.id && (
-                <div className="flex flex-wrap items-center gap-2 rounded bg-emerald-50 border border-emerald-200 p-2">
-                  <input value={ship.carrier} onChange={(e) => setShip({ ...ship, carrier: e.target.value })} placeholder="配送業者（佐川・ヤマト・DHL など）" className="rounded border border-slate-300 px-2 py-1 w-52" />
-                  <input value={ship.tracking} onChange={(e) => setShip({ ...ship, tracking: e.target.value })} placeholder="追跡番号（複数は「、」区切り）" className="rounded border border-slate-300 px-2 py-1 w-64 font-mono" />
-                  <button disabled={busy} onClick={() => run(() => api(`/api/inventory/instructions/${i.id}/ship`, { method: 'POST', body: JSON.stringify({ carrier: ship.carrier, trackingNos: ship.tracking }) })).then(() => setShip(null))} className="rounded bg-emerald-600 text-white px-3 py-1 font-bold">
-                    出荷完了（在庫から引く）
-                  </button>
-                  <button onClick={() => setShip(null)} className="rounded border border-slate-300 px-3 py-1 font-bold">
-                    やめる
-                  </button>
-                </div>
-              )}
-            </div>
-          ))}
+        <div className="flex gap-2 text-xs">
+          <button onClick={load} className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-semibold text-slate-700 hover:bg-slate-50">
+            <RefreshCw className="w-3.5 h-3.5" />
+            読み込み直す
+          </button>
+          <button onClick={() => setSettingsOpen(!settingsOpen)} className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-semibold text-slate-700 hover:bg-slate-50">
+            DHL API設定
+          </button>
         </div>
-      </section>
-      {invoiceFor && <InvoiceDialog instructionId={invoiceFor} onClose={() => setInvoiceFor(null)} onIssued={onSaved} />}
+      </div>
+      {settingsOpen && <DhlSettings onClose={() => setSettingsOpen(false)} />}
+      {error && <div className="rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs px-3 py-2">{error}</div>}
+      {data ? <AllocationPanel data={data} onSaved={load} /> : !error && <div className="p-6 text-sm text-slate-500">読み込み中…</div>}
     </div>
   );
 }
@@ -908,7 +1064,7 @@ function AllocationPanel({ data, onSaved }: { data: InventoryData; onSaved: () =
 export function InventoryView({ orders }: { orders: Order[] }) {
   const [data, setData] = useState<InventoryData | null>(null);
   const [error, setError] = useState('');
-  const [tab, setTab] = useState<'inbound' | 'allocation' | 'stock' | 'moves' | 'access'>('inbound');
+  const [tab, setTab] = useState<'inbound' | 'stock' | 'moves' | 'access'>('inbound');
   const [wh, setWh] = useState<'all' | WarehouseId>('all');
   const [stateFilter, setStateFilter] = useState<'open' | 'waiting' | 'received' | 'shortage' | 'closed' | 'all'>('open');
   const [q, setQ] = useState('');
@@ -1044,7 +1200,6 @@ export function InventoryView({ orders }: { orders: Order[] }) {
         {(
           [
             ['inbound', '入荷予定', Truck],
-            ['allocation', `引当・出荷指示${data.instructions.filter((i) => i.status === 'open').length ? `（出荷待ち${data.instructions.filter((i) => i.status === 'open').length}）` : ''}`, ClipboardList],
             ['stock', '在庫', PackageCheck],
             ['moves', '入出庫の履歴', History],
             ['access', '倉庫の担当者画面', KeyRound],
@@ -1164,7 +1319,6 @@ export function InventoryView({ orders }: { orders: Order[] }) {
         </div>
       )}
 
-      {tab === 'allocation' && <AllocationPanel data={data} onSaved={load} />}
       {tab === 'access' && <WarehouseAccessPanel data={data} onSaved={load} />}
       <div className="text-[11px] text-slate-400 flex items-center gap-1">
         <CheckCircle2 className="w-3 h-3" />

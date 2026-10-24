@@ -27,7 +27,7 @@ import { ProcurementView } from './components/ProcurementView';
 import { UnshippedClinicsView } from './components/UnshippedClinicsView';
 import { ProductMasterView } from './components/ProductMasterView';
 import { ClinicMasterView } from './components/ClinicMasterView';
-import { InventoryView } from './components/InventoryView';
+import { InventoryView, ShippingInstructionsPage } from './components/InventoryView';
 import { UnorderedView } from './components/UnorderedView';
 import { ArrivalTrackingView } from './components/ArrivalTrackingView';
 import { CustomsManagementView } from './components/CustomsManagementView';
@@ -64,6 +64,7 @@ import {
   ShieldCheck,
   Building,
   Calculator,
+  ClipboardList,
   Building2,
   Package,
   Menu,
@@ -89,7 +90,7 @@ import {
 
 const KNOWN_TABS: ViewTab[] = [
   'dashboard', 'morning_meeting', 'alerts', 'procurement', 'unshipped_clinics', 'partial_shipment', 'overdue',
-  'customs_management', 'cool_missing', 'kanto_customs_ng', 'unmatched_sheets', 'inventory_management', 'shipping_calc',
+  'customs_management', 'cool_missing', 'kanto_customs_ng', 'unmatched_sheets', 'inventory_management', 'shipping_calc', 'shipping_instructions',
   'sheet_import', 'arrival_tracking', 'products', 'clinics', 'carrier_settings', 'bulk_deliveries', 'portal_admin',
   'sales_dashboard', 'sales_rep_sales', 'sales_clinic_master', 'reorder_prediction', 'rep_ranking',
 ];
@@ -701,6 +702,13 @@ export default function App() {
       badgeColor: 'bg-amber-500 text-white font-bold',
     },
     {
+      id: 'shipping_instructions',
+      group: 'today',
+      label: '引当・出荷指示',
+      icon: ClipboardList,
+      badge: null,
+    },
+    {
       id: 'overdue',
       group: 'today',
       label: '納期超過一覧',
@@ -1207,6 +1215,8 @@ export default function App() {
           {activeTab === 'alerts' && (
             <ActionListView orders={filteredOrders} alerts={filteredAlerts} shipments={shipments} onSelectOrder={handleOpenDetail} repFilter={selectedRep} onClearRepFilter={() => setSelectedRep('')} />
           )}
+
+          {activeTab === 'shipping_instructions' && <ShippingInstructionsPage />}
 
           {activeTab === 'shipping_calc' && (
             // 国際送料電卓は独立した別アプリ（/tools/shipping-calc/）をそのまま表示する

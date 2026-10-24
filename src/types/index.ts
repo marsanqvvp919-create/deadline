@@ -179,6 +179,7 @@ export type ViewTab =
   | 'enterprise_automation'
   | 'inventory_management'
   | 'shipping_calc'
+  | 'shipping_instructions'
   | 'arrival_tracking'
   | 'customs_management'
   | 'cool_missing'

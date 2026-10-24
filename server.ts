@@ -4009,6 +4009,16 @@ async function runCarrierAutoRefresh(force = false) {
       if (!digits.includes(d)) digits.push(d);
       recent.add(d);
     }
+    // 出荷指示の AWB・追跡番号（出荷から30日以内）も確認する
+    for (const si of inventory.instructions) {
+      if (si.status === 'cancelled') continue;
+      const at = new Date(si.shippedAt || si.awbCreatedAt || si.createdAt).getTime();
+      if (now - at > CARRIER_TRACK_DAYS * 86400000) continue;
+      for (const n of [si.awbNo, ...si.trackingNos]) {
+        const d = String(n || '').replace(/\D/g, '');
+        if (d.length >= 10 && !digits.includes(d)) digits.push(d);
+      }
+    }
     carrierLastAutoRunAt = new Date().toISOString();
     carrierLastErrors = await resolveAndLookup(digits, creds, {
       refreshStale: (r) => {
@@ -4444,6 +4454,11 @@ interface ShipInstruction {
   shippedBy?: 'staff' | 'warehouse';
   invoiceNo?: string; // INVOICEアプリの発送データに保存したインボイス番号
   invoiceDocId?: string;
+  awbNo?: string; // AWB（DHLのAPIで発行、または手入力）
+  awbCarrier?: string;
+  awbMode?: 'api' | 'manual';
+  awbLabel?: boolean; // ラベルPDFを Cloud Storage に保存済み
+  awbCreatedAt?: string;
 }
 interface WarehouseAccess {
   slug: string;
@@ -4986,8 +5001,19 @@ function allocationCandidates() {
 
 function instructionView(i: ShipInstruction, _forWarehouse = false) {
   const c = masterClinicById(i.clinicId) as any;
+  // 配送状況（AWB・追跡番号を配送会社のデータで確認）
+  const nos = Array.from(new Set([i.awbNo, ...i.trackingNos].filter(Boolean).map((n) => String(n).replace(/\D/g, '')).filter((d) => d.length >= 10)));
+  const tracking = nos.map((d) => resolvedStatusForClient(d)).filter(Boolean) as any[];
+  const delivery = tracking.some((t) => t.status === 'delivered')
+    ? { code: 'delivered', label: '配達完了' }
+    : tracking.some((t) => t.status === 'exception')
+      ? { code: 'exception', label: tracking.find((t) => t.status === 'exception')?.statusText || '要確認' }
+      : tracking.some((t) => t.status === 'in_transit')
+        ? { code: 'in_transit', label: tracking.find((t) => t.status === 'in_transit')?.statusText || '輸送中' }
+        : null;
   return {
     ...i,
+    delivery,
     warehouseName: WAREHOUSES[i.warehouse],
     destination: {
       name: c?.clinicName || i.clinicName,
@@ -5099,10 +5125,11 @@ function shipInstruction(si: ShipInstruction, body: any, by: StockMove['by']): s
     .map((x: string) => x.trim())
     .filter(Boolean)
     .slice(0, 20);
+  if (trackingNos.length === 0 && si.awbNo) trackingNos.push(si.awbNo);
   for (const l of si.lines) addStock(si.warehouse, l.productId, l.productName, -l.qty, 'outbound', by, `${si.id} ${si.orderId}`, si.clinicName);
   inventory.allocations.filter((a) => a.instructionId === si.id).forEach((a) => (a.status = 'shipped'));
   si.status = 'shipped';
-  si.carrier = String(body?.carrier || '').slice(0, 50);
+  si.carrier = String(body?.carrier || '').slice(0, 50) || si.awbCarrier || '';
   si.trackingNos = trackingNos;
   si.shippedAt = new Date().toISOString();
   si.shippedBy = by;
@@ -5402,6 +5429,277 @@ app.get('/api/invoice/doc/:siId', async (req, res) => {
   }
 });
 
+// --- AWB（航空貨物の送り状）。DHL Express は MyDHL API で発行してラベルPDFを保存する。FedEx・ほかは番号の手入力
+// API の利用者名・パスワード・口座番号は Cloud Storage の awb-settings.json に保存し、画面にはパスワードを返さない
+interface AwbSettings {
+  dhl?: { username: string; password: string; accountNumber: string; env: 'test' | 'production' };
+  shipperDefaults?: Partial<Record<WarehouseId, AwbParty>>;
+}
+interface AwbParty {
+  companyName: string;
+  fullName: string;
+  addressLine1: string;
+  addressLine2: string;
+  addressLine3: string;
+  cityName: string;
+  postalCode: string;
+  countryCode: string;
+  phone: string;
+  email: string;
+}
+const AWB_OBJECT = 'awb-settings.json';
+let awbSettings: AwbSettings = {};
+let awbLoadPromise: Promise<void> | null = null;
+function loadAwbSettings() {
+  if (!awbLoadPromise) {
+    awbLoadPromise = (async () => {
+      if (!CACHE_BUCKET) return;
+      try {
+        const [buf] = await new Storage().bucket(CACHE_BUCKET).file(AWB_OBJECT).download();
+        awbSettings = JSON.parse(buf.toString('utf-8')) || {};
+      } catch (e: any) {
+        if (e?.code !== 404) {
+          awbLoadPromise = null;
+          throw e;
+        }
+      }
+    })();
+  }
+  return awbLoadPromise;
+}
+async function saveAwbSettings() {
+  if (!CACHE_BUCKET) return;
+  await new Storage().bucket(CACHE_BUCKET).file(AWB_OBJECT).save(JSON.stringify(awbSettings), { contentType: 'application/json', resumable: false });
+}
+const awbLabelObject = (siId: string) => `awb-labels/${siId}.pdf`;
+
+const COUNTRY_CODES: [RegExp, string][] = [
+  [/korea|韓国/i, 'KR'], [/singapore|シンガポール/i, 'SG'], [/japan|日本/i, 'JP'], [/ital|イタリア/i, 'IT'], [/fran|フランス/i, 'FR'],
+  [/switz|スイス/i, 'CH'], [/german|ドイツ/i, 'DE'], [/spain|スペイン/i, 'ES'], [/india|インド/i, 'IN'], [/turk|トルコ/i, 'TR'],
+  [/united states|usa|アメリカ|米国/i, 'US'], [/china|中国/i, 'CN'], [/united kingdom|uk\b|イギリス|英国/i, 'GB'], [/austria|オーストリア/i, 'AT'],
+  [/sweden|スウェーデン/i, 'SE'], [/bulgaria|ブルガリア/i, 'BG'], [/poland|ポーランド/i, 'PL'], [/netherlands|オランダ/i, 'NL'], [/belgium|ベルギー/i, 'BE'],
+  [/taiwan|台湾/i, 'TW'], [/thailand|タイ/i, 'TH'], [/israel|イスラエル/i, 'IL'], [/brazil|ブラジル/i, 'BR'], [/argentin|アルゼンチン/i, 'AR'],
+];
+const countryCode = (v: string) => (/^[A-Z]{2}$/.test(String(v || '').trim()) ? String(v).trim() : COUNTRY_CODES.find(([re]) => re.test(String(v || '')))?.[1] || '');
+/** 英語住所を DHL の住所欄（45文字×3行・市区町村）に分ける。画面で直せる下書き */
+function splitEnglishAddress(addressEn: string, postal: string) {
+  const parts = String(addressEn || '')
+    .replace(/\s+/g, ' ')
+    .split(',')
+    .map((x) => x.trim())
+    .filter((x) => x && !/^japan$|^singapore$|^(south )?korea$/i.test(x));
+  const cleaned = parts.map((p) => p.replace(/\b\d{3}-?\d{4}\b/, '').trim()).filter(Boolean);
+  const city = [...cleaned].reverse().find((p) => /city|-shi\b|-ku\b|ward|-gun|-cho|-machi/i.test(p)) || cleaned[cleaned.length - 1] || '';
+  const rest = cleaned.filter((p) => p !== city);
+  const lines: string[] = ['', '', ''];
+  let i = 0;
+  for (const p of rest) {
+    if (lines[i] && (lines[i] + ', ' + p).length > 45) i = Math.min(2, i + 1);
+    lines[i] = lines[i] ? `${lines[i]}, ${p}` : p;
+  }
+  return { addressLine1: lines[0].slice(0, 45), addressLine2: lines[1].slice(0, 45), addressLine3: lines[2].slice(0, 45), cityName: city.slice(0, 45), postalCode: String(postal || '').replace(/[^\d-]/g, '') };
+}
+
+/** AWB の下書き（インボイスの発送データから発送元・届け先・品目を作る） */
+async function awbDraft(si: ShipInstruction) {
+  const inv = await issuedInvoice(si);
+  if (!inv) throw new Error('先にインボイスを発行してください（AWBの品目・申告価格はインボイスから作ります）');
+  await loadAwbSettings();
+  const sh: any = inv.shipment;
+  const w = sh.warehouseSnapshot || {};
+  const c = sh.clinicSnapshot || {};
+  const saved = awbSettings.shipperDefaults?.[si.warehouse];
+  const shipper: AwbParty = saved || {
+    companyName: String(w.nameEn || w.name || '').slice(0, 100),
+    fullName: String(w.contactPerson || w.nameEn || '').slice(0, 100),
+    ...splitEnglishAddress(w.addressEn || w.address || '', w.zip || ''),
+    countryCode: countryCode(w.country || '') || (si.warehouse === 'korea' ? 'KR' : si.warehouse === 'singapore' ? 'SG' : 'JP'),
+    phone: String(w.phone || ''),
+    email: String(w.email || ''),
+  };
+  const receiver: AwbParty = {
+    companyName: String(c.nameEn || c.name || '').slice(0, 100),
+    fullName: String(c.doctorNameEn || c.contactPersonEn || c.nameEn || '').replace(/^Dr\.?\s*/i, 'Dr. ').slice(0, 100),
+    ...splitEnglishAddress(c.addressEn || '', c.zip || ''),
+    countryCode: 'JP',
+    phone: String(c.phone || ''),
+    email: String(c.email || ''),
+  };
+  const items = (sh.items || []).map((it: any, i: number) => ({
+    number: i + 1,
+    description: String(it.nameEn || it.nameJa || '').slice(0, 70),
+    price: Number(it.unitPrice) || 0,
+    quantity: Number(it.qty) || 0,
+    hsCode: String(it.hsCode || '').replace(/\D/g, ''),
+    manufacturerCountry: countryCode(it.countryOfOrigin || '') || shipper.countryCode,
+    netWeight: Math.max(0.001, Number(it.totalWeight) || 0.1),
+  }));
+  const weight = Math.max(0.5, Math.round(((Number(sh.totalWeight) || items.reduce((n: number, x: any) => n + x.netWeight, 0)) + 0.5) * 10) / 10);
+  return {
+    invoiceNo: sh.invoiceNo,
+    invoiceDate: sh.date,
+    currency: sh.currency || 'JPY',
+    declaredValue: Number(sh.totalInvoiceAmount) || items.reduce((n: number, x: any) => n + x.price * x.quantity, 0),
+    shipper,
+    receiver,
+    packages: [{ weight, length: 30, width: 20, height: 15 }],
+    items,
+    description: 'Medical supplies',
+  };
+}
+
+/** MyDHL API で発送を作る（AWB番号とラベルPDFを返す） */
+async function createDhlShipment(si: ShipInstruction, d: any) {
+  const cfg = awbSettings.dhl;
+  if (!cfg?.username || !cfg?.password || !cfg?.accountNumber) throw new Error('DHL の MyDHL API（利用者名・パスワード・口座番号）が登録されていません');
+  const base = cfg.env === 'production' ? 'https://express.api.dhl.com/mydhlapi' : 'https://express.api.dhl.com/mydhlapi/test';
+  const tz = d.shipper.countryCode === 'SG' ? '+08:00' : '+09:00';
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(String(d.date || '')) ? d.date : jstToday();
+  const party = (p: AwbParty) => ({
+    postalAddress: {
+      postalCode: p.postalCode,
+      cityName: p.cityName,
+      countryCode: p.countryCode,
+      addressLine1: p.addressLine1,
+      ...(p.addressLine2 ? { addressLine2: p.addressLine2 } : {}),
+      ...(p.addressLine3 ? { addressLine3: p.addressLine3 } : {}),
+    },
+    contactInformation: { phone: p.phone, companyName: p.companyName, fullName: p.fullName || p.companyName, ...(p.email ? { email: p.email } : {}) },
+  });
+  const body = {
+    plannedShippingDateAndTime: `${date}T15:00:00 GMT${tz}`,
+    pickup: { isRequested: false },
+    productCode: 'P',
+    accounts: [{ typeCode: 'shipper', number: cfg.accountNumber }],
+    outputImageProperties: { encodingFormat: 'pdf', imageOptions: [{ typeCode: 'label', templateName: 'ECOM26_84_001' }] },
+    customerDetails: { shipperDetails: party(d.shipper), receiverDetails: party(d.receiver) },
+    content: {
+      packages: d.packages.map((p: any) => ({ weight: Number(p.weight), dimensions: { length: Number(p.length), width: Number(p.width), height: Number(p.height) } })),
+      isCustomsDeclarable: true,
+      declaredValue: Number(d.declaredValue),
+      declaredValueCurrency: d.currency,
+      description: String(d.description || 'Medical supplies').slice(0, 70),
+      incoterm: 'DAP',
+      unitOfMeasurement: 'metric',
+      exportDeclaration: {
+        lineItems: d.items.map((it: any) => ({
+          number: it.number,
+          description: it.description,
+          price: it.price,
+          quantity: { value: it.quantity, unitOfMeasurement: 'PCS' },
+          ...(it.hsCode ? { commodityCodes: [{ typeCode: 'outbound', value: it.hsCode }] } : {}),
+          exportReasonType: 'permanent',
+          manufacturerCountry: it.manufacturerCountry,
+          weight: { netValue: it.netWeight, grossValue: it.netWeight },
+        })),
+        invoice: { number: d.invoiceNo, date: d.invoiceDate },
+      },
+    },
+    customerReferences: [{ value: `${si.id} ${si.orderId}`.slice(0, 35), typeCode: 'CU' }],
+  };
+  const res = await fetch(`${base}/shipments`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Basic ${Buffer.from(`${cfg.username}:${cfg.password}`).toString('base64')}` },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(60000),
+  });
+  const j: any = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const detail = [j?.title, j?.detail, ...(Array.isArray(j?.additionalDetails) ? j.additionalDetails : [])].filter(Boolean).join(' / ');
+    throw new Error(`DHL からエラーが返りました（${res.status}）：${detail || JSON.stringify(j).slice(0, 300)}`);
+  }
+  const awbNo = String(j.shipmentTrackingNumber || '');
+  const label = (j.documents || []).find((x: any) => x.typeCode === 'label') || (j.documents || [])[0];
+  return { awbNo, labelBase64: label?.content || '' };
+}
+
+app.get('/api/awb/settings', async (_req, res) => {
+  await loadAwbSettings();
+  const d = awbSettings.dhl;
+  res.json({ dhl: d ? { configured: true, username: d.username, accountNumber: d.accountNumber.replace(/.(?=.{3})/g, '*'), env: d.env } : { configured: false } });
+});
+app.post('/api/awb/settings', async (req, res) => {
+  await loadAwbSettings();
+  const d = req.body?.dhl || {};
+  const username = String(d.username || '').trim();
+  const accountNumber = String(d.accountNumber || '').trim();
+  const password = String(d.password || '');
+  if (!username || !accountNumber || (!password && !awbSettings.dhl?.password)) return res.status(400).json({ error: '利用者名・パスワード・口座番号を入れてください' });
+  awbSettings.dhl = { username, accountNumber, password: password || awbSettings.dhl!.password, env: d.env === 'production' ? 'production' : 'test' };
+  await saveAwbSettings();
+  res.json({ ok: true });
+});
+app.get('/api/awb/draft/:siId', async (req, res) => {
+  await loadInventory();
+  const si = inventory.instructions.find((x) => x.id === req.params.siId);
+  if (!si) return res.status(404).json({ error: '出荷指示が見つかりません' });
+  try {
+    await loadAwbSettings();
+    res.json({ draft: await awbDraft(si), dhlConfigured: !!awbSettings.dhl?.username, awbNo: si.awbNo || null });
+  } catch (e: any) {
+    res.status(400).json({ error: e?.message || String(e) });
+  }
+});
+app.post('/api/awb/create/:siId', async (req, res) => {
+  await loadInventory();
+  await loadAwbSettings();
+  const si = inventory.instructions.find((x) => x.id === req.params.siId);
+  if (!si) return res.status(404).json({ error: '出荷指示が見つかりません' });
+  if (si.awbNo) return res.status(400).json({ error: `すでに AWB ${si.awbNo} があります` });
+  const d = req.body?.draft;
+  if (!d?.shipper || !d?.receiver || !Array.isArray(d?.packages) || !Array.isArray(d?.items)) return res.status(400).json({ error: '送り状の内容が足りません' });
+  try {
+    const r = await createDhlShipment(si, d);
+    if (!r.awbNo) throw new Error('DHL から AWB 番号が返りませんでした');
+    if (r.labelBase64 && CACHE_BUCKET) {
+      await new Storage().bucket(CACHE_BUCKET).file(awbLabelObject(si.id)).save(Buffer.from(r.labelBase64, 'base64'), { contentType: 'application/pdf', resumable: false });
+      si.awbLabel = true;
+    }
+    si.awbNo = r.awbNo;
+    si.awbCarrier = 'DHL';
+    si.awbMode = 'api';
+    si.awbCreatedAt = new Date().toISOString();
+    // 次回もこの発送元で作れるように覚えておく
+    (awbSettings.shipperDefaults ||= {})[si.warehouse] = d.shipper;
+    await saveAwbSettings();
+    await saveInventory();
+    res.json({ instruction: instructionView(si) });
+  } catch (e: any) {
+    console.warn('[AWB] DHL create failed:', e?.message || e);
+    res.status(400).json({ error: e?.message || String(e) });
+  }
+});
+app.post('/api/awb/manual/:siId', async (req, res) => {
+  await loadInventory();
+  const si = inventory.instructions.find((x) => x.id === req.params.siId);
+  if (!si) return res.status(404).json({ error: '出荷指示が見つかりません' });
+  const awbNo = String(req.body?.awbNo || '').replace(/\s/g, '');
+  if (!awbNo) {
+    if (si.awbMode === 'api') return res.status(400).json({ error: 'APIで発行したAWBは消せません（DHLで取り消してください）' });
+    delete si.awbNo;
+    delete si.awbCarrier;
+    delete si.awbMode;
+  } else {
+    si.awbNo = awbNo;
+    si.awbCarrier = String(req.body?.carrier || '').slice(0, 30) || 'DHL';
+    si.awbMode = 'manual';
+    si.awbCreatedAt = new Date().toISOString();
+  }
+  await saveInventory();
+  res.json({ instruction: instructionView(si) });
+});
+async function sendAwbLabel(si: ShipInstruction | undefined, res: express.Response) {
+  if (!si?.awbLabel || !CACHE_BUCKET) return res.status(404).json({ error: 'ラベルがありません / No label' });
+  const [buf] = await new Storage().bucket(CACHE_BUCKET).file(awbLabelObject(si.id)).download();
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `inline; filename="${si.awbNo || si.id}_label.pdf"`);
+  res.send(buf);
+}
+app.get('/api/awb/label/:siId', async (req, res) => {
+  await loadInventory();
+  await sendAwbLabel(inventory.instructions.find((x) => x.id === req.params.siId), res);
+});
+
 // 手元の動作確認用：発注管理のCSVを渡して入荷予定に取り込む（本番では使えない）
 if (process.env.NODE_ENV !== 'production') {
   app.post('/api/inventory/dev-import-po', async (req, res) => {
@@ -5500,6 +5798,12 @@ app.get('/api/warehouse/invoice/:id', async (req, res) => {
   } catch (e: any) {
     res.status(500).json({ error: `インボイスを読み込めませんでした / Could not load the invoice (${e?.message || e})` });
   }
+});
+// AWBのラベル（倉庫の担当者が印刷して荷物に貼る）
+app.get('/api/warehouse/awb-label/:id', async (req, res) => {
+  const w = await warehouseFromRequest(req);
+  if (!w) return res.status(401).json({ error: 'login_required' });
+  await sendAwbLabel(inventory.instructions.find((x) => x.id === req.params.id && x.warehouse === w), res);
 });
 // 出荷指示の出荷完了（倉庫の担当者）
 app.post('/api/warehouse/instructions/:id/ship', async (req, res) => {
