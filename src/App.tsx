@@ -62,6 +62,7 @@ import {
   AlertTriangle,
   ShieldCheck,
   Building,
+  Calculator,
   Building2,
   Package,
   Menu,
@@ -87,7 +88,7 @@ import {
 
 const KNOWN_TABS: ViewTab[] = [
   'dashboard', 'morning_meeting', 'alerts', 'procurement', 'unshipped_clinics', 'partial_shipment', 'overdue',
-  'customs_management', 'cool_missing', 'kanto_customs_ng', 'unmatched_sheets', 'inventory_management',
+  'customs_management', 'cool_missing', 'kanto_customs_ng', 'unmatched_sheets', 'inventory_management', 'shipping_calc',
   'sheet_import', 'arrival_tracking', 'products', 'clinics', 'carrier_settings', 'bulk_deliveries', 'portal_admin',
   'sales_dashboard', 'sales_rep_sales', 'sales_clinic_master', 'reorder_prediction', 'rep_ranking',
 ];
@@ -752,6 +753,13 @@ export default function App() {
       badge: null,
     },
     {
+      id: 'shipping_calc',
+      group: 'shipping',
+      label: '国際送料電卓',
+      icon: Calculator,
+      badge: null,
+    },
+    {
       id: 'dashboard',
       group: 'analysis',
       label: 'ダッシュボード',
@@ -1181,6 +1189,11 @@ export default function App() {
 
           {activeTab === 'alerts' && (
             <ActionListView orders={filteredOrders} alerts={filteredAlerts} shipments={shipments} onSelectOrder={handleOpenDetail} repFilter={selectedRep} onClearRepFilter={() => setSelectedRep('')} />
+          )}
+
+          {activeTab === 'shipping_calc' && (
+            // 国際送料電卓は独立した別アプリ（/tools/shipping-calc/）をそのまま表示する
+            <iframe title="国際送料電卓" src="/tools/shipping-calc/" className="w-full rounded-2xl border border-slate-200 bg-white" style={{ height: 'calc(100vh - 140px)' }} />
           )}
 
           {activeTab === 'inventory_management' && (

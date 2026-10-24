@@ -4461,6 +4461,7 @@ interface InventoryStore {
   allocations: Allocation[];
   instructions: ShipInstruction[];
   seq: number; // 出荷指示の番号
+  productLinks?: Record<string, string>; // 楽楽販売の商品ID → インボイスの製剤（INVOICEアプリの products のドキュメントID）
   access: Partial<Record<WarehouseId, WarehouseAccess>>;
   poSyncedAt?: string;
 }
@@ -4494,6 +4495,7 @@ function loadInventory() {
           allocations: Array.isArray(j?.allocations) ? j.allocations : [],
           instructions: Array.isArray(j?.instructions) ? j.instructions : [],
           seq: Number(j?.seq) || 0,
+          productLinks: j?.productLinks || {},
           access: j?.access || {},
           poSyncedAt: j?.poSyncedAt,
         };
@@ -5188,9 +5190,26 @@ function matchInvoiceClinic(clinicId: string, names: string[], list: any[]) {
   const wanted = names.map(normName).filter(Boolean);
   return list.find((c) => wanted.includes(normName(c.name)) || wanted.includes(normName(c.nameEn))) || null;
 }
-function matchInvoiceProduct(name: string, list: any[]) {
+function matchInvoiceProduct(name: string, list: any[], productId?: string) {
+  // 1) インボイス作成の画面で一度選んだ対応 2) 名前が同じ 3) かっこ書きを除いて同じ 4) 片方がもう片方を含む（1件に決まるときだけ）
+  const linked = productId && inventory.productLinks?.[productId];
+  if (linked) {
+    const p = list.find((x) => x.id === linked);
+    if (p) return p;
+  }
+  const active = list.filter((p) => p.active !== false);
   const n = normName(name);
-  return list.find((p) => p.active !== false && (normName(p.nameJa) === n || normName(p.nameEn) === n)) || null;
+  const exact = active.find((p) => normName(p.nameJa) === n || normName(p.nameEn) === n);
+  if (exact) return exact;
+  const bare = (v: any) => normName(String(v || '').replace(/[（(][^）)]*[）)]/g, '').replace(/lidocaine|lido|リドカイン/gi, 'lido'));
+  const b = bare(name);
+  if (b.length >= 4) {
+    const loose = active.filter((p) => bare(p.nameJa) === b || bare(p.nameEn) === b);
+    if (loose.length === 1) return loose[0];
+    const part = active.filter((p) => [bare(p.nameJa), bare(p.nameEn)].some((x) => x.length >= 4 && (x.includes(b) || b.includes(x))));
+    if (part.length === 1) return part[0];
+  }
+  return null;
 }
 /** INVOICEアプリと同じ形の発送データ（インボイス番号は発行時に付ける） */
 function buildInvoiceShipment(si: ShipInstruction, m: NonNullable<typeof invoiceMasters>, opts: { productMap?: Record<string, string>; clinicDocId?: string; date: string }) {
@@ -5207,7 +5226,7 @@ function buildInvoiceShipment(si: ShipInstruction, m: NonNullable<typeof invoice
   if (!warehouse) problems.push(`発送元の倉庫（${WAREHOUSES[si.warehouse]}）がインボイスの倉庫マスタにありません`);
   const unmatched: { index: number; productName: string }[] = [];
   const items = si.lines.map((l, i) => {
-    const p = (opts.productMap?.[String(i)] && m.products.find((x) => x.id === opts.productMap![String(i)])) || matchInvoiceProduct(l.productName, m.products);
+    const p = (opts.productMap?.[String(i)] && m.products.find((x) => x.id === opts.productMap![String(i)])) || matchInvoiceProduct(l.productName, m.products, l.productId);
     if (!p) {
       unmatched.push({ index: i, productName: l.productName });
       return null;
@@ -5349,6 +5368,11 @@ app.post('/api/invoice/issue/:siId', async (req, res) => {
     });
     si.invoiceNo = result.invoiceNo;
     si.invoiceDocId = result.docId;
+    // 選んだ製剤の対応を覚えて、次から自動で当てる
+    for (const [idx, docId] of Object.entries((req.body?.productMap || {}) as Record<string, string>)) {
+      const line = si.lines[Number(idx)];
+      if (line?.productId && docId) (inventory.productLinks ||= {})[line.productId] = String(docId);
+    }
     await saveInventory();
     res.json({ invoiceNo: result.invoiceNo, shipment: { id: result.docId, ...d.shipment, invoiceNo: result.invoiceNo }, settings: m.settings });
   } catch (e: any) {
@@ -5512,6 +5536,11 @@ async function startServer() {
   const isProduction = process.env.NODE_ENV === 'production' && hasDist;
 
   if (isProduction) {
+    // 社内用の道具（国際送料電卓など）は社内ログインが必要
+    app.use('/tools', async (req, res, next) => {
+      if (await isStaffRequest(req).catch(() => false)) return next();
+      res.redirect('/');
+    });
     app.use(express.static(distPath));
     app.get('*', (_req, res) => {
       res.sendFile(distIndexPath);

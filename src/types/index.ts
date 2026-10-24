@@ -178,6 +178,7 @@ export type ViewTab =
   | 'clinics'
   | 'enterprise_automation'
   | 'inventory_management'
+  | 'shipping_calc'
   | 'arrival_tracking'
   | 'customs_management'
   | 'cool_missing'
