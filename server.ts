@@ -4441,10 +4441,11 @@ interface Allocation {
 interface ShipInstruction {
   id: string; // SI-000001
   warehouse: WarehouseId;
-  orderId: string;
+  orderId: string; // 表示用（まとめたときは「, 」区切り）
+  orderIds?: string[];
   clinicId: string;
   clinicName: string;
-  lines: { allocationId: string; productId: string; productName: string; qty: number }[];
+  lines: { allocationId: string; orderId?: string; productId: string; productName: string; qty: number }[];
   status: 'open' | 'shipped' | 'cancelled';
   memo: string;
   carrier: string;
@@ -5027,6 +5028,126 @@ function instructionView(i: ShipInstruction, _forWarehouse = false) {
   };
 }
 
+// --- 伝票単位の引当案：1伝票はできるだけ1か所の倉庫からまとめて出す。そろわなければ分割（先出し）や不足を示す
+type PlanType = 'single' | 'split' | 'partial' | 'none';
+interface OrderPlan {
+  type: PlanType;
+  allocations: { productId: string; warehouse: WarehouseId; qty: number }[];
+  missing: { productId: string; qty: number }[];
+  singleOptions: WarehouseId[]; // 全商品を1か所でそろえられる倉庫（優先順）
+  warehouses: WarehouseId[];
+}
+/** 1伝票の引当案。free は倉庫ごとの空き在庫（この関数は減らさない） */
+function planOrder(lines: { productId: string; need: number }[], free: Record<WarehouseId, Map<string, number>>): OrderPlan {
+  const get = (w: WarehouseId, p: string) => free[w].get(p) || 0;
+  const singleOptions = ALLOCATION_ORDER.filter((w) => lines.every((l) => get(w, l.productId) >= l.need));
+  if (singleOptions.length > 0) {
+    const w = singleOptions[0];
+    return { type: 'single', allocations: lines.map((l) => ({ productId: l.productId, warehouse: w, qty: l.need })), missing: [], singleOptions, warehouses: [w] };
+  }
+  // 1か所でそろわない：多くの商品をそろえられる倉庫から順に割り当て、倉庫の数をなるべく少なくする
+  const rest = new Map(lines.map((l) => [l.productId, l.need]));
+  const used = new Map<WarehouseId, Map<string, number>>();
+  const allocations: OrderPlan['allocations'] = [];
+  const remaining = () => Array.from(rest.entries()).filter(([, q]) => q > 0);
+  const pool = [...ALLOCATION_ORDER];
+  while (remaining().length > 0 && pool.length > 0) {
+    const score = (w: WarehouseId) => {
+      const full = remaining().filter(([p, q]) => get(w, p) >= q).length;
+      const qty = remaining().reduce((n, [p, q]) => n + Math.min(q, get(w, p)), 0);
+      return full * 100000 + qty;
+    };
+    pool.sort((a, b) => score(b) - score(a) || ALLOCATION_ORDER.indexOf(a) - ALLOCATION_ORDER.indexOf(b));
+    const w = pool.shift()!;
+    if (score(w) === 0) break;
+    for (const [p, q] of remaining()) {
+      const take = Math.min(q, get(w, p) - (used.get(w)?.get(p) || 0));
+      if (take <= 0) continue;
+      allocations.push({ productId: p, warehouse: w, qty: take });
+      rest.set(p, q - take);
+      if (!used.has(w)) used.set(w, new Map());
+      used.get(w)!.set(p, (used.get(w)!.get(p) || 0) + take);
+    }
+  }
+  const missing = remaining().map(([productId, qty]) => ({ productId, qty }));
+  const warehouses = Array.from(new Set(allocations.map((a) => a.warehouse)));
+  const type: PlanType = allocations.length === 0 ? 'none' : missing.length > 0 ? 'partial' : 'split';
+  return { type, allocations, missing, singleOptions: [], warehouses };
+}
+
+/** 未発注の伝票ごとの引当案（古い伝票・入金済みから順に空き在庫を割り当て、同じ在庫を二重に数えない） */
+function orderPlans() {
+  const free: Record<WarehouseId, Map<string, number>> = { domestic: new Map(), korea: new Map(), singapore: new Map() };
+  for (const w of ALLOCATION_ORDER) for (const s of stockList(w)) if (s.available > 0 && s.productId) free[w].set(s.productId, s.available);
+  const allocated = new Map<string, number>();
+  for (const a of inventory.allocations) {
+    if (a.status === 'cancelled') continue;
+    const k = `${a.orderId}|${a.productId}`;
+    allocated.set(k, (allocated.get(k) || 0) + a.qty);
+  }
+  const orders = ((serverRakurakuStore.orders?.orders || []) as any[])
+    .filter((o) => !/見積|出荷済|納品済|キャンセル/.test(String(o.status || '')) && o.orderState === '進行中')
+    .sort((a, b) => (a.paymentStatus === '入金済' ? 0 : 1) - (b.paymentStatus === '入金済' ? 0 : 1) || String(a.orderDate || '').localeCompare(String(b.orderDate || '')));
+  const out: any[] = [];
+  for (const o of orders) {
+    const lines = (o.lines as any[])
+      .filter((l) => l.stage === '未発注' && l.productId && !isShippingOrFee(l.productName, l.productId))
+      .map((l) => ({ productId: l.productId, productName: l.productName, quantity: l.quantity, latestDate: l.latestDate || null, allocated: allocated.get(`${o.orderId}|${l.productId}`) || 0 }))
+      .map((l) => ({ ...l, need: l.quantity - l.allocated }))
+      .filter((l) => l.need > 0);
+    if (lines.length === 0) continue;
+    const stock = (p: string) => Object.fromEntries(ALLOCATION_ORDER.map((w) => [w, free[w].get(p) || 0]));
+    const linesOut = lines.map((l) => ({ ...l, stock: stock(l.productId) }));
+    const plan = planOrder(lines, free);
+    // この伝票の案の分を空き在庫から引いておく（次の伝票の案で二重に使わない）
+    if (plan.type === 'single' || plan.type === 'split' || plan.type === 'partial')
+      for (const a of plan.allocations) free[a.warehouse].set(a.productId, (free[a.warehouse].get(a.productId) || 0) - a.qty);
+    const latest = lines.map((l) => l.latestDate || '').filter(Boolean).sort()[0] || null;
+    out.push({
+      orderId: o.orderId,
+      orderDate: o.orderDate,
+      clinicId: o.clinicId || '',
+      clinicName: o.customerName,
+      paymentStatus: o.paymentStatus,
+      salesRep: o.salesRep,
+      latestDate: latest,
+      partlyAllocated: lines.some((l) => l.allocated > 0),
+      lines: linesOut,
+      plan,
+    });
+  }
+  return out;
+}
+
+app.get('/api/inventory/order-plans', async (_req, res) => {
+  await loadInventory();
+  res.json({ plans: orderPlans() });
+});
+
+// 伝票ごとに引き当てる。mode: 'plan'（案のとおり。分割・先出しも含む）か 'single'（warehouse 1か所から全部）
+app.post('/api/inventory/allocate-order', async (req, res) => {
+  await loadInventory();
+  const { orderId, mode, warehouse } = req.body || {};
+  const p = orderPlans().find((x) => x.orderId === String(orderId));
+  if (!p) return res.status(404).json({ error: '引き当てる明細がありません（画面を読み込み直してください）' });
+  let items: { productId: string; warehouse: WarehouseId; qty: number }[];
+  if (mode === 'single') {
+    if (!isWarehouseId(warehouse) || !p.plan.singleOptions.includes(warehouse)) return res.status(400).json({ error: 'その倉庫では全商品をそろえられません' });
+    items = p.lines.map((l: any) => ({ productId: l.productId, warehouse, qty: l.need }));
+  } else {
+    items = p.plan.allocations;
+  }
+  if (items.length === 0) return res.status(400).json({ error: '引き当てられる在庫がありません' });
+  const now = new Date().toISOString();
+  for (const it of items) {
+    const line = p.lines.find((l: any) => l.productId === it.productId);
+    inventory.allocations.push({ id: moveId(), orderId: p.orderId, productId: it.productId, productName: line?.productName || '', clinicName: p.clinicName, warehouse: it.warehouse, qty: it.qty, status: 'reserved', createdAt: now });
+  }
+  applyAllocationsToOrders();
+  await saveInventory();
+  res.json({ created: items.length });
+});
+
 app.get('/api/inventory/allocation-candidates', async (_req, res) => {
   await loadInventory();
   res.json({ candidates: allocationCandidates() });
@@ -5072,19 +5193,25 @@ app.post('/api/inventory/allocations/:id/cancel', async (req, res) => {
 // 出荷指示を作る：同じご注文・同じ倉庫の引当済み（未指示）をまとめて1つの指示にする
 app.post('/api/inventory/instructions', async (req, res) => {
   await loadInventory();
-  const { orderId, warehouse, memo } = req.body || {};
+  const { orderId, orderIds, warehouse, memo } = req.body || {};
   if (!isWarehouseId(warehouse)) return res.status(400).json({ error: '倉庫を選んでください' });
-  const allocs = inventory.allocations.filter((a) => a.status === 'reserved' && a.orderId === String(orderId) && a.warehouse === warehouse);
+  // 同じクリニック・同じ倉庫の伝票はまとめて1つの出荷指示にできる
+  const ids: string[] = (Array.isArray(orderIds) && orderIds.length ? orderIds : [orderId]).map(String);
+  const allocs = inventory.allocations.filter((a) => a.status === 'reserved' && ids.includes(a.orderId) && a.warehouse === warehouse);
   if (allocs.length === 0) return res.status(400).json({ error: '出荷指示にする引当がありません' });
-  const o = ((serverRakurakuStore.orders?.orders || []) as any[]).find((x) => x.orderId === String(orderId));
+  const ordersAll = (serverRakurakuStore.orders?.orders || []) as any[];
+  const clinicIds = new Set(ids.map((id) => ordersAll.find((x) => x.orderId === id)?.clinicId || ''));
+  if (clinicIds.size > 1) return res.status(400).json({ error: '別のクリニックの伝票はまとめられません' });
+  const o = ordersAll.find((x) => x.orderId === ids[0]);
   inventory.seq += 1;
   const si: ShipInstruction = {
     id: `SI-${String(inventory.seq).padStart(6, '0')}`,
     warehouse,
-    orderId: String(orderId),
+    orderId: ids.join(', '),
+    orderIds: ids,
     clinicId: o?.clinicId || '',
     clinicName: o?.customerName || allocs[0].clinicName,
-    lines: allocs.map((a) => ({ allocationId: a.id, productId: a.productId, productName: a.productName, qty: a.qty })),
+    lines: allocs.map((a) => ({ allocationId: a.id, orderId: a.orderId, productId: a.productId, productName: a.productName, qty: a.qty })),
     status: 'open',
     memo: String(memo || '').slice(0, 500),
     carrier: '',
@@ -5241,7 +5368,7 @@ function matchInvoiceProduct(name: string, list: any[], productId?: string) {
 /** INVOICEアプリと同じ形の発送データ（インボイス番号は発行時に付ける） */
 function buildInvoiceShipment(si: ShipInstruction, m: NonNullable<typeof invoiceMasters>, opts: { productMap?: Record<string, string>; clinicDocId?: string; date: string }) {
   const problems: string[] = [];
-  const order = ((serverRakurakuStore.orders?.orders || []) as any[]).find((o) => o.orderId === si.orderId);
+  const order = ((serverRakurakuStore.orders?.orders || []) as any[]).find((o) => o.orderId === (si.orderIds?.[0] || si.orderId));
   const rk = masterClinicById(si.clinicId) as any;
   const clinic = (opts.clinicDocId && m.clinics.find((c) => c.id === opts.clinicDocId)) || matchInvoiceClinic(si.clinicId, [si.clinicName, rk?.clinicName, order?.customerName, rk?.clinicNameEn].filter(Boolean), m.clinics);
   if (!clinic) problems.push(`クリニック「${si.clinicName}」がインボイスのクリニックマスタにありません`);

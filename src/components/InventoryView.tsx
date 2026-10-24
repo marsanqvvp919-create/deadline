@@ -726,7 +726,7 @@ function InstructionBoard({ instructions, onSaved }: { instructions: Instruction
                   </button>
                 )}
               </div>
-              <div className="text-slate-600">{i.lines.map((l) => `${l.productName} × ${l.qty}`).join('、')}</div>
+              <div className="text-slate-600">{i.lines.map((l: any) => `${i.orderId.includes(',') && l.orderId ? `[${l.orderId}] ` : ''}${l.productName} × ${l.qty}`).join('、')}</div>
               <div className="flex flex-wrap items-stretch gap-1.5">
                 {step(true, '出荷指示', fmt(i.createdAt))}
                 {intl
@@ -832,26 +832,173 @@ function InstructionBoard({ instructions, onSaved }: { instructions: Instruction
   );
 }
 
+interface PlanLine {
+  productId: string;
+  productName: string;
+  quantity: number;
+  allocated: number;
+  need: number;
+  latestDate: string | null;
+  stock: Record<WarehouseId, number>;
+}
+interface OrderPlan {
+  orderId: string;
+  orderDate: string;
+  clinicId: string;
+  clinicName: string;
+  paymentStatus: string;
+  salesRep: string;
+  latestDate: string | null;
+  partlyAllocated: boolean;
+  lines: PlanLine[];
+  plan: {
+    type: 'single' | 'split' | 'partial' | 'none';
+    allocations: { productId: string; warehouse: WarehouseId; qty: number }[];
+    missing: { productId: string; qty: number }[];
+    singleOptions: WarehouseId[];
+    warehouses: WarehouseId[];
+  };
+}
+const PLAN_STYLE: Record<OrderPlan['plan']['type'], string> = {
+  single: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+  split: 'bg-amber-100 text-amber-800 border-amber-200',
+  partial: 'bg-orange-100 text-orange-800 border-orange-200',
+  none: 'bg-slate-100 text-slate-500 border-slate-200',
+};
+const planLabel = (p: OrderPlan['plan']) =>
+  p.type === 'single'
+    ? `${WH_NAME[p.warehouses[0]]}から1回で出荷できます`
+    : p.type === 'split'
+      ? `${p.warehouses.map((w) => WH_NAME[w]).join('と')}に分かれます`
+      : p.type === 'partial'
+        ? `一部だけ在庫あり（あと${p.missing.reduce((n, m) => n + m.qty, 0)}点は発注が必要）`
+        : '在庫なし（発注が必要）';
+
+/** 伝票1枚の引当（明細ごとの空き在庫と、案の倉庫を示す） */
+function OrderPlanCard({ op, onDone, onError }: { op: OrderPlan; onDone: () => void; onError: (m: string) => void }) {
+  const [busy, setBusy] = useState(false);
+  const [single, setSingle] = useState<WarehouseId | ''>(op.plan.singleOptions[0] || '');
+  const planned = (productId: string, w: WarehouseId) => op.plan.allocations.filter((a) => a.productId === productId && a.warehouse === w).reduce((n, a) => n + a.qty, 0);
+  const missingOf = (productId: string) => op.plan.missing.find((m) => m.productId === productId)?.qty || 0;
+  const go = async (body: object, msg: string) => {
+    if (!confirm(msg)) return;
+    setBusy(true);
+    try {
+      await api('/api/inventory/allocate-order', { method: 'POST', body: JSON.stringify({ orderId: op.orderId, ...body }) });
+      onDone();
+    } catch (e: any) {
+      onError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const dl = op.latestDate ? Math.round((new Date(op.latestDate.replace(/\//g, '-') + 'T00:00:00').getTime() - new Date(new Date().toDateString()).getTime()) / 86400000) : null;
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white">
+      <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 border-b border-slate-100">
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <span className="font-mono font-bold text-indigo-700">{op.orderId}</span>
+          <span className="text-slate-500">{op.orderDate}</span>
+          <span className={`rounded px-1.5 py-0.5 ${op.paymentStatus === '入金済' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>{op.paymentStatus || '—'}</span>
+          {op.latestDate && <span className={`rounded px-1.5 py-0.5 font-bold ${dl !== null && dl < 0 ? 'bg-rose-100 text-rose-700' : dl !== null && dl <= 7 ? 'bg-amber-100 text-amber-800' : 'text-slate-500'}`}>最長納期 {op.latestDate.slice(5)}{dl !== null && (dl < 0 ? `（${-dl}日超過）` : `（あと${dl}日）`)}</span>}
+          {op.partlyAllocated && <span className="rounded bg-indigo-50 text-indigo-700 px-1.5 py-0.5">一部引当済み</span>}
+        </div>
+        <span className={`rounded-full border px-2.5 py-0.5 text-[11px] font-bold ${PLAN_STYLE[op.plan.type]}`}>{planLabel(op.plan)}</span>
+      </div>
+      <table className="w-full text-xs">
+        <thead className="text-slate-400">
+          <tr>
+            <th className="text-left px-3 py-1 font-semibold">商品</th>
+            <th className="text-right px-2 py-1 font-semibold w-14">必要</th>
+            {WH_IDS.map((w) => (
+              <th key={w} className="text-center px-2 py-1 font-semibold w-24">
+                {WH_NAME[w].replace('倉庫', '')}の空き
+              </th>
+            ))}
+            <th className="text-right px-3 py-1 font-semibold w-20">不足</th>
+          </tr>
+        </thead>
+        <tbody>
+          {op.lines.map((l) => (
+            <tr key={l.productId} className="border-t border-slate-50">
+              <td className="px-3 py-1.5 font-semibold text-slate-800">{l.productName}</td>
+              <td className="px-2 py-1.5 text-right font-mono font-bold">{l.need}</td>
+              {WH_IDS.map((w) => {
+                const n = l.stock[w] || 0;
+                const use = planned(l.productId, w);
+                return (
+                  <td key={w} className="px-2 py-1.5 text-center">
+                    {n > 0 ? (
+                      <span className={`inline-block min-w-12 rounded px-1.5 py-0.5 font-mono ${use > 0 ? 'bg-indigo-600 text-white font-bold' : 'bg-slate-100 text-slate-500'}`} title={use > 0 ? `案ではここから${use}点` : ''}>
+                        {use > 0 ? `${use}/${n}` : n}
+                      </span>
+                    ) : (
+                      <span className="text-slate-300">—</span>
+                    )}
+                  </td>
+                );
+              })}
+              <td className={`px-3 py-1.5 text-right font-mono ${missingOf(l.productId) ? 'text-rose-600 font-bold' : 'text-slate-300'}`}>{missingOf(l.productId) || '—'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-t border-slate-100 bg-slate-50/60 text-xs">
+        {op.plan.type === 'single' && (
+          <>
+            {op.plan.singleOptions.length > 1 && (
+              <select value={single} onChange={(e) => setSingle(e.target.value as WarehouseId)} className="rounded border border-slate-300 px-2 py-1">
+                {op.plan.singleOptions.map((w) => (
+                  <option key={w} value={w}>
+                    {WH_NAME[w]}から出す
+                  </option>
+                ))}
+              </select>
+            )}
+            <button disabled={busy || !single} onClick={() => go({ mode: 'single', warehouse: single }, `${op.orderId} の全商品を${WH_NAME[single as WarehouseId]}から引き当てます。よろしいですか？`)} className="rounded-lg bg-emerald-600 text-white px-3 py-1.5 font-bold disabled:opacity-50">
+              この伝票を引き当てる（1回で出荷）
+            </button>
+          </>
+        )}
+        {(op.plan.type === 'split' || op.plan.type === 'partial') && (
+          <>
+            <span className="text-slate-500">{op.plan.type === 'split' ? '1か所ではそろいません。' : '全部はそろっていません。'}待つか、先に出すかを選んでください：</span>
+            <button
+              disabled={busy}
+              onClick={() =>
+                go(
+                  { mode: 'plan' },
+                  `${op.orderId} を先出しします。\n${op.plan.warehouses.map((w) => `・${WH_NAME[w]}：${op.plan.allocations.filter((a) => a.warehouse === w).map((a) => `${op.lines.find((l) => l.productId === a.productId)?.productName} ${a.qty}`).join('、')}`).join('\n')}${op.plan.missing.length ? `\n・残り（発注が必要）：${op.plan.missing.map((m) => `${op.lines.find((l) => l.productId === m.productId)?.productName} ${m.qty}`).join('、')}` : ''}\n\n出荷が${op.plan.warehouses.length + (op.plan.missing.length ? 1 : 0)}回に分かれます。よろしいですか？`
+                )
+              }
+              className="rounded-lg bg-amber-500 text-white px-3 py-1.5 font-bold disabled:opacity-50"
+            >
+              在庫のある分を先に出す（先出し）
+            </button>
+            <span className="text-slate-400">または、そのまま待つ（何もしない）</span>
+          </>
+        )}
+        {op.plan.type === 'none' && <span className="text-slate-500">在庫がないので「未発注」から楽楽販売で発注してください。</span>}
+      </div>
+    </div>
+  );
+}
+
+/** 引当と出荷指示：伝票ごとの引当案（クリニック単位にまとめて表示）と、引当済みから出荷指示を出す */
 export function AllocationPanel({ data, onSaved }: { data: InventoryData; onSaved: () => void }) {
-  const [cands, setCands] = useState<Candidate[] | null>(null);
-  const [pick, setPick] = useState<Record<string, Record<string, string>>>({}); // 行キー → 倉庫 → 数
-  const [checked, setChecked] = useState<Record<string, boolean>>({});
+  const [plans, setPlans] = useState<OrderPlan[] | null>(null);
+  const [filter, setFilter] = useState<'ready' | 'split' | 'all'>('ready');
+  const [q, setQ] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const rowKey = (c: Candidate) => `${c.orderId}|${c.productId}`;
+  const [pick, setPick] = useState<Record<string, Set<string>>>({}); // 出荷指示にまとめる伝票（クリニック|倉庫 → 受注ID）
 
-  const loadCands = useCallback(() => {
-    api('/api/inventory/allocation-candidates')
-      .then((j) => {
-        setCands(j.candidates);
-        const p: Record<string, Record<string, string>> = {};
-        j.candidates.forEach((c: Candidate) => (p[`${c.orderId}|${c.productId}`] = Object.fromEntries(c.suggest.map((x) => [x.warehouse, String(x.qty)]))));
-        setPick(p);
-        setChecked({});
-      })
+  const loadPlans = useCallback(() => {
+    api('/api/inventory/order-plans')
+      .then((j) => setPlans(j.plans))
       .catch((e) => setError(e.message));
   }, []);
-  useEffect(loadCands, [loadCands, data]);
+  useEffect(loadPlans, [loadPlans, data]);
 
   const run = async (fn: () => Promise<any>) => {
     setBusy(true);
@@ -865,27 +1012,52 @@ export function AllocationPanel({ data, onSaved }: { data: InventoryData; onSave
       setBusy(false);
     }
   };
-  const confirmAlloc = () =>
-    run(() => {
-      const items = (cands || [])
-        .filter((c) => checked[rowKey(c)])
-        .flatMap((c) => WH_IDS.map((w) => ({ orderId: c.orderId, productId: c.productId, warehouse: w, qty: Number(pick[rowKey(c)]?.[w] || 0) })).filter((x) => x.qty > 0));
-      return api('/api/inventory/allocations', { method: 'POST', body: JSON.stringify({ items }) });
-    });
 
-  // 引当済み（出荷指示前）をご注文・倉庫ごとにまとめる
-  const groups = useMemo(() => {
-    const m = new Map<string, { orderId: string; clinicName: string; warehouse: WarehouseId; items: Allocation[] }>();
+  const counts = useMemo(() => {
+    const c = { ready: 0, split: 0, all: 0 };
+    (plans || []).forEach((p) => {
+      if (p.plan.type === 'none') return;
+      c.all++;
+      if (p.plan.type === 'single') c.ready++;
+      else c.split++;
+    });
+    return c;
+  }, [plans]);
+
+  // クリニックごとにまとめる
+  const clinics = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    const list = (plans || []).filter((p) => {
+      if (filter === 'ready' && p.plan.type !== 'single') return false;
+      if (filter === 'split' && p.plan.type !== 'split' && p.plan.type !== 'partial') return false;
+      if (filter === 'all' && p.plan.type === 'none') return false;
+      if (needle && !`${p.orderId} ${p.clinicName} ${p.lines.map((l) => l.productName).join(' ')}`.toLowerCase().includes(needle)) return false;
+      return true;
+    });
+    const m = new Map<string, { clinicName: string; orders: OrderPlan[] }>();
+    list.forEach((p) => {
+      const k = p.clinicId || p.clinicName;
+      if (!m.has(k)) m.set(k, { clinicName: p.clinicName, orders: [] });
+      m.get(k)!.orders.push(p);
+    });
+    return Array.from(m.values());
+  }, [plans, filter, q]);
+
+  // 引当済み（出荷指示前）：クリニック × 倉庫ごと。中の伝票はまとめて1つの出荷指示にできる
+  const reserved = useMemo(() => {
+    const m = new Map<string, { key: string; clinicName: string; warehouse: WarehouseId; orders: Map<string, Allocation[]> }>();
     data.allocations
       .filter((a) => a.status === 'reserved')
       .forEach((a) => {
-        const k = `${a.orderId}|${a.warehouse}`;
-        if (!m.has(k)) m.set(k, { orderId: a.orderId, clinicName: a.clinicName, warehouse: a.warehouse, items: [] });
-        m.get(k)!.items.push(a);
+        const k = `${a.clinicName}|${a.warehouse}`;
+        if (!m.has(k)) m.set(k, { key: k, clinicName: a.clinicName, warehouse: a.warehouse, orders: new Map() });
+        const g = m.get(k)!;
+        if (!g.orders.has(a.orderId)) g.orders.set(a.orderId, []);
+        g.orders.get(a.orderId)!.push(a);
       });
     return Array.from(m.values());
   }, [data.allocations]);
-  const nChecked = Object.values(checked).filter(Boolean).length;
+  const chosen = (g: { key: string; orders: Map<string, Allocation[]> }) => pick[g.key] || new Set(g.orders.keys());
 
   return (
     <div className="space-y-4">
@@ -894,131 +1066,100 @@ export function AllocationPanel({ data, onSaved }: { data: InventoryData; onSave
       <InstructionBoard instructions={data.instructions} onSaved={onSaved} />
 
       <section className="rounded-xl border border-slate-200 bg-white">
-        <div className="p-3 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2">
+        <div className="p-3 border-b border-slate-100 space-y-2">
           <div>
-            <div className="font-bold text-sm text-slate-900">① 引当の候補（未発注の明細 × 空き在庫）</div>
-            <div className="text-[11px] text-slate-500">国内 → 韓国 → シンガポールの順に割り当てています。数を直してから、チェックした明細を確定してください。確定した明細は「発注管理（未発注）」から外れます。</div>
+            <div className="font-bold text-sm text-slate-900">① 引当（伝票ごと・クリニック単位）</div>
+            <div className="text-[11px] text-slate-500">1伝票はできるだけ1か所の倉庫からまとめて出します。1か所でそろわない伝票は、待つか「先出し」するかを選べます。青い数字が案で使う倉庫です。</div>
           </div>
-          <button disabled={busy || nChecked === 0} onClick={confirmAlloc} className="rounded-lg bg-indigo-600 text-white px-3 py-1.5 text-xs font-bold disabled:opacity-40">
-            チェックした{nChecked}件を引当確定
-          </button>
+          <div className="flex flex-wrap items-center gap-1.5 text-xs">
+            {([['ready', `1回で出荷できる（${counts.ready}）`], ['split', `倉庫が分かれる・一部不足（${counts.split}）`], ['all', `在庫のあるすべて（${counts.all}）`]] as const).map(([id, label]) => (
+              <button key={id} onClick={() => setFilter(id)} className={`rounded-lg border px-2.5 py-1 font-bold ${filter === id ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-slate-200 text-slate-700'}`}>
+                {label}
+              </button>
+            ))}
+            <div className="relative ml-auto">
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2 top-2" />
+              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="クリニック・受注ID・商品" className="rounded-lg border border-slate-200 pl-7 pr-2 py-1 w-56" />
+            </div>
+          </div>
         </div>
-        <div className="overflow-auto max-h-[420px]">
-          <table className="w-full text-xs">
-            <thead className="bg-slate-50 text-slate-500 sticky top-0">
-              <tr>
-                <th className="w-8 px-2 py-2">
-                  <input type="checkbox" checked={!!cands && cands.length > 0 && nChecked === cands.length} onChange={(e) => setChecked(Object.fromEntries((cands || []).map((c) => [rowKey(c), e.target.checked])))} />
-                </th>
-                <th className="text-left px-2 py-2">受注</th>
-                <th className="text-left px-2 py-2">商品</th>
-                <th className="text-right px-2 py-2">未引当</th>
-                {WH_IDS.map((w) => (
-                  <th key={w} className="text-right px-2 py-2 whitespace-nowrap">
-                    {WH_NAME[w].replace('倉庫', '')}（空き）
-                  </th>
-                ))}
-                <th className="text-right px-2 py-2">不足</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {cands === null && (
-                <tr>
-                  <td colSpan={8} className="px-3 py-6 text-center text-slate-400">
-                    読み込み中…
-                  </td>
-                </tr>
-              )}
-              {cands?.length === 0 && (
-                <tr>
-                  <td colSpan={8} className="px-3 py-6 text-center text-slate-400">
-                    在庫で引き当てられる未発注の明細はありません
-                  </td>
-                </tr>
-              )}
-              {cands?.map((c) => {
-                const k = rowKey(c);
-                const total = WH_IDS.reduce((n, w) => n + Number(pick[k]?.[w] || 0), 0);
-                return (
-                  <tr key={k} className={checked[k] ? 'bg-indigo-50/50' : ''}>
-                    <td className="px-2 py-1.5 text-center">
-                      <input type="checkbox" checked={!!checked[k]} onChange={(e) => setChecked({ ...checked, [k]: e.target.checked })} />
-                    </td>
-                    <td className="px-2 py-1.5 whitespace-nowrap">
-                      <div className="font-mono font-bold text-indigo-700">{c.orderId}</div>
-                      <div className="text-[11px] text-slate-500 max-w-40 truncate">{c.clinicName}</div>
-                      <div className="text-[10px] text-slate-400">{c.orderDate}・{c.paymentStatus}</div>
-                    </td>
-                    <td className="px-2 py-1.5 font-semibold">{c.productName}</td>
-                    <td className="px-2 py-1.5 text-right font-mono font-bold">{c.need}</td>
-                    {WH_IDS.map((w) => {
-                      const avail = c.stockAt.find((x) => x.warehouse === w)?.available || 0;
-                      return (
-                        <td key={w} className="px-2 py-1.5 text-right whitespace-nowrap">
-                          {avail > 0 ? (
-                            <>
-                              <input
-                                type="number"
-                                min={0}
-                                max={Math.min(avail, c.need)}
-                                value={pick[k]?.[w] ?? ''}
-                                onChange={(e) => setPick({ ...pick, [k]: { ...(pick[k] || {}), [w]: e.target.value } })}
-                                className="w-14 rounded border border-slate-300 px-1 py-0.5 text-right font-mono"
-                              />
-                              <span className="text-[10px] text-slate-400 ml-1">/{avail}</span>
-                            </>
-                          ) : (
-                            <span className="text-slate-300">—</span>
-                          )}
-                        </td>
-                      );
-                    })}
-                    <td className={`px-2 py-1.5 text-right font-mono ${c.need - total > 0 ? 'text-rose-600 font-bold' : 'text-slate-300'}`}>{Math.max(0, c.need - total) || '—'}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+        <div className="p-3 space-y-4">
+          {plans === null && <div className="text-center text-xs text-slate-400 py-6">読み込み中…</div>}
+          {plans && clinics.length === 0 && <div className="text-center text-xs text-slate-400 py-6">該当する伝票はありません（在庫が入ると、引き当てられる伝票がここに出ます）</div>}
+          {clinics.map((c) => (
+            <div key={c.clinicName} className="space-y-2">
+              <div className="text-sm font-bold text-slate-900">
+                {c.clinicName}
+                <span className="ml-2 text-[11px] font-normal text-slate-500">{c.orders.length}伝票</span>
+              </div>
+              {c.orders.map((op) => (
+                <OrderPlanCard key={op.orderId} op={op} onDone={onSaved} onError={setError} />
+              ))}
+            </div>
+          ))}
         </div>
       </section>
 
       <section className="rounded-xl border border-slate-200 bg-white">
         <div className="p-3 border-b border-slate-100">
-          <div className="font-bold text-sm text-slate-900">② 引当済み（出荷指示前）</div>
-          <div className="text-[11px] text-slate-500">ご注文・倉庫ごとにまとめています。「出荷指示を出す」と上の一覧と倉庫の担当者画面に出ます（国内倉庫は社内で出荷します）。</div>
+          <div className="font-bold text-sm text-slate-900">② 引当済み → 出荷指示</div>
+          <div className="text-[11px] text-slate-500">クリニック × 倉庫ごとにまとめています。同じクリニックの伝票はチェックしたものをまとめて1つの出荷指示（1つの荷物）にします。</div>
         </div>
-        {groups.length === 0 ? (
+        {reserved.length === 0 ? (
           <div className="p-6 text-center text-xs text-slate-400">引当済みで出荷指示前のものはありません</div>
         ) : (
           <div className="divide-y divide-slate-100">
-            {groups.map((g) => (
-              <div key={`${g.orderId}-${g.warehouse}`} className="p-3 flex flex-wrap items-start justify-between gap-2 text-xs">
-                <div>
-                  <div className="font-bold">
-                    <span className="font-mono text-indigo-700">{g.orderId}</span> {g.clinicName}
-                    <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 text-[11px]">{WH_NAME[g.warehouse]}</span>
+            {reserved.map((g) => {
+              const sel = chosen(g);
+              return (
+                <div key={g.key} className="p-3 text-xs space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="font-bold">
+                      {g.clinicName}
+                      <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5">{WH_NAME[g.warehouse]}</span>
+                    </div>
+                    <button
+                      disabled={busy || sel.size === 0}
+                      onClick={() => run(() => api('/api/inventory/instructions', { method: 'POST', body: JSON.stringify({ orderIds: Array.from(sel), warehouse: g.warehouse }) }))}
+                      className="inline-flex items-center gap-1 rounded-lg bg-slate-900 text-white px-3 py-1.5 font-bold disabled:opacity-40"
+                    >
+                      <Send className="w-3.5 h-3.5" />
+                      {sel.size > 1 ? `${sel.size}伝票をまとめて出荷指示` : '出荷指示を出す'}
+                    </button>
                   </div>
-                  {g.items.map((a) => (
-                    <div key={a.id} className="flex items-center gap-2 mt-0.5">
-                      <span>
-                        {a.productName} × <b className="font-mono">{a.qty}</b>
+                  {Array.from(g.orders.entries()).map(([orderId, items]) => (
+                    <div key={orderId} className="flex flex-wrap items-start gap-2 pl-1">
+                      {g.orders.size > 1 && (
+                        <input
+                          type="checkbox"
+                          checked={sel.has(orderId)}
+                          onChange={(e) => {
+                            const n = new Set(sel);
+                            e.target.checked ? n.add(orderId) : n.delete(orderId);
+                            setPick({ ...pick, [g.key]: n });
+                          }}
+                          className="mt-0.5"
+                        />
+                      )}
+                      <span className="font-mono font-bold text-indigo-700">{orderId}</span>
+                      <span className="flex-1">
+                        {items.map((a) => (
+                          <span key={a.id} className="mr-3 inline-flex items-center gap-1">
+                            {a.productName} × <b className="font-mono">{a.qty}</b>
+                            <button disabled={busy} onClick={() => run(() => api(`/api/inventory/allocations/${a.id}/cancel`, { method: 'POST' }))} className="text-[10px] text-slate-400 hover:text-rose-600">
+                              取消
+                            </button>
+                          </span>
+                        ))}
                       </span>
-                      <button disabled={busy} onClick={() => run(() => api(`/api/inventory/allocations/${a.id}/cancel`, { method: 'POST' }))} className="text-[11px] text-rose-600 hover:underline">
-                        引当を取り消す
-                      </button>
                     </div>
                   ))}
                 </div>
-                <button disabled={busy} onClick={() => run(() => api('/api/inventory/instructions', { method: 'POST', body: JSON.stringify({ orderId: g.orderId, warehouse: g.warehouse }) }))} className="inline-flex items-center gap-1 rounded-lg bg-slate-900 text-white px-3 py-1.5 font-bold">
-                  <Send className="w-3.5 h-3.5" />
-                  出荷指示を出す
-                </button>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </section>
-
     </div>
   );
 }
