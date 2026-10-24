@@ -869,7 +869,7 @@ function AllocationPanel({ data, onSaved }: { data: InventoryData; onSaved: () =
                     <span className="text-[11px] font-bold text-indigo-800">インボイス {i.invoiceNo}</span>
                     <InvoicePdfButtons source={`/api/invoice/doc/${i.id}`} />
                   </>
-                ) : (
+                ) : i.warehouse === 'domestic' ? null : (
                   <button onClick={() => setInvoiceFor(i.id)} className="rounded border border-indigo-300 bg-white px-2.5 py-1 text-[11px] font-bold text-indigo-700 hover:bg-indigo-50">
                     インボイスを作成
                   </button>

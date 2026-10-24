@@ -5178,8 +5178,9 @@ const normName = (v: any) =>
     .replace(/[\s　・()（）\-_/.,、。'"’]/g, '');
 const WAREHOUSE_HINT: Record<WarehouseId, RegExp> = { domestic: /japan|日本|国内|^jp$/i, korea: /korea|韓国|^kr$/i, singapore: /singapore|シンガポール|^sg$/i };
 function matchInvoiceWarehouse(w: WarehouseId, list: any[]) {
+  // 国内倉庫からの国内発送は国際インボイスが要らないので、既定の倉庫で代わりにしない
   const re = WAREHOUSE_HINT[w];
-  return list.find((x) => re.test(String(x.country || '')) || re.test(String(x.name || '')) || re.test(String(x.nameEn || ''))) || list.find((x) => x.isDefault) || null;
+  return list.find((x) => re.test(String(x.country || '')) || re.test(String(x.name || '')) || re.test(String(x.nameEn || ''))) || (w === 'domestic' ? null : list.find((x) => x.isDefault)) || null;
 }
 function matchInvoiceClinic(clinicId: string, names: string[], list: any[]) {
   const byId = list.find((c) => c.clinicId && String(c.clinicId) === clinicId);
@@ -5279,6 +5280,18 @@ app.get('/api/invoice/status', async (_req, res) => {
       match: { domestic: matchInvoiceWarehouse('domestic', m.warehouses)?.name || null, korea: matchInvoiceWarehouse('korea', m.warehouses)?.name || null, singapore: matchInvoiceWarehouse('singapore', m.warehouses)?.name || null },
       prefix: m.settings?.prefix || 'INV-',
       currency: m.settings?.currency || 'JPY',
+      // 楽楽販売の商品名・最近のご注文のクリニックが、インボイスのマスタで見つかるか
+      productMatch: (() => {
+        const names = Array.from(new Set(((serverRakurakuStore.orders?.orders || []) as any[]).flatMap((o) => o.lines.filter((l: any) => !isShippingOrFee(l.productName, l.productId)).map((l: any) => l.productName))));
+        const miss = names.filter((n) => !matchInvoiceProduct(n, m.products));
+        return { total: names.length, matched: names.length - miss.length, missingSample: miss.slice(0, 40) };
+      })(),
+      clinicMatch: (() => {
+        const recent = ((serverRakurakuStore.orders?.orders || []) as any[]).filter((o) => String(o.orderDate || '') >= '2026/08/01');
+        const ids = Array.from(new Map(recent.map((o) => [o.clinicId, o])).values());
+        const miss = ids.filter((o) => !matchInvoiceClinic(o.clinicId, [o.customerName, (masterClinicById(o.clinicId) as any)?.clinicNameEn].filter(Boolean), m.clinics));
+        return { total: ids.length, matched: ids.length - miss.length, missingSample: miss.slice(0, 30).map((o) => o.customerName) };
+      })(),
     });
   } catch (e: any) {
     res.status(500).json({ ok: false, error: e?.message || String(e) });
