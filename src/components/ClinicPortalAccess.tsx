@@ -3,7 +3,7 @@ import { Ban, ExternalLink, Eye, EyeOff, Globe, KeyRound, RotateCcw, Share2, Tra
 import { api, ClinicPicker, ClinicRef, CopyButton, Group, portalUrl } from './PortalAdminView';
 
 /** パスワードの決め方：自動で作るか、社内で決めた文字を入れるか */
-function PasswordChooser({
+export function PasswordChooser({
   mode,
   value,
   onMode,
@@ -47,7 +47,7 @@ function PasswordChooser({
   );
 }
 
-const passwordOk = (mode: 'auto' | 'manual', v: string) => mode === 'auto' || v.trim().length >= 8;
+export const passwordOk = (mode: 'auto' | 'manual', v: string) => mode === 'auto' || v.trim().length >= 8;
 
 /** クリニックマスタの1院について、お客様画面（URL・パスワード）を発行・管理する */
 export function ClinicPortalModal({

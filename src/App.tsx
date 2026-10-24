@@ -27,7 +27,7 @@ import { ProcurementView } from './components/ProcurementView';
 import { UnshippedClinicsView } from './components/UnshippedClinicsView';
 import { ProductMasterView } from './components/ProductMasterView';
 import { ClinicMasterView } from './components/ClinicMasterView';
-import { InventoryManagementView } from './components/InventoryManagementView';
+import { InventoryView } from './components/InventoryView';
 import { ArrivalTrackingView } from './components/ArrivalTrackingView';
 import { CustomsManagementView } from './components/CustomsManagementView';
 import { CoolMissingView } from './components/CoolMissingView';
@@ -747,7 +747,7 @@ export default function App() {
     {
       id: 'inventory_management',
       group: 'shipping',
-      label: '倉庫在庫（韓国・SG）',
+      label: '入荷・在庫（韓国・SG）',
       icon: Building,
       badge: null,
     },
@@ -1184,9 +1184,7 @@ export default function App() {
           )}
 
           {activeTab === 'inventory_management' && (
-            <InventoryManagementView
-              orders={filteredOrders}
-            />
+            <InventoryView orders={deliveryData.orders} />
           )}
 
           {activeTab === 'arrival_tracking' && (

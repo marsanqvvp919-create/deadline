@@ -87,7 +87,7 @@ function getSessionSecret(): Promise<string> {
   return sessionSecretPromise;
 }
 
-type Session = { t: 'staff' } | { t: 'portal'; g: string; v: number };
+type Session = { t: 'staff' } | { t: 'portal'; g: string; v: number } | { t: 'warehouse'; w: string; v: number };
 async function signSession(s: Session, days: number): Promise<string> {
   const body = Buffer.from(JSON.stringify({ ...s, exp: Date.now() + days * 86400000 })).toString('base64url');
   const sig = crypto.createHmac('sha256', await getSessionSecret()).update(body).digest('base64url');
@@ -134,7 +134,7 @@ function tooManyFailures(key: string) {
 const recordFailure = (key: string) => loginFailures.set(key, [...(loginFailures.get(key) || []), Date.now()]);
 
 app.use(async (req, res, next) => {
-  if (!req.path.startsWith('/api/') || req.path.startsWith('/api/auth/') || req.path.startsWith('/api/portal/')) return next();
+  if (!req.path.startsWith('/api/') || req.path.startsWith('/api/auth/') || req.path.startsWith('/api/portal/') || req.path.startsWith('/api/warehouse/')) return next();
   try {
     if (await isStaffRequest(req)) return next();
   } catch (e: any) {
@@ -660,6 +660,8 @@ const SUPPLIER_FIELD_MAP: Record<string, string[]> = {
   contactPerson: ['担当者', 'contactPerson'],
   email: ['メールアドレス', 'email'],
   phone: ['電話番号', 'TEL', 'phone'],
+  // 仕入先のエリア（韓国・ヨーロッパ・インド・その他）。入荷先の倉庫を決めるのに使う
+  area: ['エリア'],
 };
 
 function transformCsvToSuppliers(csvText: string): any[] {
@@ -702,6 +704,7 @@ function transformCsvToSuppliers(csvText: string): any[] {
     const contactPerson = getVal(row, 'contactPerson') || '';
     const email = getVal(row, 'email') || '';
     const phone = getVal(row, 'phone') || '';
+    const area = getVal(row, 'area') || '';
 
     records.push({
       supplierId,
@@ -711,6 +714,7 @@ function transformCsvToSuppliers(csvText: string): any[] {
       contactPerson,
       email,
       phone,
+      area,
       status: '通常取引',
     });
   }
@@ -1843,6 +1847,18 @@ async function syncAllRakurakuData(isManual = false): Promise<boolean> {
     lastSyncMode = useIncremental ? 'incremental' : 'full';
     applyWarehouseShipDates();
     applyShipmentQuantities();
+    // 発注管理（入荷予定のもと）は全件取得のときと、入荷画面から取り込みを頼まれたときに読む
+    if (!useIncremental || inboundPoRefreshRequested) {
+      inboundPoRefreshRequested = false;
+      await new Promise((r) => setTimeout(r, 2000));
+      try {
+        const resPo = await fetchRakurakuCsv(baseUrl, token, '101249', 60);
+        recordHeaders('101249', resPo.csv);
+        await mergePurchaseOrdersIntoInbound(transformCsvToPurchaseOrders(resPo.csv));
+      } catch (e: any) {
+        console.warn('[Inventory] Purchase orders fetch warning:', e?.message || e);
+      }
+    }
 
     // 成功処理
     serverRakurakuStore.lastSuccessTime = new Date().toISOString();
@@ -3984,6 +4000,12 @@ async function runCarrierAutoRefresh(force = false) {
       if (!digits.includes(d)) digits.push(d);
       recent.add(d);
     }
+    // 倉庫への入荷（ベンダー → 倉庫）の追跡番号も、まだ入荷していないものは取り直す
+    await loadInventory().catch(() => {});
+    for (const d of inboundActiveDigits()) {
+      if (!digits.includes(d)) digits.push(d);
+      recent.add(d);
+    }
     carrierLastAutoRunAt = new Date().toISOString();
     carrierLastErrors = await resolveAndLookup(digits, creds, {
       refreshStale: (r) => {
@@ -4320,6 +4342,588 @@ app.get('/api/portal/data', async (req, res) => {
   if (!g || (req.query.slug && req.query.slug !== g.slug)) return res.status(401).json({ error: 'login_required' });
   await loadCarrierStatusCache();
   res.json(buildPortalData(g));
+});
+
+// ----------------------------------------------------------------------
+// 入荷・在庫（韓国倉庫・シンガポール倉庫）
+// 楽楽販売の発注管理（発注済み）から入荷予定を作る。楽楽販売には書き込まない。
+// 入荷先倉庫・配送方法・追跡番号・数量は社内の画面で入れ、倉庫の担当者が実数を入れて承認すると在庫に加わる。
+// 出庫は倉庫の担当者が押して在庫から引く。データは Cloud Storage の inventory.json に保存する
+// ----------------------------------------------------------------------
+type WarehouseId = 'korea' | 'singapore';
+const WAREHOUSES: Record<WarehouseId, string> = { korea: '韓国倉庫', singapore: 'シンガポール倉庫' };
+const isWarehouseId = (v: any): v is WarehouseId => v === 'korea' || v === 'singapore';
+// 楽楽販売の「在庫」仕入先（在庫からの出荷）は入荷ではない
+const STOCK_SUPPLIER_IDS = new Set(['000000017']);
+
+interface InboundLine {
+  key: string;
+  productId: string;
+  productName: string;
+  poQty: number; // 楽楽販売の発注数
+  qty: number; // 入荷予定数（社内で直せる）
+  qtyEdited?: boolean;
+  receivedQty?: number; // 倉庫で承認した実数
+}
+interface InboundRec {
+  poId: string;
+  rakurakuStatus: string;
+  poDate: string;
+  supplierId: string;
+  supplierName: string;
+  supplierArea: string;
+  orderId: string;
+  clinicName: string;
+  lines: InboundLine[];
+  warehouse: WarehouseId;
+  warehouseEdited?: boolean;
+  method: '' | 'tracking' | 'kick' | 'handcarry';
+  trackingNos: string[];
+  memo: string;
+  excluded?: boolean;
+  cancelled?: boolean; // 楽楽販売で発注済みでなくなった（取消など）
+  received?: boolean;
+  receivedAt?: string;
+  receivedMemo?: string;
+  shortage?: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+interface StockItem {
+  productId: string;
+  productName: string;
+  qty: number;
+  updatedAt: string;
+}
+interface StockMove {
+  id: string;
+  at: string;
+  warehouse: WarehouseId;
+  productId: string;
+  productName: string;
+  delta: number;
+  type: 'inbound' | 'outbound' | 'adjust' | 'import' | 'unreceive';
+  ref?: string;
+  memo?: string;
+  by: 'staff' | 'warehouse';
+}
+interface WarehouseAccess {
+  slug: string;
+  salt: string;
+  hash: string;
+  pwVersion: number;
+  disabled?: boolean;
+  lastLoginAt?: string;
+}
+interface InventoryStore {
+  settings: { startDate: string }; // この発注日以降の発注を入荷予定にする
+  inbound: Record<string, InboundRec>;
+  stock: Record<WarehouseId, Record<string, StockItem>>;
+  moves: StockMove[];
+  access: Partial<Record<WarehouseId, WarehouseAccess>>;
+  poSyncedAt?: string;
+}
+const INVENTORY_OBJECT = 'inventory.json';
+const WAREHOUSE_COOKIE = 'nk_wh';
+let inventory: InventoryStore = { settings: { startDate: '2026/10/24' }, inbound: {}, stock: { korea: {}, singapore: {} }, moves: [], access: {} };
+let inventoryLoadPromise: Promise<void> | null = null;
+let inboundPoRefreshRequested = false;
+
+function loadInventory() {
+  if (!inventoryLoadPromise) {
+    inventoryLoadPromise = (async () => {
+      if (!CACHE_BUCKET) return;
+      try {
+        const [buf] = await new Storage().bucket(CACHE_BUCKET).file(INVENTORY_OBJECT).download();
+        const j = JSON.parse(buf.toString('utf-8'));
+        inventory = {
+          settings: { startDate: j?.settings?.startDate || inventory.settings.startDate },
+          inbound: j?.inbound || {},
+          stock: { korea: j?.stock?.korea || {}, singapore: j?.stock?.singapore || {} },
+          moves: Array.isArray(j?.moves) ? j.moves : [],
+          access: j?.access || {},
+          poSyncedAt: j?.poSyncedAt,
+        };
+      } catch (e: any) {
+        if (e?.code !== 404) {
+          inventoryLoadPromise = null;
+          throw e;
+        }
+      }
+    })();
+  }
+  return inventoryLoadPromise;
+}
+async function saveInventory() {
+  if (!CACHE_BUCKET) return;
+  // 入出庫の履歴は直近5,000件だけ残す
+  if (inventory.moves.length > 5000) inventory.moves = inventory.moves.slice(-5000);
+  await new Storage()
+    .bucket(CACHE_BUCKET)
+    .file(INVENTORY_OBJECT)
+    .save(JSON.stringify(inventory), { contentType: 'application/json', resumable: false });
+}
+
+const PO_FIELD_MAP: Record<string, string[]> = {
+  poId: ['発注ID'],
+  status: ['ステータス'],
+  supplierId: ['仕入先ID'],
+  supplierName: ['仕入先名'],
+  orderId: ['受注ID'],
+  poDate: ['発注日'],
+  productId: ['商品ID'],
+  productName: ['商品名'],
+  quantity: ['数量'],
+};
+/** 発注管理のCSV（明細ごとに1行）を発注ごとにまとめる */
+function transformCsvToPurchaseOrders(csvText: string) {
+  const rows = parseCsv(csvText);
+  if (rows.length < 2) return [];
+  const headers = rows[0].map((h) => h.replace(/^["'\s]+|["'\s]+$/g, ''));
+  const idx: Record<string, number> = {};
+  for (const [key, aliases] of Object.entries(PO_FIELD_MAP)) {
+    const i = headers.findIndex((h) => aliases.includes(h));
+    if (i !== -1) idx[key] = i;
+  }
+  const get = (row: string[], key: string) => (idx[key] !== undefined ? String(row[idx[key]] ?? '').trim() : '');
+  const byId = new Map<string, { poId: string; status: string; supplierId: string; supplierName: string; orderId: string; poDate: string; lines: { productId: string; productName: string; quantity: number }[] }>();
+  for (let r = 1; r < rows.length; r++) {
+    const row = rows[r];
+    const poId = get(row, 'poId');
+    if (!poId) continue;
+    let po = byId.get(poId);
+    if (!po) {
+      po = { poId, status: get(row, 'status'), supplierId: get(row, 'supplierId'), supplierName: get(row, 'supplierName'), orderId: get(row, 'orderId').replace(/-\d+$/, ''), poDate: get(row, 'poDate'), lines: [] };
+      byId.set(poId, po);
+    }
+    const productName = get(row, 'productName');
+    if (!productName && !get(row, 'productId')) continue;
+    if (isShippingOrFee(productName, get(row, 'productId'))) continue;
+    po.lines.push({ productId: get(row, 'productId'), productName, quantity: parseInt(get(row, 'quantity'), 10) || 0 });
+  }
+  return Array.from(byId.values());
+}
+
+const ymdSlash = (v: string) => {
+  const m = String(v || '').match(/(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})/);
+  return m ? `${m[1]}/${m[2].padStart(2, '0')}/${m[3].padStart(2, '0')}` : '';
+};
+const supplierById = (id: string) => (serverRakurakuStore.suppliers || []).find((s: any) => s.supplierId === id) || null;
+/** 仕入先のエリアから入荷先を決める（韓国→韓国倉庫、それ以外→シンガポール倉庫） */
+const warehouseForArea = (area: string): WarehouseId => (/韓国/.test(area || '') ? 'korea' : 'singapore');
+
+async function mergePurchaseOrdersIntoInbound(pos: ReturnType<typeof transformCsvToPurchaseOrders>) {
+  await loadInventory();
+  if (pos.length === 0) return;
+  const now = new Date().toISOString();
+  const start = ymdSlash(inventory.settings.startDate);
+  const seen = new Set<string>();
+  const ordersById = new Map(((serverRakurakuStore.orders?.orders || []) as any[]).map((o) => [o.orderId, o]));
+  for (const po of pos) {
+    seen.add(po.poId);
+    const ordered = /発注済/.test(po.status);
+    const existing = inventory.inbound[po.poId];
+    if (!existing) {
+      if (!ordered || STOCK_SUPPLIER_IDS.has(po.supplierId) || po.lines.length === 0) continue;
+      if (start && ymdSlash(po.poDate) && ymdSlash(po.poDate) < start) continue;
+      const sup = supplierById(po.supplierId);
+      const area = sup?.area || '';
+      inventory.inbound[po.poId] = {
+        poId: po.poId,
+        rakurakuStatus: po.status,
+        poDate: ymdSlash(po.poDate),
+        supplierId: po.supplierId,
+        supplierName: po.supplierName || sup?.supplierName || '',
+        supplierArea: area,
+        orderId: po.orderId,
+        clinicName: ordersById.get(po.orderId)?.customerName || '',
+        lines: po.lines.map((l, i) => ({ key: `${i + 1}`, productId: l.productId, productName: l.productName, poQty: l.quantity, qty: l.quantity })),
+        warehouse: warehouseForArea(area),
+        method: '',
+        trackingNos: [],
+        memo: '',
+        createdAt: now,
+        updatedAt: now,
+      };
+      continue;
+    }
+    existing.rakurakuStatus = po.status;
+    if (existing.received) continue;
+    existing.cancelled = !ordered;
+    // 発注の明細が楽楽販売で変わったら、社内で直していない数量だけ追従する
+    po.lines.forEach((l, i) => {
+      const cur = existing.lines.find((x) => x.productId === l.productId && x.productName === l.productName) || existing.lines[i];
+      if (!cur) existing.lines.push({ key: `${existing.lines.length + 1}`, productId: l.productId, productName: l.productName, poQty: l.quantity, qty: l.quantity });
+      else {
+        cur.poQty = l.quantity;
+        if (!cur.qtyEdited) cur.qty = l.quantity;
+      }
+    });
+    if (!existing.warehouseEdited) {
+      const area = supplierById(existing.supplierId)?.area || existing.supplierArea;
+      existing.supplierArea = area;
+      existing.warehouse = warehouseForArea(area);
+    }
+  }
+  // 楽楽販売から消えた発注（削除）は、まだ入荷していなければ取消扱い
+  for (const rec of Object.values(inventory.inbound)) {
+    if (!seen.has(rec.poId) && !rec.received) rec.cancelled = true;
+  }
+  inventory.poSyncedAt = now;
+  await saveInventory();
+}
+
+/** 入荷予定の表示用の状態 */
+function inboundState(rec: InboundRec): { code: string; label: string; tracking: any[] } {
+  const tracking = rec.trackingNos.map((n) => resolvedStatusForClient(n.replace(/\D/g, '')) || { trackingNo: n, status: 'unknown', statusText: '確認待ち' });
+  if (rec.cancelled) return { code: 'cancelled', label: '発注取消', tracking };
+  if (rec.excluded) return { code: 'excluded', label: '対象外', tracking };
+  if (rec.received) return { code: rec.shortage ? 'shortage' : 'received', label: rec.shortage ? '入荷済み（不足あり）' : '入荷済み', tracking };
+  if (rec.method === 'kick') return { code: 'kick', label: 'キック（追跡なし）・受取待ち', tracking };
+  if (rec.method === 'handcarry') return { code: 'handcarry', label: '直接持込・受取待ち', tracking };
+  if (rec.trackingNos.length === 0) return { code: 'no_tracking', label: '追跡番号待ち', tracking };
+  if (tracking.some((t: any) => t.status === 'delivered')) return { code: 'arrived', label: '倉庫に到着・承認待ち', tracking };
+  if (tracking.some((t: any) => t.status === 'in_transit' || t.status === 'exception')) return { code: 'in_transit', label: '配送中', tracking };
+  return { code: 'tracking', label: '追跡中', tracking };
+}
+
+/** まだ入荷していない入荷予定の追跡番号（配送会社の自動確認に足す） */
+function inboundActiveDigits(): string[] {
+  const out: string[] = [];
+  for (const rec of Object.values(inventory.inbound)) {
+    if (rec.received || rec.excluded || rec.cancelled || rec.method !== 'tracking') continue;
+    for (const n of rec.trackingNos) {
+      const d = n.replace(/\D/g, '');
+      if (d.length >= 10 && !out.includes(d)) out.push(d);
+    }
+  }
+  return out;
+}
+
+const moveId = () => crypto.randomBytes(6).toString('hex');
+function addStock(w: WarehouseId, productId: string, productName: string, delta: number, type: StockMove['type'], by: StockMove['by'], ref?: string, memo?: string) {
+  const key = productId || `name:${productName}`;
+  const cur = inventory.stock[w][key] || { productId, productName, qty: 0, updatedAt: '' };
+  cur.qty += delta;
+  cur.productName = productName || cur.productName;
+  cur.updatedAt = new Date().toISOString();
+  inventory.stock[w][key] = cur;
+  inventory.moves.push({ id: moveId(), at: cur.updatedAt, warehouse: w, productId, productName: cur.productName, delta, type, ref, memo, by });
+}
+
+function inboundView(rec: InboundRec, forWarehouse = false) {
+  const st = inboundState(rec);
+  return {
+    poId: rec.poId,
+    poDate: rec.poDate,
+    supplierName: rec.supplierName,
+    supplierArea: rec.supplierArea,
+    orderId: rec.orderId,
+    ...(forWarehouse ? {} : { clinicName: rec.clinicName, rakurakuStatus: rec.rakurakuStatus, excluded: !!rec.excluded, cancelled: !!rec.cancelled, warehouseEdited: !!rec.warehouseEdited }),
+    lines: rec.lines.map((l) => ({ key: l.key, productId: l.productId, productName: l.productName, poQty: l.poQty, qty: l.qty, qtyEdited: !!l.qtyEdited, receivedQty: l.receivedQty ?? null })),
+    warehouse: rec.warehouse,
+    method: rec.method,
+    trackingNos: rec.trackingNos,
+    tracking: st.tracking.map((t: any) => ({ trackingNo: t.trackingNo, carrier: t.carrier || '', status: t.status, statusText: t.statusText, lastLocation: t.lastLocation || '', lastEventAt: t.lastEventAt || null, deliveredAt: t.deliveredAt || null })),
+    memo: rec.memo,
+    state: st.code,
+    stateLabel: st.label,
+    received: !!rec.received,
+    receivedAt: rec.receivedAt || null,
+    receivedMemo: rec.receivedMemo || '',
+    shortage: !!rec.shortage,
+    updatedAt: rec.updatedAt,
+  };
+}
+const stockList = (w: WarehouseId) =>
+  Object.entries(inventory.stock[w])
+    .map(([key, s]) => ({ key, ...s }))
+    .sort((a, b) => a.productName.localeCompare(b.productName, 'ja'));
+
+// --- 社内の画面
+app.get('/api/inventory', async (_req, res) => {
+  await loadInventory();
+  const inbound = Object.values(inventory.inbound)
+    .sort((a, b) => (b.poDate || '').localeCompare(a.poDate || '') || b.poId.localeCompare(a.poId))
+    .map((r) => inboundView(r));
+  res.json({
+    settings: inventory.settings,
+    poSyncedAt: inventory.poSyncedAt || null,
+    warehouses: (Object.keys(WAREHOUSES) as WarehouseId[]).map((w) => ({
+      id: w,
+      name: WAREHOUSES[w],
+      slug: inventory.access[w]?.slug || null,
+      disabled: !!inventory.access[w]?.disabled,
+      lastLoginAt: inventory.access[w]?.lastLoginAt || null,
+    })),
+    inbound,
+    stock: { korea: stockList('korea'), singapore: stockList('singapore') },
+    moves: inventory.moves.slice(-500).reverse(),
+  });
+});
+
+app.post('/api/inventory/inbound/:poId', async (req, res) => {
+  await loadInventory();
+  const rec = inventory.inbound[req.params.poId];
+  if (!rec) return res.status(404).json({ error: '入荷予定が見つかりません' });
+  const b = req.body || {};
+  if (isWarehouseId(b.warehouse) && !rec.received) {
+    rec.warehouse = b.warehouse;
+    rec.warehouseEdited = true;
+  }
+  if (['', 'tracking', 'kick', 'handcarry'].includes(b.method)) rec.method = b.method;
+  let newDigits: string[] = [];
+  if (Array.isArray(b.trackingNos) || typeof b.trackingNos === 'string') {
+    const list = (Array.isArray(b.trackingNos) ? b.trackingNos.join('、') : b.trackingNos)
+      .split(/[、,\s\n]+/)
+      .map((x: string) => x.trim())
+      .filter(Boolean)
+      .slice(0, 20);
+    newDigits = list.map((x: string) => x.replace(/\D/g, '')).filter((d: string) => d.length >= 10 && !rec.trackingNos.some((n) => n.replace(/\D/g, '') === d));
+    rec.trackingNos = Array.from(new Set(list));
+    if (rec.trackingNos.length > 0 && !rec.method) rec.method = 'tracking';
+  }
+  if (Array.isArray(b.lines) && !rec.received) {
+    for (const l of b.lines) {
+      const cur = rec.lines.find((x) => x.key === String(l.key));
+      const q = Number(l.qty);
+      if (cur && Number.isFinite(q) && q >= 0) {
+        cur.qty = Math.round(q);
+        cur.qtyEdited = cur.qty !== cur.poQty;
+      }
+    }
+  }
+  if (typeof b.excluded === 'boolean') rec.excluded = b.excluded;
+  if (typeof b.memo === 'string') rec.memo = b.memo.slice(0, 500);
+  rec.updatedAt = new Date().toISOString();
+  await saveInventory();
+  // 入れたばかりの追跡番号は、すぐ配送会社に問い合わせる（結果は次に画面を開いたときに出る）
+  if (newDigits.length > 0) {
+    effectiveCarrierCreds()
+      .then(({ creds }) => resolveAndLookup(newDigits, creds, { force: true, dhlLimit: Math.max(0, DHL_DAILY_BUDGET - dhlUsedToday()) }))
+      .then(() => scheduleCarrierStatusSave())
+      .catch((e) => console.warn('[Inventory] Tracking lookup failed:', e?.message || e));
+  }
+  res.json({ inbound: inboundView(rec) });
+});
+
+// 承認の取り消し（間違えて承認したとき）。在庫から承認した数を引いて、承認待ちに戻す
+app.post('/api/inventory/inbound/:poId/unreceive', async (req, res) => {
+  await loadInventory();
+  const rec = inventory.inbound[req.params.poId];
+  if (!rec || !rec.received) return res.status(400).json({ error: '入荷済みではありません' });
+  // すでに出庫して在庫が承認数より少ない商品があるときは取り消せない（在庫がマイナスになる）
+  for (const l of rec.lines) {
+    const have = inventory.stock[rec.warehouse][l.productId || `name:${l.productName}`]?.qty || 0;
+    if ((l.receivedQty || 0) > have) return res.status(400).json({ error: `「${l.productName}」はすでに出庫されていて在庫（${have}）が承認数（${l.receivedQty}）より少ないため、取り消せません。在庫タブで数を直してください` });
+  }
+  for (const l of rec.lines) {
+    if (l.receivedQty) addStock(rec.warehouse, l.productId, l.productName, -l.receivedQty, 'unreceive', 'staff', rec.poId, '承認の取り消し');
+    delete l.receivedQty;
+  }
+  rec.received = false;
+  rec.shortage = false;
+  delete rec.receivedAt;
+  rec.updatedAt = new Date().toISOString();
+  await saveInventory();
+  res.json({ inbound: inboundView(rec) });
+});
+
+// 在庫数を直接直す（棚卸し・初期在庫）。qty は直したあとの数
+app.post('/api/inventory/stock', async (req, res) => {
+  await loadInventory();
+  const { warehouse, productId, productName, qty, memo } = req.body || {};
+  if (!isWarehouseId(warehouse)) return res.status(400).json({ error: '倉庫を選んでください' });
+  const n = Math.round(Number(qty));
+  if (!Number.isFinite(n) || n < 0) return res.status(400).json({ error: '数量は0以上の数字にしてください' });
+  const name = String(productName || '').trim().slice(0, 200);
+  if (!productId && !name) return res.status(400).json({ error: '商品を選んでください' });
+  const key = productId || `name:${name}`;
+  const cur = inventory.stock[warehouse][key]?.qty || 0;
+  if (n !== cur) addStock(warehouse, String(productId || ''), name || inventory.stock[warehouse][key]?.productName || '', n - cur, 'adjust', 'staff', undefined, String(memo || '在庫数の修正').slice(0, 200));
+  await saveInventory();
+  res.json({ stock: stockList(warehouse) });
+});
+
+// 在庫の取り込み（倉庫のCSVなど）。replace なら載っていない商品は0にする
+app.post('/api/inventory/import', async (req, res) => {
+  await loadInventory();
+  const { warehouse, rows, replace } = req.body || {};
+  if (!isWarehouseId(warehouse)) return res.status(400).json({ error: '倉庫を選んでください' });
+  if (!Array.isArray(rows) || rows.length === 0) return res.status(400).json({ error: '取り込む行がありません' });
+  const want = new Map<string, { productId: string; productName: string; qty: number }>();
+  for (const r of rows.slice(0, 5000)) {
+    const productId = String(r.productId || '').trim();
+    const productName = String(r.productName || '').trim().slice(0, 200);
+    const qty = Math.round(Number(r.qty));
+    if ((!productId && !productName) || !Number.isFinite(qty)) continue;
+    const key = productId || `name:${productName}`;
+    const prev = want.get(key);
+    want.set(key, { productId, productName, qty: (prev?.qty || 0) + Math.max(0, qty) });
+  }
+  if (replace) {
+    for (const [key, s] of Object.entries(inventory.stock[warehouse])) {
+      if (!want.has(key) && s.qty !== 0) addStock(warehouse, s.productId, s.productName, -s.qty, 'import', 'staff', undefined, '取り込みに無い商品');
+    }
+  }
+  for (const [key, w] of want) {
+    const cur = inventory.stock[warehouse][key]?.qty || 0;
+    if (w.qty !== cur) addStock(warehouse, w.productId, w.productName, w.qty - cur, 'import', 'staff', undefined, '在庫の取り込み');
+  }
+  await saveInventory();
+  res.json({ stock: stockList(warehouse), count: want.size });
+});
+
+app.post('/api/inventory/settings', async (req, res) => {
+  await loadInventory();
+  const d = ymdSlash(String(req.body?.startDate || ''));
+  if (!d) return res.status(400).json({ error: '日付を入れてください' });
+  inventory.settings.startDate = d;
+  await saveInventory();
+  res.json({ settings: inventory.settings });
+});
+
+// 楽楽販売の発注管理を今すぐ読み直す（次の同期で発注も取り込む）
+let lastInboundRefreshAt = 0;
+app.post('/api/inventory/refresh-po', async (_req, res) => {
+  if (Date.now() - lastInboundRefreshAt < 5 * 60 * 1000) return res.status(429).json({ error: '5分以内に取り込み済みです。少し待ってからお試しください' });
+  lastInboundRefreshAt = Date.now();
+  inboundPoRefreshRequested = true;
+  const ok = await syncAllRakurakuData(false);
+  await loadInventory();
+  res.json({ success: ok, poSyncedAt: inventory.poSyncedAt || null });
+});
+
+// 倉庫の担当者画面のURLとパスワード（発行・変更）
+app.post('/api/inventory/warehouse/:w/password', async (req, res) => {
+  await loadInventory();
+  const w = req.params.w;
+  if (!isWarehouseId(w)) return res.status(404).json({ error: '倉庫が見つかりません' });
+  const { password, error } = portalPasswordFromBody(req.body);
+  if (!password) return res.status(400).json({ error });
+  const cur = inventory.access[w];
+  const salt = crypto.randomBytes(16).toString('hex');
+  inventory.access[w] = {
+    slug: cur?.slug || randomFrom('abcdefghijkmnpqrstuvwxyz23456789', 16),
+    salt,
+    hash: hashPassword(password, salt),
+    pwVersion: (cur?.pwVersion || 0) + 1,
+    disabled: cur?.disabled,
+    lastLoginAt: cur?.lastLoginAt,
+  };
+  await saveInventory();
+  res.json({ slug: inventory.access[w]!.slug, password });
+});
+app.post('/api/inventory/warehouse/:w', async (req, res) => {
+  await loadInventory();
+  const w = req.params.w;
+  if (!isWarehouseId(w) || !inventory.access[w]) return res.status(404).json({ error: 'まだ発行していません' });
+  if (typeof req.body?.disabled === 'boolean') inventory.access[w]!.disabled = req.body.disabled;
+  await saveInventory();
+  res.json({ ok: true });
+});
+
+// 手元の動作確認用：発注管理のCSVを渡して入荷予定に取り込む（本番では使えない）
+if (process.env.NODE_ENV !== 'production') {
+  app.post('/api/inventory/dev-import-po', async (req, res) => {
+    await mergePurchaseOrdersIntoInbound(transformCsvToPurchaseOrders(String(req.body?.csv || '')));
+    res.json({ ok: true, count: Object.keys(inventory.inbound).length });
+  });
+}
+
+// --- 倉庫の担当者の画面（/warehouse/:slug）
+const warehouseBySlug = (slug: string): WarehouseId | null =>
+  (Object.keys(WAREHOUSES) as WarehouseId[]).find((w) => inventory.access[w]?.slug === slug && !inventory.access[w]?.disabled) || null;
+async function warehouseFromRequest(req: express.Request): Promise<WarehouseId | null> {
+  const s = await readSession(readCookie(req, WAREHOUSE_COOKIE));
+  if (!s || s.t !== 'warehouse' || !isWarehouseId(s.w)) return null;
+  await loadInventory();
+  const a = inventory.access[s.w];
+  if (!a || a.disabled || a.pwVersion !== s.v) return null;
+  const slug = String(req.query.slug || req.body?.slug || '');
+  if (slug && a.slug !== slug) return null;
+  return s.w;
+}
+app.get('/api/warehouse/info/:slug', async (req, res) => {
+  await loadInventory();
+  const w = warehouseBySlug(req.params.slug);
+  if (!w) return res.status(404).json({ error: 'このURLは使えません。担当者にお問い合わせください' });
+  res.json({ warehouse: w, name: WAREHOUSES[w] });
+});
+app.post('/api/warehouse/login', async (req, res) => {
+  await loadInventory();
+  const key = clientKey(req, 'warehouse');
+  if (tooManyFailures(key)) return res.status(429).json({ error: 'パスワードを続けて間違えたため、10分ほど待ってからお試しください / Too many attempts. Please wait 10 minutes.' });
+  const w = warehouseBySlug(String(req.body?.slug || ''));
+  const a = w ? inventory.access[w] : null;
+  const password = String(req.body?.password || '');
+  if (!w || !a || !password || !safeEqualHex(hashPassword(password, a.salt), a.hash)) {
+    recordFailure(key);
+    return res.status(401).json({ error: 'パスワードが違います / Incorrect password' });
+  }
+  a.lastLoginAt = new Date().toISOString();
+  saveInventory().catch(() => {});
+  setCookie(res, WAREHOUSE_COOKIE, await signSession({ t: 'warehouse', w, v: a.pwVersion }, PORTAL_SESSION_DAYS), PORTAL_SESSION_DAYS);
+  res.json({ ok: true, warehouse: w, name: WAREHOUSES[w] });
+});
+app.post('/api/warehouse/logout', (_req, res) => {
+  clearCookie(res, WAREHOUSE_COOKIE);
+  res.json({ ok: true });
+});
+app.get('/api/warehouse/data', async (req, res) => {
+  const w = await warehouseFromRequest(req);
+  if (!w) return res.status(401).json({ error: 'login_required' });
+  const inbound = Object.values(inventory.inbound)
+    .filter((r) => r.warehouse === w && !r.excluded && !r.cancelled)
+    .sort((a, b) => (b.poDate || '').localeCompare(a.poDate || '') || b.poId.localeCompare(a.poId))
+    .map((r) => inboundView(r, true));
+  res.json({
+    warehouse: w,
+    name: WAREHOUSES[w],
+    inbound,
+    stock: stockList(w),
+    moves: inventory.moves.filter((m) => m.warehouse === w).slice(-300).reverse(),
+  });
+});
+// 入荷の承認：届いた実数を入れる。発注数より少ない明細があれば「不足あり」
+app.post('/api/warehouse/inbound/:poId/receive', async (req, res) => {
+  const w = await warehouseFromRequest(req);
+  if (!w) return res.status(401).json({ error: 'login_required' });
+  const rec = inventory.inbound[req.params.poId];
+  if (!rec || rec.warehouse !== w || rec.excluded || rec.cancelled) return res.status(404).json({ error: '入荷予定が見つかりません / Not found' });
+  if (rec.received) return res.status(400).json({ error: 'すでに承認済みです / Already received' });
+  const given = new Map<string, number>((Array.isArray(req.body?.lines) ? req.body.lines : []).map((l: any) => [String(l.key), Math.round(Number(l.receivedQty))]));
+  for (const l of rec.lines) {
+    const q = given.get(l.key);
+    if (q === undefined || !Number.isFinite(q) || q < 0) return res.status(400).json({ error: `「${l.productName}」の入荷数を入れてください / Enter the received quantity` });
+  }
+  let shortage = false;
+  for (const l of rec.lines) {
+    l.receivedQty = given.get(l.key)!;
+    if (l.receivedQty < l.qty) shortage = true;
+    if (l.receivedQty > 0) addStock(w, l.productId, l.productName, l.receivedQty, 'inbound', 'warehouse', rec.poId, rec.supplierName);
+  }
+  rec.received = true;
+  rec.shortage = shortage;
+  rec.receivedAt = new Date().toISOString();
+  rec.receivedMemo = String(req.body?.memo || '').slice(0, 500);
+  rec.updatedAt = rec.receivedAt;
+  await saveInventory();
+  res.json({ inbound: inboundView(rec, true), stock: stockList(w) });
+});
+// 出庫：在庫から引く（在庫より多くは引けない）
+app.post('/api/warehouse/outbound', async (req, res) => {
+  const w = await warehouseFromRequest(req);
+  if (!w) return res.status(401).json({ error: 'login_required' });
+  const key = String(req.body?.key || '');
+  const qty = Math.round(Number(req.body?.qty));
+  const item = inventory.stock[w][key];
+  if (!item) return res.status(404).json({ error: '商品が見つかりません / Item not found' });
+  if (!Number.isFinite(qty) || qty <= 0) return res.status(400).json({ error: '数量を入れてください / Enter a quantity' });
+  if (qty > item.qty) return res.status(400).json({ error: `在庫（${item.qty}）より多くは出庫できません / Not enough stock (${item.qty})` });
+  addStock(w, item.productId, item.productName, -qty, 'outbound', 'warehouse', String(req.body?.ref || '').slice(0, 100) || undefined, String(req.body?.memo || '').slice(0, 300) || undefined);
+  await saveInventory();
+  res.json({ stock: stockList(w) });
 });
 
 async function startServer() {
