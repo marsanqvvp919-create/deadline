@@ -28,6 +28,7 @@ import { UnshippedClinicsView } from './components/UnshippedClinicsView';
 import { ProductMasterView } from './components/ProductMasterView';
 import { ClinicMasterView } from './components/ClinicMasterView';
 import { InventoryView } from './components/InventoryView';
+import { UnorderedView } from './components/UnorderedView';
 import { ArrivalTrackingView } from './components/ArrivalTrackingView';
 import { CustomsManagementView } from './components/CustomsManagementView';
 import { CoolMissingView } from './components/CoolMissingView';
@@ -225,6 +226,8 @@ export default function App() {
 
   // 「楽楽販売と未照合」の件数（サイドバーのバッジ用。サーバーの照合結果を15分ごとに読む）
   const [sheetUnmatchedCount, setSheetUnmatchedCount] = useState<number | null>(null);
+  // 未発注は新しい表示（在庫の引当つき）が標準。以前の表示（仕入先ごとのまとめ・発注依頼文）にも切り替えられる
+  const [procurementClassic, setProcurementClassic] = useState(false);
   useEffect(() => {
     let cancelled = false;
     const loadCount = () =>
@@ -692,7 +695,7 @@ export default function App() {
     {
       id: 'procurement',
       group: 'today',
-      label: '発注管理（未発注）',
+      label: '未発注',
       icon: ShoppingCart,
       badge: paidUnorderedCount > 0 ? `${paidUnorderedCount}` : null,
       badgeColor: 'bg-amber-500 text-white font-bold',
@@ -990,14 +993,28 @@ export default function App() {
             />
           )}
 
-          {activeTab === 'procurement' && (
-            <ProcurementView
-              orders={filteredOrders}
-              onSelectOrderLine={handleOpenDetail}
-              onOpenClinicStatus={handleOpenClinicStatus}
-              onDataUpdated={() => loadData(false)}
-            />
-          )}
+          {activeTab === 'procurement' &&
+            (procurementClassic ? (
+              <div className="space-y-2">
+                <button onClick={() => setProcurementClassic(false)} className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50">
+                  ← 新しい表示に戻る
+                </button>
+                <ProcurementView
+                  orders={filteredOrders}
+                  onSelectOrderLine={handleOpenDetail}
+                  onOpenClinicStatus={handleOpenClinicStatus}
+                  onDataUpdated={() => loadData(false)}
+                />
+              </div>
+            ) : (
+              <UnorderedView
+                orders={filteredOrders}
+                onSelectOrderLine={handleOpenDetail}
+                onOpenClinicStatus={handleOpenClinicStatus}
+                onDataUpdated={() => loadData(false)}
+                onShowClassic={() => setProcurementClassic(true)}
+              />
+            ))}
 
           {activeTab === 'unshipped_clinics' && (
             <UnshippedClinicsView
