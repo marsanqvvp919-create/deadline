@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { demoHeaders, isInventoryDemo, setInventoryDemo } from '../utils/demo';
 import { Boxes, CheckCircle2, Copy, Check, ExternalLink, KeyRound, PackageCheck, RefreshCw, Search, Truck, Upload, X, Ban, RotateCcw, History, Warehouse, ClipboardList, Send } from 'lucide-react';
 import { PasswordChooser, passwordOk } from './ClinicPortalAccess';
 import { Order } from '../types';
@@ -139,7 +140,7 @@ const STATE_STYLE: Record<string, string> = {
 };
 
 async function api(path: string, init?: RequestInit) {
-  const r = await fetch(path, { ...init, headers: { 'Content-Type': 'application/json', ...(init?.headers || {}) } });
+  const r = await fetch(path, { ...init, headers: { 'Content-Type': 'application/json', ...demoHeaders(), ...(init?.headers || {}) } });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(j?.error || `エラー（${r.status}）`);
   return j;
@@ -695,15 +696,14 @@ function InstructionBoard({ instructions, onSaved }: { instructions: Instruction
               {label}
             </button>
           ))}
-          <select value={wh} onChange={(e) => setWh(e.target.value as any)} className="rounded-lg border border-slate-200 px-2 py-1">
-            <option value="all">すべての倉庫</option>
-            {WH_IDS.map((w) => (
-              <option key={w} value={w}>
-                {WH_NAME[w]}
-              </option>
-            ))}
-          </select>
         </div>
+      </div>
+      <div className="px-3 pt-2">
+        <WarehouseTabs
+          value={wh}
+          onChange={setWh}
+          counts={Object.fromEntries((['all', ...WH_IDS] as const).map((w) => [w, instructions.filter((i) => (filter === 'all' || i.status === filter) && (w === 'all' || i.warehouse === w)).length]))}
+        />
       </div>
       {error && <div className="m-3 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs px-3 py-2">{error}</div>}
       <div className="divide-y divide-slate-100">
@@ -1164,6 +1164,156 @@ export function AllocationPanel({ data, onSaved }: { data: InventoryData; onSave
   );
 }
 
+/** サンプル表示の切り替え（実データと切り離したサンプルで流れを試す） */
+function DemoBar({ onChange }: { onChange: () => void }) {
+  const [on, setOn] = useState(isInventoryDemo());
+  return (
+    <div className={`flex flex-wrap items-center gap-2 rounded-xl border px-3 py-2 text-xs ${on ? 'border-fuchsia-300 bg-fuchsia-50 text-fuchsia-900' : 'border-slate-200 bg-white text-slate-600'}`}>
+      <label className="inline-flex items-center gap-2 font-bold cursor-pointer">
+        <input
+          type="checkbox"
+          checked={on}
+          onChange={(e) => {
+            setInventoryDemo(e.target.checked);
+            setOn(e.target.checked);
+            onChange();
+          }}
+        />
+        サンプルデータで見る
+      </label>
+      {on ? (
+        <>
+          <span>サンプル表示中です。入荷 → 在庫 → 引当 → 出荷指示 → インボイス → AWB → 出荷を自由に試せます（実データ・楽楽販売・インボイスアプリには影響しません）。</span>
+          <a href="/warehouse/demokorea" target="_blank" rel="noreferrer" className="underline font-bold">
+            倉庫の担当者画面（韓国・サンプル）
+          </a>
+          <a href="/warehouse/demosingapore" target="_blank" rel="noreferrer" className="underline font-bold">
+            （シンガポール・サンプル）
+          </a>
+          <button
+            onClick={async () => {
+              await fetch('/api/inventory/demo-reset', { method: 'POST', headers: demoHeaders() });
+              onChange();
+            }}
+            className="ml-auto rounded border border-fuchsia-300 bg-white px-2 py-0.5 font-bold"
+          >
+            サンプルを最初に戻す
+          </button>
+        </>
+      ) : (
+        <span>オンにすると、実データとは別のサンプルで操作の流れを確認できます。</span>
+      )}
+    </div>
+  );
+}
+
+/** 3倉庫の一覧（管理画面で国内・韓国・シンガポールを並べて見る） */
+function WarehouseOverview({ data, onPick }: { data: InventoryData; onPick: (w: WarehouseId) => void }) {
+  const tone: Record<WarehouseId, string> = { domestic: 'from-sky-50 border-sky-200', korea: 'from-rose-50 border-rose-200', singapore: 'from-emerald-50 border-emerald-200' };
+  return (
+    <div className="grid lg:grid-cols-3 gap-3">
+      {WH_IDS.map((w) => {
+        const stock = data.stock[w] || [];
+        const pending = data.inbound.filter((r) => r.warehouse === w && !r.received && !r.excluded && !r.cancelled);
+        const waiting = pending.filter((r) => ['arrived', 'kick', 'handcarry'].includes(r.state));
+        const openSi = data.instructions.filter((i) => i.warehouse === w && i.status === 'open');
+        const moves = data.moves.filter((m) => m.warehouse === w).slice(0, 4);
+        const kpi = (label: string, value: number | string, hi = false) => (
+          <div className={`rounded-lg bg-white/80 border px-2 py-1.5 ${hi ? 'border-amber-300' : 'border-slate-200'}`}>
+            <div className="text-[10px] text-slate-500 font-semibold">{label}</div>
+            <div className={`text-lg font-black font-mono ${hi ? 'text-amber-700' : 'text-slate-900'}`}>{value}</div>
+          </div>
+        );
+        return (
+          <div key={w} className={`rounded-2xl border bg-gradient-to-b to-white p-3 space-y-3 ${tone[w]}`}>
+            <button onClick={() => onPick(w)} className="w-full flex items-center justify-between text-left">
+              <span className="font-bold text-slate-900 flex items-center gap-1.5">
+                <Warehouse className="w-4 h-4" />
+                {WH_NAME[w]}
+              </span>
+              <span className="text-[11px] text-indigo-700 font-bold">この倉庫を見る →</span>
+            </button>
+            <div className="grid grid-cols-3 gap-1.5">
+              {kpi('在庫（品目）', stock.filter((s2) => s2.qty > 0).length)}
+              {kpi('在庫（点）', stock.reduce((n, s2) => n + s2.qty, 0))}
+              {kpi('引当済（点）', stock.reduce((n, s2) => n + s2.reserved, 0))}
+              {kpi('入荷待ち', pending.length)}
+              {kpi('承認待ち', waiting.length, waiting.length > 0)}
+              {kpi('出荷待ち', openSi.length, openSi.length > 0)}
+            </div>
+            <div className="space-y-1">
+              <div className="text-[11px] font-bold text-slate-600">承認待ちの入荷</div>
+              {waiting.length === 0 ? (
+                <div className="text-[11px] text-slate-400">ありません</div>
+              ) : (
+                waiting.slice(0, 4).map((r) => (
+                  <div key={r.poId} className="text-[11px] flex justify-between gap-2">
+                    <span className="truncate">
+                      <span className="font-mono text-indigo-700">{r.poId}</span> {r.lines.map((l) => `${l.productName}×${l.qty}`).join('、')}
+                    </span>
+                    <span className="shrink-0 text-violet-700 font-bold">{r.stateLabel.replace('・承認待ち', '').replace('・受取待ち', '')}</span>
+                  </div>
+                ))
+              )}
+            </div>
+            <div className="space-y-1">
+              <div className="text-[11px] font-bold text-slate-600">出荷待ちの出荷指示</div>
+              {openSi.length === 0 ? (
+                <div className="text-[11px] text-slate-400">ありません</div>
+              ) : (
+                openSi.slice(0, 4).map((i) => (
+                  <div key={i.id} className="text-[11px] flex justify-between gap-2">
+                    <span className="truncate">
+                      <span className="font-mono text-indigo-700">{i.id}</span> {i.clinicName}
+                    </span>
+                    <span className="shrink-0 text-slate-500">
+                      {w === 'domestic' ? '' : `${i.invoiceNo ? 'INV✓' : 'INV未'} ${i.awbNo ? 'AWB✓' : 'AWB未'}`}
+                    </span>
+                  </div>
+                ))
+              )}
+            </div>
+            <div className="space-y-1">
+              <div className="text-[11px] font-bold text-slate-600">最近の入出庫</div>
+              {moves.length === 0 ? (
+                <div className="text-[11px] text-slate-400">まだありません</div>
+              ) : (
+                moves.map((m) => (
+                  <div key={m.id} className="text-[11px] flex justify-between gap-2">
+                    <span className="truncate">
+                      {fmt(m.at)} {MOVE_LABEL[m.type] || m.type} {m.productName}
+                    </span>
+                    <span className={`shrink-0 font-mono font-bold ${m.delta < 0 ? 'text-rose-600' : 'text-emerald-700'}`}>{m.delta > 0 ? `+${m.delta}` : m.delta}</span>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** 倉庫のタブ（どの倉庫を見ているか分かるように） */
+function WarehouseTabs({ value, onChange, counts }: { value: 'all' | WarehouseId; onChange: (v: 'all' | WarehouseId) => void; counts?: Partial<Record<'all' | WarehouseId, number>> }) {
+  const items: ['all' | WarehouseId, string][] = [['all', 'すべての倉庫'], ...WH_IDS.map((w) => [w, WH_NAME[w]] as ['all' | WarehouseId, string])];
+  return (
+    <div className="flex flex-wrap gap-0 border-b-2 border-slate-200">
+      {items.map(([id, label]) => (
+        <button
+          key={id}
+          onClick={() => onChange(id)}
+          className={`-mb-0.5 px-4 py-2 text-sm font-bold border-b-2 ${value === id ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-800'}`}
+        >
+          {label}
+          {counts?.[id] !== undefined && <span className={`ml-1.5 rounded-full px-1.5 text-[11px] ${value === id ? 'bg-indigo-100' : 'bg-slate-100'}`}>{counts[id]}</span>}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 /** 引当・出荷指示ページ（サイドバーの「未発注」の下）。出荷指示ごとにインボイス・AWB・出荷・配達まで追う */
 export function ShippingInstructionsPage() {
   const [data, setData] = useState<InventoryData | null>(null);
@@ -1195,6 +1345,7 @@ export function ShippingInstructionsPage() {
           </button>
         </div>
       </div>
+      <DemoBar onChange={load} />
       {settingsOpen && <DhlSettings onClose={() => setSettingsOpen(false)} />}
       {error && <div className="rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs px-3 py-2">{error}</div>}
       {data ? <AllocationPanel data={data} onSaved={load} /> : !error && <div className="p-6 text-sm text-slate-500">読み込み中…</div>}
@@ -1271,8 +1422,15 @@ export function InventoryView({ orders }: { orders: Order[] }) {
     return <div className="p-6 text-sm text-slate-500">{error || '読み込み中…'}</div>;
   }
 
+  const whCounts = {
+    all: data.inbound.filter((r) => !r.received && !r.excluded && !r.cancelled).length,
+    ...Object.fromEntries(WH_IDS.map((w) => [w, data.inbound.filter((r) => r.warehouse === w && !r.received && !r.excluded && !r.cancelled).length])),
+  } as Record<'all' | WarehouseId, number>;
+  const moves = data.moves.filter((m) => wh === 'all' || m.warehouse === wh);
+
   return (
     <div className="space-y-4">
+      <DemoBar onChange={load} />
       <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-3">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -1284,7 +1442,7 @@ export function InventoryView({ orders }: { orders: Order[] }) {
               楽楽販売の発注（発注済み）から入荷予定を作ります。入荷先・配送方法・追跡番号・数量はここで入れ、倉庫の担当者が実数を入れて承認すると在庫に加わります。楽楽販売には書き込みません。
             </p>
           </div>
-          <div className="flex flex-wrap items-center gap-2 text-xs">
+          <div className={`flex flex-wrap items-center gap-2 text-xs ${isInventoryDemo() ? 'hidden' : ''}`}>
             <span className="text-slate-500">発注の取り込み {fmt(data.poSyncedAt)}</span>
             <button
               disabled={refreshing}
@@ -1307,7 +1465,7 @@ export function InventoryView({ orders }: { orders: Order[] }) {
             </button>
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2 text-xs">
+        <div className={`flex flex-wrap items-center gap-2 text-xs ${isInventoryDemo() ? 'hidden' : ''}`}>
           <span className="text-slate-500">入荷予定にする発注日</span>
           <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="rounded border border-slate-300 px-2 py-0.5" />
           <span className="text-slate-500">以降</span>
@@ -1337,6 +1495,14 @@ export function InventoryView({ orders }: { orders: Order[] }) {
         </div>
       </div>
 
+      <WarehouseTabs value={wh} onChange={setWh} counts={whCounts} />
+      {wh === 'all' && <WarehouseOverview data={data} onPick={setWh} />}
+      {wh !== 'all' && (
+        <div className="rounded-lg bg-indigo-50 border border-indigo-200 px-3 py-1.5 text-xs font-bold text-indigo-800 flex items-center gap-1.5">
+          <Warehouse className="w-4 h-4" />
+          {WH_NAME[wh]}を表示しています
+        </div>
+      )}
       <div className="flex flex-wrap gap-1.5">
         {(
           [
@@ -1360,14 +1526,6 @@ export function InventoryView({ orders }: { orders: Order[] }) {
       {tab === 'inbound' && (
         <div className="space-y-3">
           <div className="flex flex-wrap items-center gap-2 text-xs">
-            <select value={wh} onChange={(e) => setWh(e.target.value as any)} className="rounded-md border border-slate-300 px-2 py-1 font-semibold">
-              <option value="all">すべての倉庫</option>
-              {WH_IDS.map((w) => (
-                <option key={w} value={w}>
-                  {WH_NAME[w]}
-                </option>
-              ))}
-            </select>
             <select value={stateFilter} onChange={(e) => setStateFilter(e.target.value as any)} className="rounded-md border border-slate-300 px-2 py-1 font-semibold">
               <option value="open">未入荷（すべて）</option>
               <option value="waiting">倉庫の承認待ち</option>
@@ -1414,8 +1572,8 @@ export function InventoryView({ orders }: { orders: Order[] }) {
             )}
           </div>
           {importOpen && <ImportPanel products={products} onDone={load} onClose={() => setImportOpen(false)} />}
-          <div className="grid xl:grid-cols-3 gap-3">
-            {WH_IDS.map((w) => (
+          <div className={`grid gap-3 ${wh === 'all' ? 'xl:grid-cols-3' : ''}`}>
+            {WH_IDS.filter((w) => wh === 'all' || w === wh).map((w) => (
               <StockTable key={w} warehouse={w} rows={data.stock[w] || []} onSaved={load} products={products} />
             ))}
           </div>
@@ -1437,14 +1595,14 @@ export function InventoryView({ orders }: { orders: Order[] }) {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {data.moves.length === 0 && (
+              {moves.length === 0 && (
                 <tr>
                   <td colSpan={7} className="px-3 py-6 text-center text-slate-400">
                     まだ入出庫はありません
                   </td>
                 </tr>
               )}
-              {data.moves.map((m) => (
+              {moves.map((m) => (
                 <tr key={m.id}>
                   <td className="px-3 py-1.5 whitespace-nowrap">{fmt(m.at)}</td>
                   <td className="px-3 py-1.5 whitespace-nowrap">{WH_NAME[m.warehouse]}</td>

@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
+import { demoHeaders } from '../utils/demo';
 import { Loader2, Plane, Settings, X } from 'lucide-react';
 
 // AWB（航空貨物の送り状）。DHL Express は MyDHL API で発行してラベルPDFを保存する。
 // API の登録がない間・FedEx などは、AWB番号を手入力する
 
 async function api(path: string, init?: RequestInit) {
-  const r = await fetch(path, { ...init, headers: { 'Content-Type': 'application/json', ...(init?.headers || {}) } });
+  const r = await fetch(path, { ...init, headers: { 'Content-Type': 'application/json', ...demoHeaders(), ...(init?.headers || {}) } });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(j?.error || `エラー（${r.status}）`);
   return j;

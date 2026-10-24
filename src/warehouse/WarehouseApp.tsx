@@ -83,8 +83,12 @@ const NAME_EN: Record<string, string> = { korea: 'Korea warehouse', singapore: '
 const MOVE_LABEL: Record<string, string> = { inbound: '入荷 In', outbound: '出庫 Out', adjust: '修正 Adjust', import: '取込 Import', unreceive: '取消 Undo' };
 const fmt = (iso: string | null) => (iso ? new Date(iso).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—');
 
+// /warehouse/demokorea・demosingapore はサンプル（ログインなし・実データに影響しない）
+let demoMode = false;
+const demoHeader = (): Record<string, string> => (demoMode ? { 'x-demo': '1' } : {});
+
 async function api(path: string, init?: RequestInit) {
-  const r = await fetch(path, { ...init, headers: { 'Content-Type': 'application/json', ...(init?.headers || {}) } });
+  const r = await fetch(path, { ...init, headers: { 'Content-Type': 'application/json', ...demoHeader(), ...(init?.headers || {}) } });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw Object.assign(new Error(j?.error || `Error (${r.status})`), { status: r.status });
   return j;
@@ -439,6 +443,7 @@ function Dashboard({ slug, onLogout }: { slug: string; onLogout: () => void }) {
         </div>
       </header>
       <main className="max-w-5xl mx-auto px-4 py-4 space-y-3">
+        {demoMode && <div className="rounded-lg bg-fuchsia-50 border border-fuchsia-300 text-fuchsia-900 text-xs font-bold px-3 py-2">サンプル表示です（実データには影響しません） / Sample data – nothing here is real.</div>}
         {error && <div className="rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-sm px-3 py-2">{error}</div>}
 
         {tab === 'inbound' && (
@@ -568,10 +573,11 @@ function Dashboard({ slug, onLogout }: { slug: string; onLogout: () => void }) {
 }
 
 export function WarehouseApp({ slug }: { slug: string }) {
+  demoMode = slug.startsWith('demo');
   const [state, setState] = useState<'checking' | 'in' | 'out'>('checking');
   useEffect(() => {
     document.title = '入荷・在庫 / Inbound & stock';
-    fetch(`/api/warehouse/data?slug=${slug}`)
+    fetch(`/api/warehouse/data?slug=${slug}`, { headers: demoHeader() })
       .then((r) => setState(r.status === 401 ? 'out' : 'in'))
       .catch(() => setState('out'));
   }, [slug]);

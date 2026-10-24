@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { demoHeaders } from '../utils/demo';
 import { AlertTriangle, FileText, Loader2, Package, X } from 'lucide-react';
 import { generateInvoicePDF, generatePackingListPDF, loadJapaneseFont } from './pdf';
 
@@ -6,7 +7,7 @@ import { generateInvoicePDF, generatePackingListPDF, loadJapaneseFont } from './
 // 発行するとINVOICEアプリの発送データにも INV-日付-連番 で入る。PDFは INVOICEアプリと同じ形
 
 async function api(path: string, init?: RequestInit) {
-  const r = await fetch(path, { ...init, headers: { 'Content-Type': 'application/json', ...(init?.headers || {}) } });
+  const r = await fetch(path, { ...init, headers: { 'Content-Type': 'application/json', ...demoHeaders(), ...(init?.headers || {}) } });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(j?.error || `エラー（${r.status}）`);
   return j;
