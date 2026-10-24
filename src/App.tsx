@@ -535,7 +535,7 @@ export default function App() {
       if (o.orderState === '全明細出荷済' || o.orderState === '納品完了') return;
       o.lines.forEach((l) => {
         if (isShippingOrFee(l.productName, l.productId)) return;
-        if (l.stage === '未発注') count++;
+        if (l.stage === '未発注' && (l.allocatedQty || 0) < l.quantity) count++;
       });
     });
     return count;

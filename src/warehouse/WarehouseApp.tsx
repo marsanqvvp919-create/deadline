@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { CheckCircle2, History, Loader2, Lock, LogOut, PackageCheck, PackageMinus, RefreshCw, Search, Truck, Warehouse } from 'lucide-react';
+import { CheckCircle2, ClipboardList, History, Loader2, Lock, LogOut, PackageCheck, PackageMinus, RefreshCw, Search, Send, Truck, Warehouse } from 'lucide-react';
 
 // 倉庫の担当者の画面（/warehouse/:slug）。自分の倉庫の入荷予定だけを見て、届いた実数を入れて承認・出庫する。
 // 日本語と英語を並べて表示する（韓国・シンガポールの倉庫の担当者向け）
@@ -30,7 +30,21 @@ interface StockRow {
   key: string;
   productName: string;
   qty: number;
+  reserved: number;
+  available: number;
   updatedAt: string;
+}
+interface Instruction {
+  id: string;
+  orderId: string;
+  lines: { productName: string; qty: number }[];
+  status: 'open' | 'shipped' | 'cancelled';
+  memo: string;
+  carrier: string;
+  trackingNos: string[];
+  createdAt: string;
+  shippedAt?: string;
+  destination: { name: string; nameEn: string; director: string; postalCode: string; address: string; addressEn: string; phone: string };
 }
 interface Move {
   id: string;
@@ -47,6 +61,7 @@ interface Data {
   inbound: Inbound[];
   stock: StockRow[];
   moves: Move[];
+  instructions: Instruction[];
 }
 
 const STATE_EN: Record<string, string> = {
@@ -226,10 +241,95 @@ function InboundCard({ rec, slug, onDone }: { rec: Inbound; slug: string; onDone
   );
 }
 
+function InstructionCard({ si, slug, onDone }: { si: Instruction; slug: string; onDone: () => void }) {
+  const [carrier, setCarrier] = useState('');
+  const [tracking, setTracking] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const d = si.destination;
+  const ship = async () => {
+    if (!tracking.trim() && !confirm('追跡番号なしで出荷完了にします。よろしいですか？\nMark as shipped without a tracking number?')) return;
+    setBusy(true);
+    setError('');
+    try {
+      await api(`/api/warehouse/instructions/${si.id}/ship`, { method: 'POST', body: JSON.stringify({ slug, carrier, trackingNos: tracking }) });
+      onDone();
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className={`rounded-xl border bg-white p-4 space-y-3 ${si.status === 'open' ? 'border-amber-300' : 'border-slate-200'}`}>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <div className="font-mono font-bold text-indigo-700">{si.id}</div>
+          <div className="text-[11px] text-slate-500">
+            指示日 / Issued {fmt(si.createdAt)}・注文 / Order {si.orderId}
+          </div>
+        </div>
+        <span className={`text-[11px] font-bold px-2 py-1 rounded border ${si.status === 'open' ? 'bg-amber-50 text-amber-800 border-amber-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'}`}>
+          {si.status === 'open' ? '出荷待ち / To ship' : `出荷済み / Shipped ${fmt(si.shippedAt || null)}`}
+        </span>
+      </div>
+      <div className="rounded-lg bg-slate-50 border border-slate-200 p-3 text-xs space-y-0.5">
+        <div className="text-[11px] text-slate-500 font-bold">届け先 / Ship to</div>
+        <div className="font-bold text-slate-900">
+          {d.name} {d.nameEn && <span className="font-normal text-slate-500">/ {d.nameEn}</span>}
+        </div>
+        {d.director && <div>院長 / Attn: {d.director}</div>}
+        <div>
+          {d.postalCode && `〒${d.postalCode} `}
+          {d.address}
+        </div>
+        {d.addressEn && <div className="text-slate-500">{d.addressEn}</div>}
+        {d.phone && <div>TEL {d.phone}</div>}
+      </div>
+      <table className="w-full text-xs">
+        <thead className="text-slate-500">
+          <tr className="border-b border-slate-100">
+            <th className="text-left py-1">商品 / Item</th>
+            <th className="text-right py-1 w-24">数量 / Qty</th>
+          </tr>
+        </thead>
+        <tbody>
+          {si.lines.map((l, i) => (
+            <tr key={i} className="border-b border-slate-50">
+              <td className="py-1.5 font-semibold">{l.productName}</td>
+              <td className="py-1.5 text-right font-mono font-bold">{l.qty}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {si.memo && <div className="text-[11px] text-slate-600">メモ / Note: {si.memo}</div>}
+      {si.status === 'open' ? (
+        <div className="space-y-2">
+          <div className="flex flex-wrap gap-2">
+            <input value={carrier} onChange={(e) => setCarrier(e.target.value)} placeholder="配送業者 / Carrier (DHL, FedEx…)" className="rounded border border-slate-300 px-2.5 py-1.5 text-xs w-56" />
+            <input value={tracking} onChange={(e) => setTracking(e.target.value)} placeholder="追跡番号 / Tracking no." className="flex-1 min-w-48 rounded border border-slate-300 px-2.5 py-1.5 text-xs font-mono" />
+          </div>
+          {error && <div className="text-xs text-rose-600">{error}</div>}
+          <button disabled={busy} onClick={ship} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 text-white px-4 py-2 text-sm font-bold disabled:opacity-50">
+            <Send className="w-4 h-4" />
+            出荷完了（在庫から引く） / Mark as shipped
+          </button>
+        </div>
+      ) : (
+        si.trackingNos.length > 0 && (
+          <div className="text-[11px] font-mono text-slate-600">
+            {si.carrier} {si.trackingNos.join('、')}
+          </div>
+        )
+      )}
+    </div>
+  );
+}
+
 function Dashboard({ slug, onLogout }: { slug: string; onLogout: () => void }) {
   const [data, setData] = useState<Data | null>(null);
   const [error, setError] = useState('');
-  const [tab, setTab] = useState<'inbound' | 'stock' | 'moves'>('inbound');
+  const [tab, setTab] = useState<'inbound' | 'ship' | 'stock' | 'moves'>('inbound');
   const [showReceived, setShowReceived] = useState(false);
   const [q, setQ] = useState('');
   const [out, setOut] = useState<{ key: string; name: string; max: number; qty: string; ref: string; memo: string } | null>(null);
@@ -297,6 +397,7 @@ function Dashboard({ slug, onLogout }: { slug: string; onLogout: () => void }) {
           {(
             [
               ['inbound', `入荷 / Inbound（${pending.length}）`, Truck],
+              ['ship', `出荷指示 / Shipping（${(data.instructions || []).filter((i) => i.status === 'open').length}）`, ClipboardList],
               ['stock', '在庫・出庫 / Stock & out', PackageCheck],
               ['moves', '履歴 / History', History],
             ] as const
@@ -335,6 +436,18 @@ function Dashboard({ slug, onLogout }: { slug: string; onLogout: () => void }) {
           </>
         )}
 
+        {tab === 'ship' && (
+          <>
+            {(data.instructions || []).length === 0 && <div className="rounded-xl border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-500">出荷指示はありません / No shipping instructions.</div>}
+            {(data.instructions || [])
+              .slice()
+              .sort((a, b) => (a.status === 'open' ? 0 : 1) - (b.status === 'open' ? 0 : 1))
+              .map((si) => (
+                <InstructionCard key={si.id} si={si} slug={slug} onDone={load} />
+              ))}
+          </>
+        )}
+
         {tab === 'stock' && (
           <div className="rounded-xl border border-slate-200 bg-white">
             <div className="p-3 border-b border-slate-100 flex items-center gap-2">
@@ -365,14 +478,15 @@ function Dashboard({ slug, onLogout }: { slug: string; onLogout: () => void }) {
               <thead className="bg-slate-50 text-slate-500">
                 <tr>
                   <th className="text-left px-3 py-2">商品 / Item</th>
-                  <th className="text-right px-3 py-2 w-24">在庫 / Stock</th>
+                  <th className="text-right px-3 py-2 w-20">在庫 / Stock</th>
+                  <th className="text-right px-3 py-2 w-24">引当済 / Reserved</th>
                   <th className="w-32" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {stock.length === 0 && (
                   <tr>
-                    <td colSpan={3} className="px-3 py-6 text-center text-slate-400">
+                    <td colSpan={4} className="px-3 py-6 text-center text-slate-400">
                       在庫はありません / No stock
                     </td>
                   </tr>
@@ -381,9 +495,10 @@ function Dashboard({ slug, onLogout }: { slug: string; onLogout: () => void }) {
                   <tr key={s.key} className={s.qty <= 0 ? 'text-slate-400' : ''}>
                     <td className="px-3 py-2 font-semibold">{s.productName}</td>
                     <td className="px-3 py-2 text-right font-mono font-bold">{s.qty}</td>
+                    <td className="px-3 py-2 text-right font-mono text-amber-700">{s.reserved || ''}</td>
                     <td className="px-3 py-2 text-right">
-                      {s.qty > 0 && (
-                        <button onClick={() => setOut({ key: s.key, name: s.productName, max: s.qty, qty: '', ref: '', memo: '' })} className="inline-flex items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-2 py-1 font-bold text-amber-800">
+                      {s.available > 0 && (
+                        <button onClick={() => setOut({ key: s.key, name: s.productName, max: s.available, qty: '', ref: '', memo: '' })} className="inline-flex items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-2 py-1 font-bold text-amber-800">
                           <PackageMinus className="w-3.5 h-3.5" />
                           出庫 / Out
                         </button>

@@ -1847,6 +1847,8 @@ async function syncAllRakurakuData(isManual = false): Promise<boolean> {
     lastSyncMode = useIncremental ? 'incremental' : 'full';
     applyWarehouseShipDates();
     applyShipmentQuantities();
+    await loadInventory().catch(() => {});
+    applyAllocationsToOrders();
     // 発注管理（入荷予定のもと）は全件取得のときと、入荷画面から取り込みを頼まれたときに読む
     if (!useIncremental || inboundPoRefreshRequested) {
       inboundPoRefreshRequested = false;
@@ -1927,7 +1929,7 @@ const isEmptyValue = (v: any) => v === null || v === undefined || v === '' || v 
 let slimCache: { key: string; orders: any; shipments: any } | null = null;
 
 function slimForClient() {
-  const key = `${serverRakurakuStore.lastSuccessTime}|${(serverRakurakuStore.orders?.orders || []).length}|${(serverRakurakuStore.shipments || []).length}`;
+  const key = `${serverRakurakuStore.lastSuccessTime}|${(serverRakurakuStore.orders?.orders || []).length}|${(serverRakurakuStore.shipments || []).length}|${allocationVersion}`;
   if (slimCache && slimCache.key === key) return slimCache;
   const src = serverRakurakuStore.orders;
   const orders = src
@@ -4350,9 +4352,13 @@ app.get('/api/portal/data', async (req, res) => {
 // 入荷先倉庫・配送方法・追跡番号・数量は社内の画面で入れ、倉庫の担当者が実数を入れて承認すると在庫に加わる。
 // 出庫は倉庫の担当者が押して在庫から引く。データは Cloud Storage の inventory.json に保存する
 // ----------------------------------------------------------------------
-type WarehouseId = 'korea' | 'singapore';
-const WAREHOUSES: Record<WarehouseId, string> = { korea: '韓国倉庫', singapore: 'シンガポール倉庫' };
-const isWarehouseId = (v: any): v is WarehouseId => v === 'korea' || v === 'singapore';
+type WarehouseId = 'domestic' | 'korea' | 'singapore';
+const WAREHOUSES: Record<WarehouseId, string> = { domestic: '国内倉庫', korea: '韓国倉庫', singapore: 'シンガポール倉庫' };
+const isWarehouseId = (v: any): v is WarehouseId => v === 'domestic' || v === 'korea' || v === 'singapore';
+// 引当は早く届く順（国内 → 韓国 → シンガポール）
+const ALLOCATION_ORDER: WarehouseId[] = ['domestic', 'korea', 'singapore'];
+// 国内倉庫は社内スタッフが社内の画面で入出庫する（担当者用のログインは韓国・シンガポールだけ）
+const PORTAL_WAREHOUSES: WarehouseId[] = ['korea', 'singapore'];
 // 楽楽販売の「在庫」仕入先（在庫からの出荷）は入荷ではない
 const STOCK_SUPPLIER_IDS = new Set(['000000017']);
 
@@ -4407,6 +4413,35 @@ interface StockMove {
   memo?: string;
   by: 'staff' | 'warehouse';
 }
+// 引当：未発注のご注文明細に、倉庫の在庫を確保する（楽楽販売には書き込まない）
+interface Allocation {
+  id: string;
+  orderId: string;
+  productId: string;
+  productName: string;
+  clinicName: string;
+  warehouse: WarehouseId;
+  qty: number;
+  status: 'reserved' | 'instructed' | 'shipped' | 'cancelled';
+  instructionId?: string;
+  createdAt: string;
+}
+// 出荷指示：倉庫ごと・ご注文ごとに、引当済みの商品を出荷してもらう
+interface ShipInstruction {
+  id: string; // SI-000001
+  warehouse: WarehouseId;
+  orderId: string;
+  clinicId: string;
+  clinicName: string;
+  lines: { allocationId: string; productId: string; productName: string; qty: number }[];
+  status: 'open' | 'shipped' | 'cancelled';
+  memo: string;
+  carrier: string;
+  trackingNos: string[];
+  createdAt: string;
+  shippedAt?: string;
+  shippedBy?: 'staff' | 'warehouse';
+}
 interface WarehouseAccess {
   slug: string;
   salt: string;
@@ -4420,12 +4455,24 @@ interface InventoryStore {
   inbound: Record<string, InboundRec>;
   stock: Record<WarehouseId, Record<string, StockItem>>;
   moves: StockMove[];
+  allocations: Allocation[];
+  instructions: ShipInstruction[];
+  seq: number; // 出荷指示の番号
   access: Partial<Record<WarehouseId, WarehouseAccess>>;
   poSyncedAt?: string;
 }
 const INVENTORY_OBJECT = 'inventory.json';
 const WAREHOUSE_COOKIE = 'nk_wh';
-let inventory: InventoryStore = { settings: { startDate: '2026/10/24' }, inbound: {}, stock: { korea: {}, singapore: {} }, moves: [], access: {} };
+let inventory: InventoryStore = {
+  settings: { startDate: '2026/10/24' },
+  inbound: {},
+  stock: { domestic: {}, korea: {}, singapore: {} },
+  moves: [],
+  allocations: [],
+  instructions: [],
+  seq: 0,
+  access: {},
+};
 let inventoryLoadPromise: Promise<void> | null = null;
 let inboundPoRefreshRequested = false;
 
@@ -4439,8 +4486,11 @@ function loadInventory() {
         inventory = {
           settings: { startDate: j?.settings?.startDate || inventory.settings.startDate },
           inbound: j?.inbound || {},
-          stock: { korea: j?.stock?.korea || {}, singapore: j?.stock?.singapore || {} },
+          stock: { domestic: j?.stock?.domestic || {}, korea: j?.stock?.korea || {}, singapore: j?.stock?.singapore || {} },
           moves: Array.isArray(j?.moves) ? j.moves : [],
+          allocations: Array.isArray(j?.allocations) ? j.allocations : [],
+          instructions: Array.isArray(j?.instructions) ? j.instructions : [],
+          seq: Number(j?.seq) || 0,
           access: j?.access || {},
           poSyncedAt: j?.poSyncedAt,
         };
@@ -4509,8 +4559,8 @@ const ymdSlash = (v: string) => {
   return m ? `${m[1]}/${m[2].padStart(2, '0')}/${m[3].padStart(2, '0')}` : '';
 };
 const supplierById = (id: string) => (serverRakurakuStore.suppliers || []).find((s: any) => s.supplierId === id) || null;
-/** 仕入先のエリアから入荷先を決める（韓国→韓国倉庫、それ以外→シンガポール倉庫） */
-const warehouseForArea = (area: string): WarehouseId => (/韓国/.test(area || '') ? 'korea' : 'singapore');
+/** 仕入先のエリアから入荷先を決める（韓国→韓国倉庫、日本→国内倉庫、それ以外→シンガポール倉庫） */
+const warehouseForArea = (area: string): WarehouseId => (/韓国/.test(area || '') ? 'korea' : /日本|国内/.test(area || '') ? 'domestic' : 'singapore');
 
 async function mergePurchaseOrdersIntoInbound(pos: ReturnType<typeof transformCsvToPurchaseOrders>) {
   await loadInventory();
@@ -4635,9 +4685,19 @@ function inboundView(rec: InboundRec, forWarehouse = false) {
     updatedAt: rec.updatedAt,
   };
 }
+const stockKey = (productId: string, productName: string) => productId || `name:${productName}`;
+/** 引当済み（出荷指示を含む、まだ出荷していない）の数 */
+function reservedQty(w: WarehouseId, key: string): number {
+  return inventory.allocations
+    .filter((a) => a.warehouse === w && (a.status === 'reserved' || a.status === 'instructed') && stockKey(a.productId, a.productName) === key)
+    .reduce((n, a) => n + a.qty, 0);
+}
 const stockList = (w: WarehouseId) =>
   Object.entries(inventory.stock[w])
-    .map(([key, s]) => ({ key, ...s }))
+    .map(([key, s]) => {
+      const reserved = reservedQty(w, key);
+      return { key, ...s, reserved, available: Math.max(0, s.qty - reserved) };
+    })
     .sort((a, b) => a.productName.localeCompare(b.productName, 'ja'));
 
 // --- 社内の画面
@@ -4649,7 +4709,7 @@ app.get('/api/inventory', async (_req, res) => {
   res.json({
     settings: inventory.settings,
     poSyncedAt: inventory.poSyncedAt || null,
-    warehouses: (Object.keys(WAREHOUSES) as WarehouseId[]).map((w) => ({
+    warehouses: PORTAL_WAREHOUSES.map((w) => ({
       id: w,
       name: WAREHOUSES[w],
       slug: inventory.access[w]?.slug || null,
@@ -4657,8 +4717,14 @@ app.get('/api/inventory', async (_req, res) => {
       lastLoginAt: inventory.access[w]?.lastLoginAt || null,
     })),
     inbound,
-    stock: { korea: stockList('korea'), singapore: stockList('singapore') },
+    stock: { domestic: stockList('domestic'), korea: stockList('korea'), singapore: stockList('singapore') },
     moves: inventory.moves.slice(-500).reverse(),
+    allocations: inventory.allocations.filter((a) => a.status === 'reserved' || a.status === 'instructed'),
+    instructions: inventory.instructions
+      .filter((i) => i.status === 'open' || Date.now() - new Date(i.shippedAt || i.createdAt).getTime() < 30 * 86400000)
+      .slice()
+      .reverse()
+      .map((i) => instructionView(i)),
   });
 });
 
@@ -4798,7 +4864,7 @@ app.post('/api/inventory/refresh-po', async (_req, res) => {
 app.post('/api/inventory/warehouse/:w/password', async (req, res) => {
   await loadInventory();
   const w = req.params.w;
-  if (!isWarehouseId(w)) return res.status(404).json({ error: '倉庫が見つかりません' });
+  if (!isWarehouseId(w) || !PORTAL_WAREHOUSES.includes(w)) return res.status(404).json({ error: '倉庫が見つかりません' });
   const { password, error } = portalPasswordFromBody(req.body);
   if (!password) return res.status(400).json({ error });
   const cur = inventory.access[w];
@@ -4823,17 +4889,279 @@ app.post('/api/inventory/warehouse/:w', async (req, res) => {
   res.json({ ok: true });
 });
 
+/** 入荷の承認（倉庫の担当者、国内倉庫は社内スタッフ）。届いた実数を在庫に加える。エラーがあれば文言を返す */
+function receiveInbound(rec: InboundRec, lines: any, memo: any, by: StockMove['by']): string | null {
+  const given = new Map<string, number>((Array.isArray(lines) ? lines : []).map((l: any) => [String(l.key), Math.round(Number(l.receivedQty))]));
+  for (const l of rec.lines) {
+    const q = given.get(l.key);
+    if (q === undefined || !Number.isFinite(q) || q < 0) return `「${l.productName}」の入荷数を入れてください / Enter the received quantity`;
+  }
+  let shortage = false;
+  for (const l of rec.lines) {
+    l.receivedQty = given.get(l.key)!;
+    if (l.receivedQty < l.qty) shortage = true;
+    if (l.receivedQty > 0) addStock(rec.warehouse, l.productId, l.productName, l.receivedQty, 'inbound', by, rec.poId, rec.supplierName);
+  }
+  rec.received = true;
+  rec.shortage = shortage;
+  rec.receivedAt = new Date().toISOString();
+  rec.receivedMemo = String(memo || '').slice(0, 500);
+  rec.updatedAt = rec.receivedAt;
+  return null;
+}
+
+// --- 引当と出荷指示
+let allocationVersion = 0;
+/** ご注文明細に引当済みの数を付ける（未発注の一覧から外すため） */
+function applyAllocationsToOrders() {
+  const sum = new Map<string, number>();
+  for (const a of inventory.allocations) {
+    if (a.status === 'cancelled') continue;
+    const k = `${a.orderId}|${a.productId}`;
+    sum.set(k, (sum.get(k) || 0) + a.qty);
+  }
+  ((serverRakurakuStore.orders?.orders || []) as any[]).forEach((o) =>
+    o.lines.forEach((l: any) => {
+      const n = sum.get(`${o.orderId}|${l.productId}`) || 0;
+      if (n > 0) l.allocatedQty = n;
+      else delete l.allocatedQty;
+    })
+  );
+  allocationVersion++;
+}
+
+/** 引当の候補：未発注の明細のうち、まだ引き当てていない数を、国内 → 韓国 → シンガポールの順に空き在庫から割り当てる */
+function allocationCandidates() {
+  const free: Record<WarehouseId, Map<string, number>> = { domestic: new Map(), korea: new Map(), singapore: new Map() };
+  for (const w of ALLOCATION_ORDER) for (const s of stockList(w)) if (s.available > 0) free[w].set(s.key, s.available);
+  const allocated = new Map<string, number>();
+  for (const a of inventory.allocations) {
+    if (a.status === 'cancelled') continue;
+    const k = `${a.orderId}|${a.productId}`;
+    allocated.set(k, (allocated.get(k) || 0) + a.qty);
+  }
+  const out: any[] = [];
+  const orders = ((serverRakurakuStore.orders?.orders || []) as any[])
+    .filter((o) => !/見積|出荷済|納品済|キャンセル/.test(String(o.status || '')) && o.orderState === '進行中')
+    .sort((a, b) => String(a.orderDate || '').localeCompare(String(b.orderDate || '')));
+  for (const o of orders) {
+    for (const l of o.lines) {
+      if (l.stage !== '未発注' || isShippingOrFee(l.productName, l.productId) || !l.productId) continue;
+      const need = l.quantity - (allocated.get(`${o.orderId}|${l.productId}`) || 0);
+      if (need <= 0) continue;
+      const stockAt = ALLOCATION_ORDER.map((w) => ({ warehouse: w, available: free[w].get(l.productId) || 0 }));
+      if (stockAt.every((x) => x.available <= 0)) continue;
+      // 早く届く倉庫から順に、足りるまで割り当てる（候補なので空き在庫も先に減らしておく）
+      let rest = need;
+      const suggest: { warehouse: WarehouseId; qty: number }[] = [];
+      for (const w of ALLOCATION_ORDER) {
+        const have = free[w].get(l.productId) || 0;
+        if (rest <= 0 || have <= 0) continue;
+        const q = Math.min(rest, have);
+        suggest.push({ warehouse: w, qty: q });
+        free[w].set(l.productId, have - q);
+        rest -= q;
+      }
+      out.push({
+        orderId: o.orderId,
+        orderDate: o.orderDate,
+        clinicName: o.customerName,
+        paymentStatus: o.paymentStatus,
+        productId: l.productId,
+        productName: l.productName,
+        need,
+        stockAt,
+        suggest,
+        shortBy: rest,
+      });
+    }
+  }
+  return out;
+}
+
+function instructionView(i: ShipInstruction, _forWarehouse = false) {
+  const c = masterClinicById(i.clinicId) as any;
+  return {
+    ...i,
+    warehouseName: WAREHOUSES[i.warehouse],
+    destination: {
+      name: c?.clinicName || i.clinicName,
+      nameEn: c?.clinicNameEn || '',
+      director: c?.directorName || '',
+      postalCode: c?.postalCode || '',
+      address: c?.address || '',
+      addressEn: c?.addressEn || '',
+      phone: c?.phone || '',
+    },
+  };
+}
+
+app.get('/api/inventory/allocation-candidates', async (_req, res) => {
+  await loadInventory();
+  res.json({ candidates: allocationCandidates() });
+});
+
+// 引当の確定：items = [{ orderId, productId, warehouse, qty }]
+app.post('/api/inventory/allocations', async (req, res) => {
+  await loadInventory();
+  const items = Array.isArray(req.body?.items) ? req.body.items : [];
+  if (items.length === 0) return res.status(400).json({ error: '引き当てる明細を選んでください' });
+  const orders = new Map(((serverRakurakuStore.orders?.orders || []) as any[]).map((o) => [o.orderId, o]));
+  const now = new Date().toISOString();
+  const created: Allocation[] = [];
+  for (const it of items) {
+    const w = it.warehouse;
+    const qty = Math.round(Number(it.qty));
+    const o = orders.get(String(it.orderId));
+    const l = o?.lines.find((x: any) => x.productId === String(it.productId));
+    if (!isWarehouseId(w) || !o || !l || !(qty > 0)) return res.status(400).json({ error: '引当の内容が正しくありません。画面を読み込み直してください' });
+    const already = inventory.allocations.filter((a) => a.status !== 'cancelled' && a.orderId === o.orderId && a.productId === l.productId).reduce((n, a) => n + a.qty, 0) + created.filter((a) => a.orderId === o.orderId && a.productId === l.productId).reduce((n, a) => n + a.qty, 0);
+    if (already + qty > l.quantity) return res.status(400).json({ error: `${o.orderId}「${l.productName}」は注文数（${l.quantity}）を超えて引き当てられません` });
+    const key = stockKey(l.productId, l.productName);
+    const avail = (inventory.stock[w][key]?.qty || 0) - reservedQty(w, key) - created.filter((a) => a.warehouse === w && a.productId === l.productId).reduce((n, a) => n + a.qty, 0);
+    if (qty > avail) return res.status(400).json({ error: `${WAREHOUSES[w]}の「${l.productName}」は空き在庫が${Math.max(0, avail)}しかありません` });
+    created.push({ id: moveId(), orderId: o.orderId, productId: l.productId, productName: l.productName, clinicName: o.customerName, warehouse: w, qty, status: 'reserved', createdAt: now });
+  }
+  inventory.allocations.push(...created);
+  applyAllocationsToOrders();
+  await saveInventory();
+  res.json({ created: created.length });
+});
+
+app.post('/api/inventory/allocations/:id/cancel', async (req, res) => {
+  await loadInventory();
+  const a = inventory.allocations.find((x) => x.id === req.params.id);
+  if (!a || a.status !== 'reserved') return res.status(400).json({ error: '取り消せる引当ではありません（出荷指示済みなら、先に出荷指示を取り消してください）' });
+  a.status = 'cancelled';
+  applyAllocationsToOrders();
+  await saveInventory();
+  res.json({ ok: true });
+});
+
+// 出荷指示を作る：同じご注文・同じ倉庫の引当済み（未指示）をまとめて1つの指示にする
+app.post('/api/inventory/instructions', async (req, res) => {
+  await loadInventory();
+  const { orderId, warehouse, memo } = req.body || {};
+  if (!isWarehouseId(warehouse)) return res.status(400).json({ error: '倉庫を選んでください' });
+  const allocs = inventory.allocations.filter((a) => a.status === 'reserved' && a.orderId === String(orderId) && a.warehouse === warehouse);
+  if (allocs.length === 0) return res.status(400).json({ error: '出荷指示にする引当がありません' });
+  const o = ((serverRakurakuStore.orders?.orders || []) as any[]).find((x) => x.orderId === String(orderId));
+  inventory.seq += 1;
+  const si: ShipInstruction = {
+    id: `SI-${String(inventory.seq).padStart(6, '0')}`,
+    warehouse,
+    orderId: String(orderId),
+    clinicId: o?.clinicId || '',
+    clinicName: o?.customerName || allocs[0].clinicName,
+    lines: allocs.map((a) => ({ allocationId: a.id, productId: a.productId, productName: a.productName, qty: a.qty })),
+    status: 'open',
+    memo: String(memo || '').slice(0, 500),
+    carrier: '',
+    trackingNos: [],
+    createdAt: new Date().toISOString(),
+  };
+  allocs.forEach((a) => {
+    a.status = 'instructed';
+    a.instructionId = si.id;
+  });
+  inventory.instructions.push(si);
+  await saveInventory();
+  res.json({ instruction: instructionView(si) });
+});
+
+app.post('/api/inventory/instructions/:id/cancel', async (req, res) => {
+  await loadInventory();
+  const si = inventory.instructions.find((x) => x.id === req.params.id);
+  if (!si || si.status !== 'open') return res.status(400).json({ error: '取り消せる出荷指示ではありません' });
+  si.status = 'cancelled';
+  inventory.allocations.filter((a) => a.instructionId === si.id).forEach((a) => {
+    a.status = 'reserved';
+    delete a.instructionId;
+  });
+  await saveInventory();
+  res.json({ ok: true });
+});
+
+/** 出荷指示の出荷完了：在庫から引き、引当を出荷済みにする */
+function shipInstruction(si: ShipInstruction, body: any, by: StockMove['by']): string | null {
+  if (si.status !== 'open') return 'この出荷指示はすでに出荷済みか、取り消されています / Already shipped or cancelled';
+  for (const l of si.lines) {
+    const have = inventory.stock[si.warehouse][stockKey(l.productId, l.productName)]?.qty || 0;
+    if (l.qty > have) return `「${l.productName}」の在庫（${have}）が足りません / Not enough stock`;
+  }
+  const trackingNos = String(body?.trackingNos || '')
+    .split(/[、,\s\n]+/)
+    .map((x: string) => x.trim())
+    .filter(Boolean)
+    .slice(0, 20);
+  for (const l of si.lines) addStock(si.warehouse, l.productId, l.productName, -l.qty, 'outbound', by, `${si.id} ${si.orderId}`, si.clinicName);
+  inventory.allocations.filter((a) => a.instructionId === si.id).forEach((a) => (a.status = 'shipped'));
+  si.status = 'shipped';
+  si.carrier = String(body?.carrier || '').slice(0, 50);
+  si.trackingNos = trackingNos;
+  si.shippedAt = new Date().toISOString();
+  si.shippedBy = by;
+  if (body?.memo) si.memo = [si.memo, String(body.memo).slice(0, 300)].filter(Boolean).join(' / ');
+  return null;
+}
+
+// 社内：出荷完了（国内倉庫の分。ほかの倉庫の分も代わりに押せる）
+app.post('/api/inventory/instructions/:id/ship', async (req, res) => {
+  await loadInventory();
+  const si = inventory.instructions.find((x) => x.id === req.params.id);
+  if (!si) return res.status(404).json({ error: '出荷指示が見つかりません' });
+  const err = shipInstruction(si, req.body, 'staff');
+  if (err) return res.status(400).json({ error: err });
+  applyAllocationsToOrders();
+  await saveInventory();
+  res.json({ instruction: instructionView(si) });
+});
+
+// 社内：国内倉庫の入荷の承認（韓国・シンガポールは倉庫の担当者が押す）
+app.post('/api/inventory/inbound/:poId/receive', async (req, res) => {
+  await loadInventory();
+  const rec = inventory.inbound[req.params.poId];
+  if (!rec || rec.excluded || rec.cancelled) return res.status(404).json({ error: '入荷予定が見つかりません' });
+  if (rec.received) return res.status(400).json({ error: 'すでに承認済みです' });
+  const err = receiveInbound(rec, req.body?.lines, req.body?.memo, 'staff');
+  if (err) return res.status(400).json({ error: err });
+  await saveInventory();
+  res.json({ inbound: inboundView(rec) });
+});
+
+// 社内：国内倉庫からの出庫（出荷指示以外）
+app.post('/api/inventory/outbound', async (req, res) => {
+  await loadInventory();
+  const { warehouse, key, qty, ref, memo } = req.body || {};
+  if (!isWarehouseId(warehouse)) return res.status(400).json({ error: '倉庫を選んでください' });
+  const item = inventory.stock[warehouse][String(key || '')];
+  const n = Math.round(Number(qty));
+  if (!item) return res.status(404).json({ error: '商品が見つかりません' });
+  if (!(n > 0)) return res.status(400).json({ error: '数量を入れてください' });
+  const free = item.qty - reservedQty(warehouse, String(key));
+  if (n > free) return res.status(400).json({ error: `引当済みを除いた在庫（${Math.max(0, free)}）より多くは出庫できません` });
+  addStock(warehouse, item.productId, item.productName, -n, 'outbound', 'staff', String(ref || '').slice(0, 100) || undefined, String(memo || '').slice(0, 300) || undefined);
+  await saveInventory();
+  res.json({ stock: stockList(warehouse) });
+});
+
 // 手元の動作確認用：発注管理のCSVを渡して入荷予定に取り込む（本番では使えない）
 if (process.env.NODE_ENV !== 'production') {
   app.post('/api/inventory/dev-import-po', async (req, res) => {
     await mergePurchaseOrdersIntoInbound(transformCsvToPurchaseOrders(String(req.body?.csv || '')));
     res.json({ ok: true, count: Object.keys(inventory.inbound).length });
   });
+  app.post('/api/inventory/dev-seed-orders', async (req, res) => {
+    serverRakurakuStore.orders = finalizeDeliveryData(Array.isArray(req.body?.orders) ? req.body.orders : []);
+    await loadInventory();
+    applyAllocationsToOrders();
+    res.json({ ok: true });
+  });
 }
 
 // --- 倉庫の担当者の画面（/warehouse/:slug）
 const warehouseBySlug = (slug: string): WarehouseId | null =>
-  (Object.keys(WAREHOUSES) as WarehouseId[]).find((w) => inventory.access[w]?.slug === slug && !inventory.access[w]?.disabled) || null;
+  PORTAL_WAREHOUSES.find((w) => inventory.access[w]?.slug === slug && !inventory.access[w]?.disabled) || null;
 async function warehouseFromRequest(req: express.Request): Promise<WarehouseId | null> {
   const s = await readSession(readCookie(req, WAREHOUSE_COOKIE));
   if (!s || s.t !== 'warehouse' || !isWarehouseId(s.w)) return null;
@@ -4883,6 +5211,11 @@ app.get('/api/warehouse/data', async (req, res) => {
     inbound,
     stock: stockList(w),
     moves: inventory.moves.filter((m) => m.warehouse === w).slice(-300).reverse(),
+    instructions: inventory.instructions
+      .filter((i) => i.warehouse === w && (i.status === 'open' || Date.now() - new Date(i.shippedAt || i.createdAt).getTime() < 14 * 86400000))
+      .slice()
+      .reverse()
+      .map((i) => instructionView(i, true)),
   });
 });
 // 入荷の承認：届いた実数を入れる。発注数より少ない明細があれば「不足あり」
@@ -4892,24 +5225,22 @@ app.post('/api/warehouse/inbound/:poId/receive', async (req, res) => {
   const rec = inventory.inbound[req.params.poId];
   if (!rec || rec.warehouse !== w || rec.excluded || rec.cancelled) return res.status(404).json({ error: '入荷予定が見つかりません / Not found' });
   if (rec.received) return res.status(400).json({ error: 'すでに承認済みです / Already received' });
-  const given = new Map<string, number>((Array.isArray(req.body?.lines) ? req.body.lines : []).map((l: any) => [String(l.key), Math.round(Number(l.receivedQty))]));
-  for (const l of rec.lines) {
-    const q = given.get(l.key);
-    if (q === undefined || !Number.isFinite(q) || q < 0) return res.status(400).json({ error: `「${l.productName}」の入荷数を入れてください / Enter the received quantity` });
-  }
-  let shortage = false;
-  for (const l of rec.lines) {
-    l.receivedQty = given.get(l.key)!;
-    if (l.receivedQty < l.qty) shortage = true;
-    if (l.receivedQty > 0) addStock(w, l.productId, l.productName, l.receivedQty, 'inbound', 'warehouse', rec.poId, rec.supplierName);
-  }
-  rec.received = true;
-  rec.shortage = shortage;
-  rec.receivedAt = new Date().toISOString();
-  rec.receivedMemo = String(req.body?.memo || '').slice(0, 500);
-  rec.updatedAt = rec.receivedAt;
+  const err = receiveInbound(rec, req.body?.lines, req.body?.memo, 'warehouse');
+  if (err) return res.status(400).json({ error: err });
   await saveInventory();
   res.json({ inbound: inboundView(rec, true), stock: stockList(w) });
+});
+// 出荷指示の出荷完了（倉庫の担当者）
+app.post('/api/warehouse/instructions/:id/ship', async (req, res) => {
+  const w = await warehouseFromRequest(req);
+  if (!w) return res.status(401).json({ error: 'login_required' });
+  const si = inventory.instructions.find((x) => x.id === req.params.id && x.warehouse === w);
+  if (!si) return res.status(404).json({ error: '出荷指示が見つかりません / Not found' });
+  const err = shipInstruction(si, req.body, 'warehouse');
+  if (err) return res.status(400).json({ error: err });
+  applyAllocationsToOrders();
+  await saveInventory();
+  res.json({ instruction: instructionView(si, true), stock: stockList(w) });
 });
 // 出庫：在庫から引く（在庫より多くは引けない）
 app.post('/api/warehouse/outbound', async (req, res) => {
@@ -4920,7 +5251,8 @@ app.post('/api/warehouse/outbound', async (req, res) => {
   const item = inventory.stock[w][key];
   if (!item) return res.status(404).json({ error: '商品が見つかりません / Item not found' });
   if (!Number.isFinite(qty) || qty <= 0) return res.status(400).json({ error: '数量を入れてください / Enter a quantity' });
-  if (qty > item.qty) return res.status(400).json({ error: `在庫（${item.qty}）より多くは出庫できません / Not enough stock (${item.qty})` });
+  const free = item.qty - reservedQty(w, key);
+  if (qty > free) return res.status(400).json({ error: `引当済みを除いた在庫（${Math.max(0, free)}）より多くは出庫できません。出荷指示の分は「出荷指示」から出荷してください / Only ${Math.max(0, free)} unreserved – ship reserved items from the shipping instructions` });
   addStock(w, item.productId, item.productName, -qty, 'outbound', 'warehouse', String(req.body?.ref || '').slice(0, 100) || undefined, String(req.body?.memo || '').slice(0, 300) || undefined);
   await saveInventory();
   res.json({ stock: stockList(w) });

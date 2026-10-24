@@ -33,6 +33,7 @@ export interface OrderLine {
   lineAmount?: number;
   costPrice?: number;
   poNumber?: string;
+  allocatedQty?: number;            // 倉庫の在庫から引き当てた数（入荷・在庫の画面で確定。楽楽販売には無い）
 }
 
 export interface Order {

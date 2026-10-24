@@ -142,6 +142,8 @@ export const ProcurementView: React.FC<ProcurementViewProps> = ({
         if (isShippingOrFee(l.productName, l.productId)) {
           return;
         }
+        // 倉庫の在庫で全数を引き当てた未発注の明細は、発注しないので一覧に出さない
+        if (l.stage === '未発注' && (l.allocatedQty || 0) >= l.quantity) return;
         const po = l.stage === '発注済・入荷待ち' && l.poDate ? parseYmd(l.poDate) : null;
         const poDays = po ? Math.floor((today.getTime() - po.getTime()) / 86400000) : null;
 
