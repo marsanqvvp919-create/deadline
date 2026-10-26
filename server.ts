@@ -210,6 +210,10 @@ const FIELD_MAP: Record<string, string[]> = {
 // 精算の行。納期超過には数えない
 const SETTLEMENT_LINE_KEYWORDS = ['割引', '不足分', '前回分差額'];
 
+// 送料・手数料に加え、割引・不足分・前回分差額の精算行も商品ではない（在庫・引当の対象外）
+const isNonProductLine = (productName?: string, productId?: string) =>
+  isShippingOrFee(productName, productId) || SETTLEMENT_LINE_KEYWORDS.some((kw) => String(productName || '').includes(kw));
+
 // 送料・代行手数料等の除外判定（商品としてカウントせず取引明細にも出さない）
 function isShippingOrFee(productName?: string, productId?: string): boolean {
   if (!productName && !productId) return false;
@@ -4682,7 +4686,7 @@ app.post('/api/inventory/sample-stock/seed', async (_req, res) => {
     .sort((a, b) => (a.paymentStatus === '入金済' ? 0 : 1) - (b.paymentStatus === '入金済' ? 0 : 1) || String(b.orderDate || '').localeCompare(String(a.orderDate || '')));
   for (const o of orders) {
     for (const l of o.lines) {
-      if (l.stage !== '未発注' || !l.productId || isShippingOrFee(l.productName, l.productId)) continue;
+      if (l.stage !== '未発注' || !l.productId || isNonProductLine(l.productName, l.productId)) continue;
       const cur = need.get(l.productId) || { productId: l.productId, productName: l.productName, qty: 0 };
       cur.qty += l.quantity;
       need.set(l.productId, cur);
@@ -4832,7 +4836,7 @@ function transformCsvToPurchaseOrders(csvText: string) {
     }
     const productName = get(row, 'productName');
     if (!productName && !get(row, 'productId')) continue;
-    if (isShippingOrFee(productName, get(row, 'productId'))) continue;
+    if (isNonProductLine(productName, get(row, 'productId'))) continue;
     po.lines.push({ productId: get(row, 'productId'), productName, quantity: parseInt(get(row, 'quantity'), 10) || 0 });
   }
   return Array.from(byId.values());
@@ -5231,7 +5235,7 @@ function allocationCandidates() {
     .sort((a, b) => String(a.orderDate || '').localeCompare(String(b.orderDate || '')));
   for (const o of orders) {
     for (const l of o.lines) {
-      if (l.stage !== '未発注' || isShippingOrFee(l.productName, l.productId) || !l.productId) continue;
+      if (l.stage !== '未発注' || isNonProductLine(l.productName, l.productId) || !l.productId) continue;
       const need = l.quantity - (allocated.get(`${o.orderId}|${l.productId}`) || 0);
       if (need <= 0) continue;
       const stockAt = ALLOCATION_ORDER.map((w) => ({ warehouse: w, available: free[w].get(l.productId) || 0 }));
@@ -5355,7 +5359,7 @@ function orderPlans() {
   const out: any[] = [];
   for (const o of orders) {
     const lines = (o.lines as any[])
-      .filter((l) => l.stage === '未発注' && l.productId && !isShippingOrFee(l.productName, l.productId))
+      .filter((l) => l.stage === '未発注' && l.productId && !isNonProductLine(l.productName, l.productId))
       .map((l) => ({ productId: l.productId, productName: l.productName, quantity: l.quantity, latestDate: l.latestDate || null, allocated: allocated.get(`${o.orderId}|${l.productId}`) || 0 }))
       .map((l) => ({ ...l, need: l.quantity - l.allocated }))
       .filter((l) => l.need > 0);
@@ -5720,7 +5724,7 @@ app.get('/api/invoice/status', async (_req, res) => {
       currency: m.settings?.currency || 'JPY',
       // 楽楽販売の商品名・最近のご注文のクリニックが、インボイスのマスタで見つかるか
       productMatch: (() => {
-        const names = Array.from(new Set(invOrders().flatMap((o) => o.lines.filter((l: any) => !isShippingOrFee(l.productName, l.productId)).map((l: any) => l.productName))));
+        const names = Array.from(new Set(invOrders().flatMap((o) => o.lines.filter((l: any) => !isNonProductLine(l.productName, l.productId)).map((l: any) => l.productName))));
         const miss = names.filter((n) => !matchInvoiceProduct(n, m.products));
         return { total: names.length, matched: names.length - miss.length, missingSample: miss.slice(0, 40) };
       })(),
