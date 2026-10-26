@@ -4479,6 +4479,8 @@ interface InventoryStore {
   instructions: ShipInstruction[];
   seq: number; // 出荷指示の番号
   productLinks?: Record<string, string>; // 楽楽販売の商品ID → インボイスの製剤（INVOICEアプリの products のドキュメントID）
+  // 動作確認用に実データへ入れた仮の在庫（あとでまとめて消す）
+  sampleSeed?: { at: string; items: { warehouse: WarehouseId; productId: string; productName: string; qty: number }[] } | null;
   access: Partial<Record<WarehouseId, WarehouseAccess>>;
   poSyncedAt?: string;
 }
@@ -4668,6 +4670,73 @@ function buildDemoState(): DemoState {
   };
 }
 
+// --- 仮の在庫（実データ）：本物の未発注の商品に仮の在庫を入れて、引当や出荷指示を実データで試す。あとでまとめて消す
+app.post('/api/inventory/sample-stock/seed', async (_req, res) => {
+  if (isDemo()) return res.status(400).json({ error: 'サンプル表示中は使えません' });
+  await loadInventory();
+  if (inv().sampleSeed) return res.status(400).json({ error: 'すでに仮の在庫が入っています。先に消してください' });
+  // 本物の未発注の明細（入金済み・新しい順）から商品を選び、国内・韓国・シンガポールに振り分ける
+  const need = new Map<string, { productId: string; productName: string; qty: number }>();
+  const orders = invOrders()
+    .filter((o) => !/見積|出荷済|納品済|キャンセル/.test(String(o.status || '')) && o.orderState === '進行中')
+    .sort((a, b) => (a.paymentStatus === '入金済' ? 0 : 1) - (b.paymentStatus === '入金済' ? 0 : 1) || String(b.orderDate || '').localeCompare(String(a.orderDate || '')));
+  for (const o of orders) {
+    for (const l of o.lines) {
+      if (l.stage !== '未発注' || !l.productId || isShippingOrFee(l.productName, l.productId)) continue;
+      const cur = need.get(l.productId) || { productId: l.productId, productName: l.productName, qty: 0 };
+      cur.qty += l.quantity;
+      need.set(l.productId, cur);
+    }
+    if (need.size >= 24) break;
+  }
+  if (need.size === 0) return res.status(400).json({ error: '未発注の明細がないため、仮の在庫を入れる商品がありません' });
+  // 順番に 国内・韓国・シンガポール・韓国・国内・（在庫なし） … と振り分け、伝票によって1回で出せる・分かれる・不足が出るようにする
+  const pattern: (WarehouseId | null)[] = ['domestic', 'korea', 'singapore', 'korea', 'domestic', null, 'singapore', 'korea'];
+  const items: { warehouse: WarehouseId; productId: string; productName: string; qty: number }[] = [];
+  Array.from(need.values()).forEach((p, i) => {
+    const w = pattern[i % pattern.length];
+    if (!w) return;
+    // 3つに1つは少し足りない数にして「一部だけ在庫あり」も出す
+    const qty = i % 3 === 2 ? Math.max(1, Math.floor(p.qty / 2)) : p.qty + 10;
+    items.push({ warehouse: w, productId: p.productId, productName: p.productName, qty });
+  });
+  for (const it of items) addStock(it.warehouse, it.productId, it.productName, it.qty, 'import', 'staff', undefined, '【仮】サンプル在庫');
+  inv().sampleSeed = { at: new Date().toISOString(), items };
+  await saveInventory();
+  res.json({ ok: true, count: items.length });
+});
+app.post('/api/inventory/sample-stock/clear', async (_req, res) => {
+  if (isDemo()) return res.status(400).json({ error: 'サンプル表示中は使えません' });
+  await loadInventory();
+  const seed = inv().sampleSeed;
+  if (!seed) return res.status(400).json({ error: '仮の在庫は入っていません' });
+  // 仮の在庫を入れてから作った出荷待ちの出荷指示と引当を取り消す（本物の在庫は0なので、その間の引当は仮の在庫のもの）
+  const since = seed.at;
+  let cancelledSi = 0;
+  let cancelledAlloc = 0;
+  for (const si of inv().instructions) {
+    if (si.status === 'open' && si.createdAt >= since) {
+      si.status = 'cancelled';
+      cancelledSi++;
+    }
+  }
+  for (const a of inv().allocations) {
+    if ((a.status === 'reserved' || a.status === 'instructed') && a.createdAt >= since) {
+      a.status = 'cancelled';
+      cancelledAlloc++;
+    }
+  }
+  for (const it of seed.items) {
+    const have = inv().stock[it.warehouse][it.productId]?.qty || 0;
+    const back = Math.min(have, it.qty);
+    if (back > 0) addStock(it.warehouse, it.productId, it.productName, -back, 'adjust', 'staff', undefined, '【仮】サンプル在庫を削除');
+  }
+  inv().sampleSeed = null;
+  applyAllocationsToOrders();
+  await saveInventory();
+  res.json({ ok: true, cancelledSi, cancelledAlloc });
+});
+
 // サンプルを最初の状態に戻す
 app.post('/api/inventory/demo-reset', (_req, res) => {
   demoState = null;
@@ -4705,6 +4774,7 @@ function loadInventory() {
           instructions: Array.isArray(j?.instructions) ? j.instructions : [],
           seq: Number(j?.seq) || 0,
           productLinks: j?.productLinks || {},
+          sampleSeed: j?.sampleSeed || null,
           access: j?.access || {},
           poSyncedAt: j?.poSyncedAt,
         };
@@ -4923,6 +4993,7 @@ app.get('/api/inventory', async (_req, res) => {
   res.json({
     settings: inv().settings,
     poSyncedAt: inv().poSyncedAt || null,
+    sampleSeed: inv().sampleSeed ? { at: inv().sampleSeed!.at, count: inv().sampleSeed!.items.length } : null,
     warehouses: PORTAL_WAREHOUSES.map((w) => ({
       id: w,
       name: WAREHOUSES[w],

@@ -115,6 +115,7 @@ interface Move {
 }
 interface InventoryData {
   settings: { startDate: string };
+  sampleSeed?: { at: string; count: number } | null;
   poSyncedAt: string | null;
   warehouses: { id: WarehouseId; name: string; slug: string | null; disabled: boolean; lastLoginAt: string | null }[];
   inbound: Inbound[];
@@ -1295,6 +1296,34 @@ function WarehouseOverview({ data, onPick }: { data: InventoryData; onPick: (w: 
   );
 }
 
+/** 実データに入れた仮の在庫の表示（消すボタンつき） */
+function SampleStockBar({ data, onChange }: { data: InventoryData; onChange: () => void }) {
+  const [busy, setBusy] = useState(false);
+  if (isInventoryDemo() || !data.sampleSeed) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-xl border-2 border-orange-300 bg-orange-50 px-3 py-2 text-xs text-orange-900">
+      <span className="font-bold">仮の在庫が入っています（{data.sampleSeed.count}品目・{fmt(data.sampleSeed.at)}）</span>
+      <span>動作確認用です。引当・出荷指示を試したあとは、必ず「仮の在庫を消す」を押してください（その間の出荷待ちの引当・出荷指示も取り消して元に戻します）。</span>
+      <button
+        disabled={busy}
+        onClick={async () => {
+          if (!confirm('仮の在庫を消します。仮の在庫を入れてから作った引当・出荷指示（出荷待ち）も取り消します。よろしいですか？')) return;
+          setBusy(true);
+          try {
+            await api('/api/inventory/sample-stock/clear', { method: 'POST' });
+            onChange();
+          } finally {
+            setBusy(false);
+          }
+        }}
+        className="ml-auto rounded-lg bg-orange-600 text-white px-3 py-1 font-bold disabled:opacity-50"
+      >
+        仮の在庫を消す
+      </button>
+    </div>
+  );
+}
+
 /** 倉庫のタブ（どの倉庫を見ているか分かるように） */
 function WarehouseTabs({ value, onChange, counts }: { value: 'all' | WarehouseId; onChange: (v: 'all' | WarehouseId) => void; counts?: Partial<Record<'all' | WarehouseId, number>> }) {
   const items: ['all' | WarehouseId, string][] = [['all', 'すべての倉庫'], ...WH_IDS.map((w) => [w, WH_NAME[w]] as ['all' | WarehouseId, string])];
@@ -1348,6 +1377,7 @@ export function ShippingInstructionsPage() {
       <DemoBar onChange={load} />
       {settingsOpen && <DhlSettings onClose={() => setSettingsOpen(false)} />}
       {error && <div className="rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs px-3 py-2">{error}</div>}
+      {data && <SampleStockBar data={data} onChange={load} />}
       {data ? <AllocationPanel data={data} onSaved={load} /> : !error && <div className="p-6 text-sm text-slate-500">読み込み中…</div>}
     </div>
   );
@@ -1431,6 +1461,7 @@ export function InventoryView({ orders }: { orders: Order[] }) {
   return (
     <div className="space-y-4">
       <DemoBar onChange={load} />
+      <SampleStockBar data={data} onChange={load} />
       <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-3">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
