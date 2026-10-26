@@ -31,6 +31,7 @@ import { InventoryView, ShippingInstructionsPage } from './components/InventoryV
 import { UnorderedView } from './components/UnorderedView';
 import { UndoToastHost } from './components/flow/UndoToast';
 import { UpdateNotice } from './components/flow/UpdateNotice';
+import { InvoiceAdmin } from './invoice/InvoiceAdmin';
 import { ArrivalTrackingView } from './components/ArrivalTrackingView';
 import { CustomsManagementView } from './components/CustomsManagementView';
 import { CoolMissingView } from './components/CoolMissingView';
@@ -67,6 +68,7 @@ import {
   Building,
   Calculator,
   ClipboardList,
+  FileText,
   Building2,
   Package,
   Menu,
@@ -92,7 +94,7 @@ import {
 
 const KNOWN_TABS: ViewTab[] = [
   'dashboard', 'morning_meeting', 'alerts', 'procurement', 'unshipped_clinics', 'partial_shipment', 'overdue',
-  'customs_management', 'cool_missing', 'kanto_customs_ng', 'unmatched_sheets', 'inventory_management', 'shipping_calc', 'shipping_instructions',
+  'customs_management', 'cool_missing', 'kanto_customs_ng', 'unmatched_sheets', 'inventory_management', 'shipping_calc', 'shipping_instructions', 'invoices',
   'sheet_import', 'arrival_tracking', 'products', 'clinics', 'carrier_settings', 'bulk_deliveries', 'portal_admin',
   'sales_dashboard', 'sales_rep_sales', 'sales_clinic_master', 'reorder_prediction', 'rep_ranking',
 ];
@@ -671,6 +673,8 @@ export default function App() {
   ];
   // 通関・輸入はクール手配漏れ・通関NGをタブで含む
   const CUSTOMS_TABS: ViewTab[] = ['customs_management', 'cool_missing', 'kanto_customs_ng'];
+  // 配送状況：到着トラッキング・一括発注の配送・通関・輸入を1つの画面にまとめ、中をタブで切り替える
+  const DELIVERY_TABS: ViewTab[] = ['arrival_tracking', 'bulk_deliveries', ...CUSTOMS_TABS];
   const deliveryNavItems: {
     id: ViewTab;
     group: string;
@@ -729,16 +733,12 @@ export default function App() {
     {
       id: 'arrival_tracking',
       group: 'shipping',
-      label: '到着トラッキング',
+      label: '配送状況',
       icon: Clock,
-      badge: null,
-    },
-    {
-      id: 'bulk_deliveries',
-      group: 'shipping',
-      label: '一括発注の配送',
-      icon: Boxes,
-      badge: null,
+      // バッジは要対応（クール手配漏れ＋通関NG）
+      badge: coolMissingCount + kantoNgCount > 0 ? `${coolMissingCount + kantoNgCount}` : null,
+      badgeColor: 'bg-amber-600 text-white font-bold',
+      match: DELIVERY_TABS,
     },
     {
       id: 'unshipped_clinics',
@@ -749,20 +749,17 @@ export default function App() {
       badgeColor: 'bg-slate-600 text-white font-bold',
     },
     {
-      id: 'customs_management',
-      group: 'shipping',
-      label: '通関・輸入',
-      icon: Plane,
-      // バッジは要対応（クール手配漏れ＋通関NG）
-      badge: coolMissingCount + kantoNgCount > 0 ? `${coolMissingCount + kantoNgCount}` : null,
-      badgeColor: 'bg-amber-600 text-white font-bold',
-      match: CUSTOMS_TABS,
-    },
-    {
       id: 'inventory_management',
       group: 'shipping',
       label: '入荷・在庫（韓国・SG）',
       icon: Building,
+      badge: null,
+    },
+    {
+      id: 'invoices',
+      group: 'shipping',
+      label: 'インボイス',
+      icon: FileText,
       badge: null,
     },
     {
@@ -1136,11 +1133,13 @@ export default function App() {
             />
           )}
 
-          {/* 通関・輸入：一覧・クール手配漏れ・通関NG をタブで切り替える */}
-          {CUSTOMS_TABS.includes(activeTab) && (
+          {/* 配送状況：到着トラッキング・一括発注の配送・通関・輸入（一覧・クール手配漏れ・通関NG）をタブで切り替える */}
+          {DELIVERY_TABS.includes(activeTab) && (
             <div className="mb-4 inline-flex flex-wrap gap-1 rounded-xl border border-slate-200 bg-white p-1 shadow-2xs">
               {([
-                ['customs_management', '通関・輸入の一覧', null],
+                ['arrival_tracking', '到着トラッキング', null],
+                ['bulk_deliveries', '一括発注の配送', null],
+                ['customs_management', '通関・輸入', null],
                 ['cool_missing', 'クール手配漏れ', coolMissingCount],
                 ['kanto_customs_ng', '通関NG・通関保留', kantoNgCount],
               ] as [ViewTab, string, number | null][]).map(([id, label, n]) => (
@@ -1222,6 +1221,7 @@ export default function App() {
           <UndoToastHost />
           <UpdateNotice />
           {activeTab === 'shipping_instructions' && <ShippingInstructionsPage onNavigate={(t) => setActiveTab(t as ViewTab)} />}
+          {activeTab === 'invoices' && <InvoiceAdmin />}
 
           {activeTab === 'shipping_calc' && (
             // 国際送料電卓は独立した別アプリ（/tools/shipping-calc/）をそのまま表示する

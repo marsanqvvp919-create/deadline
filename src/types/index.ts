@@ -180,6 +180,7 @@ export type ViewTab =
   | 'inventory_management'
   | 'shipping_calc'
   | 'shipping_instructions'
+  | 'invoices'
   | 'arrival_tracking'
   | 'customs_management'
   | 'cool_missing'

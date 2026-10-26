@@ -5904,6 +5904,228 @@ app.post('/api/invoice/issue/:siId', async (req, res) => {
   }
 });
 
+// --- インボイスの管理（INVOICEアプリの機能をこのシステムで）：発送データの一覧・作成・状態変更、マスタと設定の編集。
+// INVOICEアプリと同じ Firestore を使うので、どちらで直しても同じデータになる
+const INVOICE_FIELDS: Record<string, { text: string[]; num: string[]; bool: string[] }> = {
+  products: {
+    text: ['productId', 'sku', 'nameJa', 'nameEn', 'manufacturer', 'spec', 'unit', 'hsCode', 'countryOfOrigin', 'purchaseCurrency', 'boxSize', 'lotNo', 'expiryDate', 'temp', 'notes'],
+    num: ['content', 'purchasePrice', 'invoicePrice', 'weight', 'currentStock', 'minStock'],
+    bool: ['active'],
+  },
+  clinics: {
+    text: ['clinicId', 'name', 'nameEn', 'corporationName', 'contactPerson', 'contactPersonEn', 'doctorName', 'doctorNameEn', 'zip', 'prefecture', 'city', 'address', 'building', 'addressEn', 'phone', 'email', 'email2', 'notes'],
+    num: [],
+    bool: ['active'],
+  },
+  warehouses: {
+    text: ['warehouseId', 'name', 'nameEn', 'contactPerson', 'address', 'addressEn', 'phone', 'email', 'country', 'zip', 'notes'],
+    num: [],
+    bool: ['isDefault'],
+  },
+};
+const SETTINGS_FIELDS = { text: ['prefix', 'currency', 'defaultWarehouseId', 'declaration', 'termsOfDelivery', 'reasonForExport', 'weightUnit', 'dateFormat', 'companyLogo', 'signatureImage'], num: ['decimalPlaces'], bool: ['minStockWarning'] };
+function pickFields(body: any, f: { text: string[]; num: string[]; bool: string[] }) {
+  const out: any = {};
+  for (const k of f.text) if (typeof body?.[k] === 'string') out[k] = body[k].slice(0, k === 'companyLogo' || k === 'signatureImage' ? 2_000_000 : 2000);
+  for (const k of f.num) if (body?.[k] !== undefined && body[k] !== '' && Number.isFinite(Number(body[k]))) out[k] = Number(body[k]);
+  for (const k of f.bool) if (typeof body?.[k] === 'boolean') out[k] = body[k];
+  return out;
+}
+
+/** インボイス番号（接頭辞＋日付＋連番）を付けて発送データを保存する。INVOICEアプリと同じ番号体系で重複しない */
+async function saveShipmentWithNumber(shipment: any, date: string, prefixFromSettings?: string) {
+  const db = invoiceDb();
+  const prefix = prefixFromSettings || 'INV-';
+  const digits = date.replace(/-/g, '');
+  return db.runTransaction(async (tx) => {
+    const same = await tx.get(db.collection('shipments').where('date', '==', date));
+    let maxSeq = 0;
+    same.docs.forEach((doc) => {
+      const mm = String(doc.get('invoiceNo') || '').match(/[-_/](\d+)$/);
+      if (mm) maxSeq = Math.max(maxSeq, parseInt(mm[1], 10));
+    });
+    maxSeq = Math.max(maxSeq, same.size);
+    const invoiceNo = `${prefix}${digits}-${String(maxSeq + 1).padStart(3, '0')}`;
+    const ref = db.collection('shipments').doc();
+    tx.set(ref, { ...shipment, invoiceNo, date });
+    return { invoiceNo, docId: ref.id };
+  });
+}
+
+app.get('/api/invoice-admin/masters/:type', async (req, res) => {
+  const type = req.params.type;
+  if (!INVOICE_FIELDS[type]) return res.status(404).json({ error: '種類が違います' });
+  try {
+    const snap = await invoiceDb().collection(type).get();
+    res.json({ items: snap.docs.map((d) => ({ id: d.id, ...d.data() })) });
+  } catch (e: any) {
+    res.status(500).json({ error: `読み込めませんでした（${e?.message || e}）` });
+  }
+});
+app.post('/api/invoice-admin/masters/:type', async (req, res) => {
+  const type = req.params.type;
+  if (!INVOICE_FIELDS[type]) return res.status(404).json({ error: '種類が違います' });
+  const data = pickFields(req.body, INVOICE_FIELDS[type]);
+  const nameKey = type === 'products' ? 'nameJa' : 'name';
+  if (!String(data[nameKey] || '').trim()) return res.status(400).json({ error: '名前を入れてください' });
+  try {
+    const now = new Date().toISOString();
+    const ref = await invoiceDb().collection(type).add({ active: true, ...data, createdAt: now, updatedAt: now, updatedBy: '納期管理システム' });
+    invoiceMasters = null;
+    res.json({ id: ref.id });
+  } catch (e: any) {
+    res.status(500).json({ error: `保存できませんでした（${e?.message || e}）` });
+  }
+});
+app.post('/api/invoice-admin/masters/:type/:id', async (req, res) => {
+  const type = req.params.type;
+  if (!INVOICE_FIELDS[type]) return res.status(404).json({ error: '種類が違います' });
+  const data = pickFields(req.body, INVOICE_FIELDS[type]);
+  try {
+    const db = invoiceDb();
+    if (type === 'warehouses' && data.isDefault === true) {
+      // 既定の倉庫は1つだけ
+      const all = await db.collection('warehouses').get();
+      const batch = db.batch();
+      all.docs.forEach((d) => d.id !== req.params.id && d.get('isDefault') && batch.update(d.ref, { isDefault: false }));
+      await batch.commit();
+    }
+    await db.collection(type).doc(req.params.id).update({ ...data, updatedAt: new Date().toISOString(), updatedBy: '納期管理システム' });
+    invoiceMasters = null;
+    res.json({ ok: true });
+  } catch (e: any) {
+    res.status(500).json({ error: `保存できませんでした（${e?.message || e}）` });
+  }
+});
+app.get('/api/invoice-admin/settings', async (_req, res) => {
+  try {
+    const d = await invoiceDb().doc('systemSettings/default').get();
+    res.json({ settings: d.exists ? d.data() : {} });
+  } catch (e: any) {
+    res.status(500).json({ error: `読み込めませんでした（${e?.message || e}）` });
+  }
+});
+app.post('/api/invoice-admin/settings', async (req, res) => {
+  try {
+    await invoiceDb().doc('systemSettings/default').set(pickFields(req.body, SETTINGS_FIELDS), { merge: true });
+    invoiceMasters = null;
+    res.json({ ok: true });
+  } catch (e: any) {
+    res.status(500).json({ error: `保存できませんでした（${e?.message || e}）` });
+  }
+});
+// 発送データ（インボイス）の一覧：期間（発送日）で絞る
+app.get('/api/invoice-admin/shipments', async (req, res) => {
+  const from = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.from || '')) ? String(req.query.from) : new Date(Date.now() - 60 * 86400000).toISOString().slice(0, 10);
+  const to = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.to || '')) ? String(req.query.to) : '9999-12-31';
+  try {
+    const snap = await invoiceDb().collection('shipments').where('date', '>=', from).where('date', '<=', to).get();
+    const items = snap.docs
+      .map((d) => {
+        const x: any = d.data();
+        return {
+          id: d.id,
+          invoiceNo: x.invoiceNo,
+          date: x.date,
+          status: x.status,
+          clinicName: x.clinicSnapshot?.name || x.clinicSnapshot?.nameEn || '',
+          warehouseName: x.warehouseSnapshot?.name || '',
+          totalQty: x.totalQty || 0,
+          totalInvoiceAmount: x.totalInvoiceAmount || 0,
+          currency: x.currency || 'JPY',
+          courier: x.courier || '',
+          trackingNo: x.trackingNo || '',
+          createdByName: x.createdByName || '',
+          items: (x.items || []).map((it: any) => `${it.nameEn || it.nameJa} ×${it.qty}`).join('、'),
+        };
+      })
+      .sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.invoiceNo).localeCompare(String(a.invoiceNo)));
+    res.json({ items, from, to });
+  } catch (e: any) {
+    res.status(500).json({ error: `読み込めませんでした（${e?.message || e}）` });
+  }
+});
+app.get('/api/invoice-admin/shipments/:id', async (req, res) => {
+  try {
+    const db = invoiceDb();
+    const [d, s2] = await Promise.all([db.collection('shipments').doc(req.params.id).get(), db.doc('systemSettings/default').get()]);
+    if (!d.exists) return res.status(404).json({ error: '見つかりません' });
+    res.json({ shipment: { id: d.id, ...d.data() }, settings: s2.exists ? s2.data() : {} });
+  } catch (e: any) {
+    res.status(500).json({ error: `読み込めませんでした（${e?.message || e}）` });
+  }
+});
+app.post('/api/invoice-admin/shipments/:id/status', async (req, res) => {
+  const status = String(req.body?.status || '');
+  if (!['DRAFT', 'WAITING', 'CONFIRMED', 'SHIPPED', 'CANCELLED'].includes(status)) return res.status(400).json({ error: '状態が違います' });
+  try {
+    const ref = invoiceDb().collection('shipments').doc(req.params.id);
+    const d = await ref.get();
+    if (!d.exists) return res.status(404).json({ error: '見つかりません' });
+    const now = new Date().toISOString();
+    const upd: any = { status, updatedAt: now, updatedByName: '納期管理システム', history: [...((d.get('history') as any[]) || []), { date: now.substring(0, 16).replace('T', ' '), user: '納期管理システム', action: 'STATUS_CHANGE', detail: `状況変更: ${d.get('status')} → ${status}` }] };
+    if (typeof req.body?.trackingNo === 'string' && req.body.trackingNo.trim()) upd.trackingNo = req.body.trackingNo.trim().slice(0, 100);
+    await ref.update(upd);
+    res.json({ ok: true });
+  } catch (e: any) {
+    res.status(500).json({ error: `保存できませんでした（${e?.message || e}）` });
+  }
+});
+// 出荷依頼を通さずにインボイスを作る（サンプル送付など）
+app.post('/api/invoice-admin/shipments', async (req, res) => {
+  try {
+    const m = await loadInvoiceMasters(true);
+    const b = req.body || {};
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(String(b.date || '')) ? String(b.date) : jstToday();
+    const clinic = m.clinics.find((c) => c.id === b.clinicId);
+    const warehouse = m.warehouses.find((w) => w.id === b.warehouseId);
+    if (!clinic) return res.status(400).json({ error: 'クリニックを選んでください' });
+    if (!warehouse) return res.status(400).json({ error: '発送元の倉庫を選んでください' });
+    const lines = (Array.isArray(b.items) ? b.items : []).filter((x: any) => x?.productId && Number(x.qty) > 0);
+    if (lines.length === 0) return res.status(400).json({ error: '商品を1つ以上入れてください' });
+    const items = lines.map((x: any) => {
+      const p = m.products.find((pp) => pp.id === x.productId);
+      if (!p) throw new Error('製剤が見つかりません');
+      const qty = Math.round(Number(x.qty));
+      const unitPrice = x.unitPrice !== undefined && x.unitPrice !== '' ? Number(x.unitPrice) : typeof p.invoicePrice === 'number' && p.invoicePrice > 0 ? p.invoicePrice : Number(p.purchasePrice) || 0;
+      const weight = Number(p.weight) || 0;
+      return { productId: p.id, sku: p.sku || '', nameEn: p.nameEn || p.nameJa, nameJa: p.nameJa || '', lotNo: p.lotNo || '', expiryDate: p.expiryDate || '', qty, unit: p.unit || 'vial', unitPrice, amount: unitPrice * qty, weight, totalWeight: Math.round(weight * qty * 1000) / 1000, hsCode: p.hsCode || '', countryOfOrigin: p.countryOfOrigin || '' };
+    });
+    const total = items.reduce((n: number, x: any) => n + x.amount, 0);
+    const now = new Date().toISOString();
+    const shipment = {
+      warehouseId: warehouse.id,
+      warehouseSnapshot: warehouse,
+      clinicId: clinic.id,
+      clinicSnapshot: clinic,
+      currency: m.settings?.currency || 'JPY',
+      courier: String(b.courier || 'DHL Express').slice(0, 50),
+      trackingNo: String(b.trackingNo || '').slice(0, 100),
+      shippingCost: Number(b.shippingCost) || 0,
+      insurance: 0,
+      otherCharges: 0,
+      notes: String(b.notes || '').slice(0, 500),
+      items,
+      totalQty: items.reduce((n: number, x: any) => n + x.qty, 0),
+      totalWeight: Math.round(items.reduce((n: number, x: any) => n + x.totalWeight, 0) * 1000) / 1000,
+      totalItemsAmount: total,
+      totalInvoiceAmount: total + (Number(b.shippingCost) || 0),
+      status: 'CONFIRMED',
+      createdBy: 'deadline',
+      createdByName: '納期管理システム',
+      updatedBy: 'deadline',
+      updatedByName: '納期管理システム',
+      createdAt: now,
+      updatedAt: now,
+      history: [{ date: now.substring(0, 16).replace('T', ' '), user: '納期管理システム', action: 'CREATED_MANUAL', detail: `手入力でインボイス作成（${items.length}品目）` }],
+    };
+    const r = await saveShipmentWithNumber(shipment, date, m.settings?.prefix);
+    res.json({ invoiceNo: r.invoiceNo, shipment: { id: r.docId, ...shipment, invoiceNo: r.invoiceNo, date }, settings: m.settings });
+  } catch (e: any) {
+    res.status(400).json({ error: e?.message || String(e) });
+  }
+});
+
 /** 発行済みインボイスの発送データ（PDFを作り直す用） */
 async function issuedInvoice(si: ShipInstruction) {
   if (!si.invoiceDocId) return null;
