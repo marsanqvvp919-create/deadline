@@ -29,6 +29,7 @@ import { ProductMasterView } from './components/ProductMasterView';
 import { ClinicMasterView } from './components/ClinicMasterView';
 import { InventoryView, ShippingInstructionsPage } from './components/InventoryView';
 import { UnorderedView } from './components/UnorderedView';
+import { UndoToastHost } from './components/flow/UndoToast';
 import { ArrivalTrackingView } from './components/ArrivalTrackingView';
 import { CustomsManagementView } from './components/CustomsManagementView';
 import { CoolMissingView } from './components/CoolMissingView';
@@ -1021,6 +1022,7 @@ export default function App() {
                 onOpenClinicStatus={handleOpenClinicStatus}
                 onDataUpdated={() => loadData(false)}
                 onShowClassic={() => setProcurementClassic(true)}
+                onNavigate={(t) => setActiveTab(t as ViewTab)}
               />
             ))}
 
@@ -1216,7 +1218,8 @@ export default function App() {
             <ActionListView orders={filteredOrders} alerts={filteredAlerts} shipments={shipments} onSelectOrder={handleOpenDetail} repFilter={selectedRep} onClearRepFilter={() => setSelectedRep('')} />
           )}
 
-          {activeTab === 'shipping_instructions' && <ShippingInstructionsPage />}
+          <UndoToastHost />
+          {activeTab === 'shipping_instructions' && <ShippingInstructionsPage onNavigate={(t) => setActiveTab(t as ViewTab)} />}
 
           {activeTab === 'shipping_calc' && (
             // 国際送料電卓は独立した別アプリ（/tools/shipping-calc/）をそのまま表示する
@@ -1224,7 +1227,7 @@ export default function App() {
           )}
 
           {activeTab === 'inventory_management' && (
-            <InventoryView orders={deliveryData.orders} />
+            <InventoryView orders={deliveryData.orders} onNavigate={(t) => setActiveTab(t as ViewTab)} />
           )}
 
           {activeTab === 'arrival_tracking' && (

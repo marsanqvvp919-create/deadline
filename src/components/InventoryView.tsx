@@ -5,6 +5,10 @@ import { PasswordChooser, passwordOk } from './ClinicPortalAccess';
 import { Order } from '../types';
 import { InvoiceDialog, InvoicePdfButtons } from '../invoice/InvoiceDialog';
 import { AwbDialog, DhlSettings } from '../invoice/AwbDialog';
+import { FlowSteps } from './flow/FlowSteps';
+import { ColorLegend } from './flow/ColorLegend';
+import { notifyDone, notifyError } from './flow/UndoToast';
+import { TONE, Tone } from './flow/tone';
 
 // 入荷・在庫（国内倉庫・韓国倉庫・シンガポール倉庫）。楽楽販売の発注（発注済み）から入荷予定を作り、
 // 入荷先倉庫・配送方法・追跡番号・数量をここで入れる。倉庫の担当者が実数を入れて承認すると在庫に加わる（国内倉庫は社内で承認）。
@@ -127,18 +131,33 @@ interface InventoryData {
 
 const MOVE_LABEL: Record<string, string> = { inbound: '入荷', outbound: '出庫', adjust: '在庫修正', import: '取り込み', unreceive: '承認取消' };
 const fmt = (iso: string | null) => (iso ? new Date(iso).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—');
-const STATE_STYLE: Record<string, string> = {
-  no_tracking: 'bg-amber-100 text-amber-800 border-amber-200',
-  tracking: 'bg-blue-50 text-blue-700 border-blue-200',
-  in_transit: 'bg-blue-100 text-blue-800 border-blue-200',
-  arrived: 'bg-violet-100 text-violet-800 border-violet-200',
-  kick: 'bg-orange-100 text-orange-800 border-orange-200',
-  handcarry: 'bg-orange-100 text-orange-800 border-orange-200',
-  received: 'bg-emerald-100 text-emerald-800 border-emerald-200',
-  shortage: 'bg-rose-100 text-rose-800 border-rose-200',
-  excluded: 'bg-slate-100 text-slate-500 border-slate-200',
-  cancelled: 'bg-slate-100 text-slate-500 border-slate-200',
+// 入荷の状態の色（全画面共通の色のルール）。国内倉庫の到着・キック・持込は社内で承認するので「あなたの作業待ち」
+const STATE_TONE: Record<string, 'urgent' | 'action' | 'waiting' | 'done' | 'na'> = {
+  no_tracking: 'action',
+  tracking: 'waiting',
+  in_transit: 'waiting',
+  arrived: 'waiting',
+  kick: 'waiting',
+  handcarry: 'waiting',
+  received: 'done',
+  shortage: 'urgent',
+  excluded: 'na',
+  cancelled: 'na',
 };
+const stateTone = (r: { state: string; warehouse: string }) => (r.warehouse === 'domestic' && ['arrived', 'kick', 'handcarry'].includes(r.state) ? 'action' : STATE_TONE[r.state] || 'na');
+/** 入荷予定で次にやること（1行） */
+const inboundNext = (r: { state: string; warehouse: string; received: boolean }) =>
+  r.state === 'no_tracking'
+    ? '次にやること：下に追跡番号を入れる（キック・持込なら配送方法を選ぶ）'
+    : r.warehouse === 'domestic' && ['arrived', 'kick', 'handcarry'].includes(r.state)
+      ? '次にやること：届いたら「国内倉庫に届いた」で数を確認して承認'
+      : ['arrived', 'kick', 'handcarry'].includes(r.state)
+        ? '倉庫の担当者が数を確認して承認するのを待っています'
+        : ['tracking', 'in_transit'].includes(r.state)
+          ? '倉庫に届くのを待っています（自動で追跡しています）'
+          : r.state === 'shortage'
+            ? '届いた数が足りません。仕入先に確認してください'
+            : '';
 
 async function api(path: string, init?: RequestInit) {
   const r = await fetch(path, { ...init, headers: { 'Content-Type': 'application/json', ...demoHeaders(), ...(init?.headers || {}) } });
@@ -174,7 +193,7 @@ function InboundCard({ rec, onSaved }: { rec: Inbound; onSaved: () => void }) {
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-mono font-bold text-indigo-700">{rec.poId}</span>
-            <span className={`text-[11px] font-bold px-2 py-0.5 rounded border ${STATE_STYLE[rec.state] || 'bg-slate-100 text-slate-600 border-slate-200'}`}>{rec.stateLabel}</span>
+            <span className={`text-[11px] font-bold px-2 py-0.5 rounded border ${TONE[stateTone(rec)]}`}>{rec.stateLabel}</span>
             <span className="text-[11px] text-slate-500">発注日 {rec.poDate || '—'}</span>
           </div>
           <div className="text-sm font-bold text-slate-900 mt-1">
@@ -184,6 +203,7 @@ function InboundCard({ rec, onSaved }: { rec: Inbound; onSaved: () => void }) {
           <div className="text-[11px] text-slate-500">
             受注 {rec.orderId || '—'} {rec.clinicName}
           </div>
+          {inboundNext(rec) && <div className={`mt-1 inline-block rounded px-2 py-0.5 text-[11px] font-bold ${TONE[stateTone(rec) === 'action' ? 'action' : stateTone(rec) === 'urgent' ? 'urgent' : 'waiting']}`}>{inboundNext(rec)}</div>}
         </div>
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <label className="flex items-center gap-1">
@@ -285,35 +305,53 @@ function InboundCard({ rec, onSaved }: { rec: Inbound; onSaved: () => void }) {
       )}
       {error && <div className="text-xs text-rose-600">{error}</div>}
 
-      <div className="flex flex-wrap gap-2 pt-1 border-t border-slate-100">
-        {!rec.received && !rec.cancelled && (
-          <button disabled={busy} onClick={() => save({ excluded: !rec.excluded })} className="inline-flex items-center gap-1 rounded-md border border-slate-300 px-2.5 py-1 text-[11px] font-bold text-slate-600 hover:bg-slate-50">
-            {rec.excluded ? <RotateCcw className="w-3.5 h-3.5" /> : <Ban className="w-3.5 h-3.5" />}
-            {rec.excluded ? '入荷予定に戻す' : '対象外にする（倉庫を通らない等）'}
-          </button>
-        )}
-        {rec.received && (
-          <button
-            disabled={busy}
-            onClick={async () => {
-              if (!confirm('倉庫の承認を取り消し、在庫から承認した数を引きます。よろしいですか？')) return;
-              setBusy(true);
-              try {
-                await api(`/api/inventory/inbound/${rec.poId}/unreceive`, { method: 'POST' });
-                onSaved();
-              } catch (e: any) {
-                setError(e.message);
-              } finally {
-                setBusy(false);
-              }
-            }}
-            className="inline-flex items-center gap-1 rounded-md border border-rose-200 px-2.5 py-1 text-[11px] font-bold text-rose-600 hover:bg-rose-50"
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-            承認を取り消す
-          </button>
-        )}
-      </div>
+      {(!rec.cancelled || rec.received) && (
+        <div className="flex justify-end pt-1 border-t border-slate-100">
+          <details className="relative">
+            <summary className="list-none cursor-pointer rounded-lg border border-slate-200 px-2 py-1 text-[11px] text-slate-500 hover:bg-slate-50">… そのほかの操作</summary>
+            <div className="absolute right-0 z-20 mt-1 w-64 rounded-lg border border-slate-200 bg-white p-2 shadow-lg space-y-1.5 text-[11px]">
+              {!rec.received && !rec.cancelled && (
+                <button
+                  disabled={busy}
+                  onClick={async () => {
+                    const to = !rec.excluded;
+                    await save({ excluded: to });
+                    notifyDone(to ? `${rec.poId} を対象外にしました` : `${rec.poId} を入荷予定に戻しました`, async () => {
+                      await api(`/api/inventory/inbound/${rec.poId}`, { method: 'POST', body: JSON.stringify({ excluded: !to }) });
+                      onSaved();
+                    });
+                  }}
+                  className="flex items-center gap-1 text-slate-700"
+                >
+                  {rec.excluded ? <RotateCcw className="w-3.5 h-3.5" /> : <Ban className="w-3.5 h-3.5" />}
+                  {rec.excluded ? '入荷予定に戻す' : '対象外にする（倉庫を通らない等）'}
+                </button>
+              )}
+              {rec.received && (
+                <button
+                  disabled={busy}
+                  onClick={async () => {
+                    setBusy(true);
+                    try {
+                      await api(`/api/inventory/inbound/${rec.poId}/unreceive`, { method: 'POST' });
+                      onSaved();
+                      notifyDone(`${rec.poId} の承認を取り消しました（在庫から引きました）`);
+                    } catch (e: any) {
+                      notifyError(e.message);
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
+                  className="flex items-center gap-1 text-rose-600"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  承認を取り消す（在庫から承認した数を引く）
+                </button>
+              )}
+            </div>
+          </details>
+        </div>
+      )}
     </div>
   );
 }
@@ -325,7 +363,7 @@ function DomesticReceive({ rec, onSaved }: { rec: Inbound; onSaved: () => void }
   const [error, setError] = useState('');
   if (!open)
     return (
-      <button onClick={() => setOpen(true)} className="inline-flex items-center gap-1 rounded-md bg-emerald-600 text-white px-3 py-1 text-xs font-bold">
+      <button onClick={() => setOpen(true)} className="inline-flex items-center gap-1 rounded-md bg-amber-500 hover:bg-amber-600 text-white px-3 py-1 text-xs font-bold">
         <CheckCircle2 className="w-3.5 h-3.5" />
         国内倉庫に届いた（承認する）
       </button>
@@ -347,6 +385,10 @@ function DomesticReceive({ rec, onSaved }: { rec: Inbound; onSaved: () => void }
             try {
               await api(`/api/inventory/inbound/${rec.poId}/receive`, { method: 'POST', body: JSON.stringify({ lines: rec.lines.map((l) => ({ key: l.key, receivedQty: Number(qty[l.key]) })) }) });
               onSaved();
+              notifyDone(`${rec.poId} を承認し、国内倉庫の在庫に${rec.lines.reduce((n, l) => n + (Number(qty[l.key]) || 0), 0)}点を加えました`, async () => {
+                await api(`/api/inventory/inbound/${rec.poId}/unreceive`, { method: 'POST' });
+                onSaved();
+              });
             } catch (e: any) {
               setError(e.message);
             }
@@ -359,6 +401,7 @@ function DomesticReceive({ rec, onSaved }: { rec: Inbound; onSaved: () => void }
           やめる
         </button>
       </div>
+      <div className="text-[11px] text-emerald-800">国内倉庫の在庫に {rec.lines.reduce((n, l) => n + (Number(qty[l.key]) || 0), 0)}点を加えます。予定より少ない商品は「不足」になります。</div>
     </div>
   );
 }
@@ -660,36 +703,45 @@ function InstructionBoard({ instructions, onSaved }: { instructions: Instruction
   const [awbFor, setAwbFor] = useState<string | null>(null);
   const [ship, setShip] = useState<{ id: string; carrier: string; tracking: string } | null>(null);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-  const run = async (fn: () => Promise<any>) => {
+  const run = async (fn: () => Promise<any>, done?: string, undo?: () => Promise<any>) => {
     setBusy(true);
-    setError('');
     try {
       await fn();
       onSaved();
+      if (done) notifyDone(done, undo ? async () => (await undo(), onSaved()) : undefined);
     } catch (e: any) {
-      setError(e.message);
+      notifyError(e.message);
     } finally {
       setBusy(false);
     }
   };
   const list = instructions.filter((i) => (filter === 'all' || i.status === filter) && (wh === 'all' || i.warehouse === wh));
   const count = (st: string) => instructions.filter((i) => i.status === st).length;
-  const step = (done: boolean, label: string, sub?: React.ReactNode, warn = false) => (
-    <div className={`rounded-lg border px-2 py-1 min-w-24 ${done ? 'border-emerald-200 bg-emerald-50' : warn ? 'border-amber-300 bg-amber-50' : 'border-slate-200 bg-slate-50'}`}>
-      <div className={`text-[10px] font-bold ${done ? 'text-emerald-700' : warn ? 'text-amber-800' : 'text-slate-400'}`}>
-        {done ? '✓ ' : ''}
+  // ステップの表示（押すボタンは右の「次の一手」だけ）
+  const chip = (tone: Tone, label: string, sub?: React.ReactNode) => (
+    <div className={`rounded-lg border px-2 py-1 min-w-24 ${TONE[tone]}`}>
+      <div className="text-[10px] font-bold">
+        {tone === 'done' ? '✓ ' : ''}
         {label}
       </div>
       {sub && <div className="text-[11px] text-slate-700">{sub}</div>}
     </div>
   );
+  /** この出荷依頼で次にやること（ボタンは1つ） */
+  const next = (i: Instruction): { label: string; preview: string; onClick: () => void } | { wait: string } | null => {
+    if (i.status !== 'open') return null;
+    const intl = i.warehouse !== 'domestic';
+    if (intl && !i.invoiceNo) return { label: 'インボイスを作る', preview: 'インボイスアプリのマスタで内容を確認してから発行します（番号が付きます）', onClick: () => setInvoiceFor(i.id) };
+    if (intl && !i.awbNo) return { label: '送り状（AWB）を作る', preview: 'インボイスの内容から送り状を作ります。住所を確認してから発行します', onClick: () => setAwbFor(i.id) };
+    if (!intl) return { label: '出荷完了にする', preview: '国内倉庫の在庫から引き、出荷済みにします', onClick: () => setShip({ id: i.id, carrier: '', tracking: '' }) };
+    return { wait: `${WH_NAME[i.warehouse]}の担当者が出荷するのを待っています` };
+  };
   return (
     <section className="rounded-xl border border-slate-200 bg-white">
       <div className="p-3 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2">
         <div>
-          <div className="font-bold text-sm text-slate-900">出荷指示のステータス</div>
-          <div className="text-[11px] text-slate-500">指示 → インボイス → AWB → 出荷 → 配達。国内倉庫の国内発送はインボイス・AWBが要りません。楽楽販売の出荷管理への入力は別途お願いします。</div>
+          <div className="font-bold text-sm text-slate-900">倉庫への出荷依頼</div>
+          <div className="text-[11px] text-slate-500">右の黄色いボタンが次にやることです。国内倉庫の国内発送はインボイス・送り状が要りません。</div>
         </div>
         <div className="flex flex-wrap gap-1.5 text-xs">
           {([['open', `出荷待ち（${count('open')}）`], ['shipped', `出荷済み（${count('shipped')}）`], ['all', 'すべて']] as const).map(([id, label]) => (
@@ -706,104 +758,96 @@ function InstructionBoard({ instructions, onSaved }: { instructions: Instruction
           counts={Object.fromEntries((['all', ...WH_IDS] as const).map((w) => [w, instructions.filter((i) => (filter === 'all' || i.status === filter) && (w === 'all' || i.warehouse === w)).length]))}
         />
       </div>
-      {error && <div className="m-3 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs px-3 py-2">{error}</div>}
       <div className="divide-y divide-slate-100">
-        {list.length === 0 && <div className="p-6 text-center text-xs text-slate-400">該当する出荷指示はありません</div>}
+        {list.length === 0 && <div className="p-6 text-center text-xs text-slate-400">該当する出荷依頼はありません</div>}
         {list.map((i) => {
           const intl = i.warehouse !== 'domestic';
+          const nx = next(i);
           return (
             <div key={i.id} className={`p-3 text-xs space-y-2 ${i.status === 'shipped' ? 'bg-slate-50/50' : ''}`}>
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="font-bold">
-                  <span className="font-mono text-indigo-700">{i.id}</span>
-                  <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5">{i.warehouseName}</span>
-                  <span className="ml-2">
-                    {i.orderId} {i.clinicName}
-                  </span>
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="font-bold">
+                    <span className="font-mono text-indigo-700">{i.id}</span>
+                    <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5">{i.warehouseName}</span>
+                    <span className="ml-2 text-sm">{i.clinicName}</span>
+                    <span className="ml-2 font-normal text-slate-500">{i.orderId}</span>
+                  </div>
+                  <div className="text-slate-600 mt-0.5">{i.lines.map((l: any) => `${i.orderId.includes(',') && l.orderId ? `[${l.orderId}] ` : ''}${l.productName} × ${l.qty}`).join('、')}</div>
                 </div>
-                {i.status === 'open' && (
-                  <button disabled={busy} onClick={() => confirm('出荷指示を取り消して、引当済みに戻します。よろしいですか？') && run(() => api(`/api/inventory/instructions/${i.id}/cancel`, { method: 'POST' }))} className="text-[11px] text-slate-500 hover:text-rose-600">
-                    指示を取り消す
-                  </button>
-                )}
-              </div>
-              <div className="text-slate-600">{i.lines.map((l: any) => `${i.orderId.includes(',') && l.orderId ? `[${l.orderId}] ` : ''}${l.productName} × ${l.qty}`).join('、')}</div>
-              <div className="flex flex-wrap items-stretch gap-1.5">
-                {step(true, '出荷指示', fmt(i.createdAt))}
-                {intl
-                  ? step(
-                      !!i.invoiceNo,
-                      'インボイス',
-                      i.invoiceNo ? (
-                        <span className="flex flex-col gap-1">
-                          <span className="font-mono">{i.invoiceNo}</span>
-                          <InvoicePdfButtons source={`/api/invoice/doc/${i.id}`} label={false} />
-                        </span>
-                      ) : (
-                        <button onClick={() => setInvoiceFor(i.id)} className="mt-0.5 rounded bg-indigo-600 text-white px-2 py-0.5 font-bold">
-                          作成する
-                        </button>
-                      ),
-                      !i.invoiceNo
-                    )
-                  : step(true, 'インボイス', <span className="text-slate-400">国内のため不要</span>)}
-                {intl
-                  ? step(
-                      !!i.awbNo,
-                      'AWB',
-                      i.awbNo ? (
-                        <span className="flex flex-col gap-0.5">
-                          <span className="font-mono">
-                            {i.awbCarrier} {i.awbNo}
-                          </span>
-                          {i.awbLabel && (
-                            <a href={`/api/awb/label/${i.id}`} target="_blank" rel="noreferrer" className="text-indigo-700 font-bold underline">
-                              ラベルPDF
-                            </a>
-                          )}
-                          {i.awbMode === 'manual' && i.status === 'open' && (
-                            <button onClick={() => confirm('AWB番号を消しますか？') && run(() => api(`/api/awb/manual/${i.id}`, { method: 'POST', body: JSON.stringify({ awbNo: '' }) }))} className="text-[10px] text-slate-400 text-left">
-                              番号を消す
-                            </button>
-                          )}
-                        </span>
-                      ) : i.invoiceNo ? (
-                        <button onClick={() => setAwbFor(i.id)} className="mt-0.5 rounded bg-amber-600 text-white px-2 py-0.5 font-bold">
-                          作成する
-                        </button>
-                      ) : (
-                        <span className="text-slate-400">インボイスの後</span>
-                      ),
-                      !!i.invoiceNo && !i.awbNo
-                    )
-                  : step(true, 'AWB', <span className="text-slate-400">国内のため不要</span>)}
-                {step(
-                  i.status === 'shipped',
-                  '出荷',
-                  i.status === 'shipped' ? (
-                    <span>
-                      {fmt(i.shippedAt || null)}
-                      {i.shippedBy === 'warehouse' ? '（倉庫）' : '（社内）'}
-                    </span>
-                  ) : i.warehouse === 'domestic' ? (
-                    <button onClick={() => setShip({ id: i.id, carrier: '', tracking: '' })} className="mt-0.5 rounded bg-emerald-600 text-white px-2 py-0.5 font-bold">
-                      出荷完了にする
-                    </button>
-                  ) : (
-                    <span className="flex flex-col gap-0.5">
-                      <span className="text-slate-500">倉庫の出荷待ち</span>
-                      <button onClick={() => setShip({ id: i.id, carrier: i.awbCarrier || '', tracking: i.awbNo || '' })} className="text-[10px] text-slate-400 text-left">
-                        社内で完了にする
+                <div className="flex items-start gap-1.5">
+                  {nx && 'label' in nx && (
+                    <div className="text-right">
+                      <button disabled={busy} onClick={nx.onClick} className="rounded-lg bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 font-bold disabled:opacity-50">
+                        {nx.label}
                       </button>
-                    </span>
-                  ),
-                  i.status === 'open' && (!intl || (!!i.invoiceNo && !!i.awbNo))
+                      <div className="text-[10px] text-slate-500 mt-0.5 max-w-56">{nx.preview}</div>
+                    </div>
+                  )}
+                  {nx && 'wait' in nx && <span className={`rounded-lg border px-2.5 py-1.5 font-bold ${TONE.waiting}`}>{nx.wait}</span>}
+                  <details className="relative">
+                    <summary className="list-none cursor-pointer rounded-lg border border-slate-200 px-2 py-1.5 text-slate-500 hover:bg-slate-50">…</summary>
+                    <div className="absolute right-0 z-20 mt-1 w-56 rounded-lg border border-slate-200 bg-white p-2 shadow-lg space-y-1.5">
+                      {i.invoiceNo && (
+                        <div className="space-y-1">
+                          <div className="text-[10px] text-slate-500">インボイス {i.invoiceNo}</div>
+                          <InvoicePdfButtons source={`/api/invoice/doc/${i.id}`} label={false} />
+                        </div>
+                      )}
+                      {i.awbLabel && (
+                        <a href={`/api/awb/label/${i.id}`} target="_blank" rel="noreferrer" className="block text-indigo-700 font-bold">
+                          送り状のラベルPDF
+                        </a>
+                      )}
+                      {i.status === 'open' && intl && i.invoiceNo && i.awbNo && (
+                        <button onClick={() => setShip({ id: i.id, carrier: i.awbCarrier || '', tracking: i.awbNo || '' })} className="block text-left text-slate-700">
+                          倉庫の代わりに出荷完了にする
+                        </button>
+                      )}
+                      {i.awbMode === 'manual' && i.status === 'open' && (
+                        <button onClick={() => run(() => api(`/api/awb/manual/${i.id}`, { method: 'POST', body: JSON.stringify({ awbNo: '' }) }), '送り状の番号を消しました')} className="block text-left text-slate-700">
+                          送り状の番号を消す
+                        </button>
+                      )}
+                      {i.status === 'open' && (
+                        <button
+                          onClick={() =>
+                            run(() => api(`/api/inventory/instructions/${i.id}/cancel`, { method: 'POST' }), `${i.id} の出荷依頼を取り消しました（確保した在庫は残っています）`, () =>
+                              api(`/api/inventory/instructions/${i.id}/restore`, { method: 'POST' })
+                            )
+                          }
+                          className="block text-left text-rose-600"
+                        >
+                          出荷依頼を取り消す
+                        </button>
+                      )}
+                      {i.status === 'shipped' && (
+                        <button
+                          onClick={() => run(() => api(`/api/inventory/instructions/${i.id}/unship`, { method: 'POST' }), `${i.id} を出荷待ちに戻しました（在庫を戻しました）`)}
+                          className="block text-left text-rose-600"
+                        >
+                          出荷完了を取り消す
+                        </button>
+                      )}
+                    </div>
+                  </details>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-stretch gap-1.5">
+                {chip('done', '出荷依頼', fmt(i.createdAt))}
+                {intl ? chip(i.invoiceNo ? 'done' : 'action', 'インボイス', i.invoiceNo ? <span className="font-mono">{i.invoiceNo}</span> : '未作成') : chip('na', 'インボイス', '国内のため不要')}
+                {intl
+                  ? chip(i.awbNo ? 'done' : i.invoiceNo ? 'action' : 'na', '送り状（AWB）', i.awbNo ? <span className="font-mono">{`${i.awbCarrier || ''} ${i.awbNo}`}</span> : i.invoiceNo ? '未作成' : 'インボイスの後')
+                  : chip('na', '送り状（AWB）', '国内のため不要')}
+                {chip(
+                  i.status === 'shipped' ? 'done' : !intl || (i.invoiceNo && i.awbNo) ? (intl ? 'waiting' : 'action') : 'na',
+                  '出荷',
+                  i.status === 'shipped' ? `${fmt(i.shippedAt || null)}${i.shippedBy === 'warehouse' ? '（倉庫）' : '（社内）'}` : intl ? '倉庫の出荷待ち' : '未出荷'
                 )}
-                {step(
-                  i.delivery?.code === 'delivered',
+                {chip(
+                  i.delivery?.code === 'delivered' ? 'done' : i.delivery?.code === 'exception' ? 'urgent' : i.status === 'shipped' ? 'waiting' : 'na',
                   '配達',
-                  i.delivery ? <span className={i.delivery.code === 'exception' ? 'text-rose-700 font-bold' : ''}>{i.delivery.label}</span> : <span className="text-slate-400">{i.status === 'shipped' ? '確認中' : '—'}</span>,
-                  i.delivery?.code === 'exception'
+                  i.delivery ? i.delivery.label : i.status === 'shipped' ? '確認中' : '—'
                 )}
               </div>
               <div className="text-[11px] text-slate-500">
@@ -812,15 +856,28 @@ function InstructionBoard({ instructions, onSaved }: { instructions: Instruction
                 {i.trackingNos.length > 0 && <span className="ml-2 font-mono text-slate-700">追跡 {i.carrier} {i.trackingNos.join('、')}</span>}
               </div>
               {ship?.id === i.id && (
-                <div className="flex flex-wrap items-center gap-2 rounded bg-emerald-50 border border-emerald-200 p-2">
+                <div className="flex flex-wrap items-center gap-2 rounded bg-amber-50 border border-amber-200 p-2">
                   <input value={ship.carrier} onChange={(e) => setShip({ ...ship, carrier: e.target.value })} placeholder="配送業者（佐川・ヤマト・DHL など）" className="rounded border border-slate-300 px-2 py-1 w-52" />
                   <input value={ship.tracking} onChange={(e) => setShip({ ...ship, tracking: e.target.value })} placeholder="追跡番号（複数は「、」区切り）" className="rounded border border-slate-300 px-2 py-1 w-64 font-mono" />
-                  <button disabled={busy} onClick={() => run(() => api(`/api/inventory/instructions/${i.id}/ship`, { method: 'POST', body: JSON.stringify({ carrier: ship.carrier, trackingNos: ship.tracking }) })).then(() => setShip(null))} className="rounded bg-emerald-600 text-white px-3 py-1 font-bold">
-                    出荷完了（在庫から引く）
+                  <button
+                    disabled={busy}
+                    onClick={() =>
+                      run(
+                        () => api(`/api/inventory/instructions/${i.id}/ship`, { method: 'POST', body: JSON.stringify({ carrier: ship.carrier, trackingNos: ship.tracking }) }),
+                        `${i.id} を出荷完了にしました（在庫から ${i.lines.reduce((n, l) => n + l.qty, 0)}点を引きました）`,
+                        () => api(`/api/inventory/instructions/${i.id}/unship`, { method: 'POST' })
+                      ).then(() => setShip(null))
+                    }
+                    className="rounded bg-amber-500 text-white px-3 py-1 font-bold"
+                  >
+                    出荷完了にする
                   </button>
                   <button onClick={() => setShip(null)} className="rounded border border-slate-300 px-3 py-1 font-bold">
                     やめる
                   </button>
+                  <span className="basis-full text-[11px] text-slate-600">
+                    {WH_NAME[i.warehouse]}の在庫から {i.lines.map((l) => `${l.productName} ${l.qty}`).join('、')} を引き、出荷済みにします。
+                  </span>
                 </div>
               )}
             </div>
@@ -860,12 +917,7 @@ interface OrderPlan {
     warehouses: WarehouseId[];
   };
 }
-const PLAN_STYLE: Record<OrderPlan['plan']['type'], string> = {
-  single: 'bg-emerald-100 text-emerald-800 border-emerald-200',
-  split: 'bg-amber-100 text-amber-800 border-amber-200',
-  partial: 'bg-orange-100 text-orange-800 border-orange-200',
-  none: 'bg-slate-100 text-slate-500 border-slate-200',
-};
+const PLAN_STYLE: Record<OrderPlan['plan']['type'], string> = { single: TONE.action, split: TONE.action, partial: TONE.action, none: TONE.na };
 const planLabel = (p: OrderPlan['plan']) =>
   p.type === 'single'
     ? `${WH_NAME[p.warehouses[0]]}から1回で出荷できます`
@@ -881,18 +933,24 @@ function OrderPlanCard({ op, onDone, onError }: { op: OrderPlan; onDone: () => v
   const [single, setSingle] = useState<WarehouseId | ''>(op.plan.singleOptions[0] || '');
   const planned = (productId: string, w: WarehouseId) => op.plan.allocations.filter((a) => a.productId === productId && a.warehouse === w).reduce((n, a) => n + a.qty, 0);
   const missingOf = (productId: string) => op.plan.missing.find((m) => m.productId === productId)?.qty || 0;
-  const go = async (body: object, msg: string) => {
-    if (!confirm(msg)) return;
+  const go = async (body: object, done: string) => {
     setBusy(true);
     try {
-      await api('/api/inventory/allocate-order', { method: 'POST', body: JSON.stringify({ orderId: op.orderId, ...body }) });
+      const j = await api('/api/inventory/allocate-order', { method: 'POST', body: JSON.stringify({ orderId: op.orderId, ...body }) });
       onDone();
+      notifyDone(done, async () => {
+        await api('/api/inventory/allocations/cancel-many', { method: 'POST', body: JSON.stringify({ ids: j.ids }) });
+        onDone();
+      });
     } catch (e: any) {
       onError(e.message);
     } finally {
       setBusy(false);
     }
   };
+  const total = op.lines.reduce((n, l) => n + l.need, 0);
+  const planText = op.plan.warehouses.map((w) => `${WH_NAME[w]}から${op.plan.allocations.filter((a) => a.warehouse === w).reduce((n, a) => n + a.qty, 0)}点`).join('、');
+  const missingTotal = op.plan.missing.reduce((n, m) => n + m.qty, 0);
   const dl = op.latestDate ? Math.round((new Date(op.latestDate.replace(/\//g, '-') + 'T00:00:00').getTime() - new Date(new Date().toDateString()).getTime()) / 86400000) : null;
   return (
     <div className="rounded-lg border border-slate-200 bg-white">
@@ -956,27 +1014,21 @@ function OrderPlanCard({ op, onDone, onError }: { op: OrderPlan; onDone: () => v
                 ))}
               </select>
             )}
-            <button disabled={busy || !single} onClick={() => go({ mode: 'single', warehouse: single }, `${op.orderId} の全商品を${WH_NAME[single as WarehouseId]}から引き当てます。よろしいですか？`)} className="rounded-lg bg-emerald-600 text-white px-3 py-1.5 font-bold disabled:opacity-50">
-              この伝票を引き当てる（1回で出荷）
+            <button disabled={busy || !single} onClick={() => go({ mode: 'single', warehouse: single }, `${op.orderId} の${total}点を${WH_NAME[single as WarehouseId]}で確保しました（次は下の「倉庫へ出荷依頼」）`)} className="rounded-lg bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 font-bold disabled:opacity-50">
+              在庫を確保する（1回で出荷）
             </button>
+            <span className="basis-full text-[11px] text-slate-500">{single && `${WH_NAME[single as WarehouseId]}の在庫から${total}点を確保します。この伝票は未発注の一覧から消えます。`}</span>
           </>
         )}
         {(op.plan.type === 'split' || op.plan.type === 'partial') && (
           <>
-            <span className="text-slate-500">{op.plan.type === 'split' ? '1か所ではそろいません。' : '全部はそろっていません。'}待つか、先に出すかを選んでください：</span>
-            <button
-              disabled={busy}
-              onClick={() =>
-                go(
-                  { mode: 'plan' },
-                  `${op.orderId} を先出しします。\n${op.plan.warehouses.map((w) => `・${WH_NAME[w]}：${op.plan.allocations.filter((a) => a.warehouse === w).map((a) => `${op.lines.find((l) => l.productId === a.productId)?.productName} ${a.qty}`).join('、')}`).join('\n')}${op.plan.missing.length ? `\n・残り（発注が必要）：${op.plan.missing.map((m) => `${op.lines.find((l) => l.productId === m.productId)?.productName} ${m.qty}`).join('、')}` : ''}\n\n出荷が${op.plan.warehouses.length + (op.plan.missing.length ? 1 : 0)}回に分かれます。よろしいですか？`
-                )
-              }
-              className="rounded-lg bg-amber-500 text-white px-3 py-1.5 font-bold disabled:opacity-50"
-            >
-              在庫のある分を先に出す（先出し）
+            <button disabled={busy} onClick={() => go({ mode: 'plan' }, `${op.orderId} の先に届く分（${planText}）を確保しました`)} className="rounded-lg bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 font-bold disabled:opacity-50">
+              先に届く分だけ送る
             </button>
-            <span className="text-slate-400">または、そのまま待つ（何もしない）</span>
+            <span className="text-slate-400">全部そろうまで待つなら、何もしなくて大丈夫です</span>
+            <span className="basis-full text-[11px] text-slate-500">
+              {planText}を確保します。{missingTotal > 0 && `残り${missingTotal}点は発注が必要です。`}出荷は{op.plan.warehouses.length + (missingTotal > 0 ? 1 : 0)}回に分かれます。
+            </span>
           </>
         )}
         {op.plan.type === 'none' && <span className="text-slate-500">在庫がないので「未発注」から楽楽販売で発注してください。</span>}
@@ -1064,13 +1116,11 @@ export function AllocationPanel({ data, onSaved }: { data: InventoryData; onSave
     <div className="space-y-4">
       {error && <div className="rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs px-3 py-2">{error}</div>}
 
-      <InstructionBoard instructions={data.instructions} onSaved={onSaved} />
-
       <section className="rounded-xl border border-slate-200 bg-white">
         <div className="p-3 border-b border-slate-100 space-y-2">
           <div>
-            <div className="font-bold text-sm text-slate-900">① 引当（伝票ごと・クリニック単位）</div>
-            <div className="text-[11px] text-slate-500">1伝票はできるだけ1か所の倉庫からまとめて出します。1か所でそろわない伝票は、待つか「先出し」するかを選べます。青い数字が案で使う倉庫です。</div>
+            <div className="font-bold text-sm text-slate-900">在庫を確保（伝票ごと・クリニック単位）</div>
+            <div className="text-[11px] text-slate-500">1伝票はできるだけ1か所の倉庫からまとめて出します。青い数字が使う倉庫です。</div>
           </div>
           <div className="flex flex-wrap items-center gap-1.5 text-xs">
             {([['ready', `1回で出荷できる（${counts.ready}）`], ['split', `倉庫が分かれる・一部不足（${counts.split}）`], ['all', `在庫のあるすべて（${counts.all}）`]] as const).map(([id, label]) => (
@@ -1103,8 +1153,8 @@ export function AllocationPanel({ data, onSaved }: { data: InventoryData; onSave
 
       <section className="rounded-xl border border-slate-200 bg-white">
         <div className="p-3 border-b border-slate-100">
-          <div className="font-bold text-sm text-slate-900">② 引当済み → 出荷指示</div>
-          <div className="text-[11px] text-slate-500">クリニック × 倉庫ごとにまとめています。同じクリニックの伝票はチェックしたものをまとめて1つの出荷指示（1つの荷物）にします。</div>
+          <div className="font-bold text-sm text-slate-900">確保済み → 倉庫へ出荷依頼</div>
+          <div className="text-[11px] text-slate-500">クリニック × 倉庫ごとにまとめています。同じクリニックの伝票はチェックしたものを1つの荷物にします。</div>
         </div>
         {reserved.length === 0 ? (
           <div className="p-6 text-center text-xs text-slate-400">引当済みで出荷指示前のものはありません</div>
@@ -1119,14 +1169,37 @@ export function AllocationPanel({ data, onSaved }: { data: InventoryData; onSave
                       {g.clinicName}
                       <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5">{WH_NAME[g.warehouse]}</span>
                     </div>
-                    <button
-                      disabled={busy || sel.size === 0}
-                      onClick={() => run(() => api('/api/inventory/instructions', { method: 'POST', body: JSON.stringify({ orderIds: Array.from(sel), warehouse: g.warehouse }) }))}
-                      className="inline-flex items-center gap-1 rounded-lg bg-slate-900 text-white px-3 py-1.5 font-bold disabled:opacity-40"
-                    >
-                      <Send className="w-3.5 h-3.5" />
-                      {sel.size > 1 ? `${sel.size}伝票をまとめて出荷指示` : '出荷指示を出す'}
-                    </button>
+                    <div className="text-right">
+                      <button
+                        disabled={busy || sel.size === 0}
+                        onClick={async () => {
+                          setBusy(true);
+                          try {
+                            const j = await api('/api/inventory/instructions', { method: 'POST', body: JSON.stringify({ orderIds: Array.from(sel), warehouse: g.warehouse }) });
+                            onSaved();
+                            notifyDone(`${j.instruction.id} を${WH_NAME[g.warehouse]}へ出荷依頼しました`, async () => {
+                              await api(`/api/inventory/instructions/${j.instruction.id}/cancel`, { method: 'POST' });
+                              onSaved();
+                            });
+                          } catch (e: any) {
+                            notifyError(e.message);
+                          } finally {
+                            setBusy(false);
+                          }
+                        }}
+                        className="inline-flex items-center gap-1 rounded-lg bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 font-bold disabled:opacity-40"
+                      >
+                        <Send className="w-3.5 h-3.5" />
+                        {sel.size > 1 ? `${sel.size}伝票をまとめて倉庫へ出荷依頼` : '倉庫へ出荷依頼'}
+                      </button>
+                      <div className="text-[10px] text-slate-500 mt-0.5">
+                        {g.warehouse === 'domestic' ? '国内倉庫の出荷待ちになります（社内で出荷）' : `${WH_NAME[g.warehouse]}の担当者画面に出荷依頼が出ます`}（{sel.size}伝票・
+                        {Array.from(g.orders.entries())
+                          .filter(([id]) => sel.has(id))
+                          .reduce((n, [, items]) => n + items.reduce((m, a) => m + a.qty, 0), 0)}
+                        点）
+                      </div>
+                    </div>
                   </div>
                   {Array.from(g.orders.entries()).map(([orderId, items]) => (
                     <div key={orderId} className="flex flex-wrap items-start gap-2 pl-1">
@@ -1147,7 +1220,22 @@ export function AllocationPanel({ data, onSaved }: { data: InventoryData; onSave
                         {items.map((a) => (
                           <span key={a.id} className="mr-3 inline-flex items-center gap-1">
                             {a.productName} × <b className="font-mono">{a.qty}</b>
-                            <button disabled={busy} onClick={() => run(() => api(`/api/inventory/allocations/${a.id}/cancel`, { method: 'POST' }))} className="text-[10px] text-slate-400 hover:text-rose-600">
+                            <button
+                              disabled={busy}
+                              onClick={async () => {
+                                try {
+                                  await api(`/api/inventory/allocations/${a.id}/cancel`, { method: 'POST' });
+                                  onSaved();
+                                  notifyDone(`${a.productName} ${a.qty}点の確保を取り消しました（未発注に戻りました）`, async () => {
+                                    await api(`/api/inventory/allocations/${a.id}/restore`, { method: 'POST' });
+                                    onSaved();
+                                  });
+                                } catch (e: any) {
+                                  notifyError(e.message);
+                                }
+                              }}
+                              className="text-[10px] text-slate-400 hover:text-rose-600"
+                            >
                               取消
                             </button>
                           </span>
@@ -1161,6 +1249,8 @@ export function AllocationPanel({ data, onSaved }: { data: InventoryData; onSave
           </div>
         )}
       </section>
+
+      <InstructionBoard instructions={data.instructions} onSaved={onSaved} />
     </div>
   );
 }
@@ -1344,7 +1434,7 @@ function WarehouseTabs({ value, onChange, counts }: { value: 'all' | WarehouseId
 }
 
 /** 引当・出荷指示ページ（サイドバーの「未発注」の下）。出荷指示ごとにインボイス・AWB・出荷・配達まで追う */
-export function ShippingInstructionsPage() {
+export function ShippingInstructionsPage({ onNavigate }: { onNavigate?: (tab: string) => void }) {
   const [data, setData] = useState<InventoryData | null>(null);
   const [error, setError] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -1354,8 +1444,13 @@ export function ShippingInstructionsPage() {
       .catch((e) => setError(e.message));
   }, []);
   useEffect(load, [load]);
+  useEffect(() => {
+    window.addEventListener('flow-refresh', load);
+    return () => window.removeEventListener('flow-refresh', load);
+  }, [load]);
   return (
     <div className="space-y-3">
+      <FlowSteps current="allocate" onNavigate={onNavigate} />
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold text-slate-900 flex items-center gap-2">
@@ -1365,6 +1460,7 @@ export function ShippingInstructionsPage() {
           <p className="text-xs text-slate-500 mt-1">在庫から引き当てた明細を倉庫ごとの出荷指示にし、インボイス・AWBの作成から出荷・配達まで追います。</p>
         </div>
         <div className="flex gap-2 text-xs">
+          <ColorLegend />
           <button onClick={load} className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-semibold text-slate-700 hover:bg-slate-50">
             <RefreshCw className="w-3.5 h-3.5" />
             読み込み直す
@@ -1383,7 +1479,7 @@ export function ShippingInstructionsPage() {
   );
 }
 
-export function InventoryView({ orders }: { orders: Order[] }) {
+export function InventoryView({ orders, onNavigate }: { orders: Order[]; onNavigate?: (tab: string) => void }) {
   const [data, setData] = useState<InventoryData | null>(null);
   const [error, setError] = useState('');
   const [tab, setTab] = useState<'inbound' | 'stock' | 'moves' | 'access'>('inbound');
@@ -1403,6 +1499,10 @@ export function InventoryView({ orders }: { orders: Order[] }) {
       .catch((e) => setError(e.message));
   }, []);
   useEffect(load, [load]);
+  useEffect(() => {
+    window.addEventListener('flow-refresh', load);
+    return () => window.removeEventListener('flow-refresh', load);
+  }, [load]);
 
   // 商品の候補（取り込み・在庫の追加で名前から商品IDを探す）
   const products = useMemo(() => {
@@ -1460,6 +1560,7 @@ export function InventoryView({ orders }: { orders: Order[] }) {
 
   return (
     <div className="space-y-4">
+      <FlowSteps current="inbound" onNavigate={onNavigate} />
       <DemoBar onChange={load} />
       <SampleStockBar data={data} onChange={load} />
       <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-3">
@@ -1473,6 +1574,7 @@ export function InventoryView({ orders }: { orders: Order[] }) {
               楽楽販売の発注（発注済み）から入荷予定を作ります。入荷先・配送方法・追跡番号・数量はここで入れ、倉庫の担当者が実数を入れて承認すると在庫に加わります。楽楽販売には書き込みません。
             </p>
           </div>
+          <ColorLegend />
           <div className={`flex flex-wrap items-center gap-2 text-xs ${isInventoryDemo() ? 'hidden' : ''}`}>
             <span className="text-slate-500">発注の取り込み {fmt(data.poSyncedAt)}</span>
             <button

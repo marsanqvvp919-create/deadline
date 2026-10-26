@@ -5387,6 +5387,37 @@ function orderPlans() {
   return out;
 }
 
+// 画面上部のステップ表示用の件数（未発注 → 確保 → 出荷依頼 → インボイス → 送り状 → 出荷 → 配達）
+app.get('/api/inventory/flow', async (_req, res) => {
+  await loadInventory();
+  const plans = orderPlans();
+  let unordered = 0;
+  for (const o of invOrders()) {
+    if (/見積|出荷済|納品済|キャンセル/.test(String(o.status || '')) || o.orderState !== '進行中') continue;
+    for (const l of o.lines) if (l.stage === '未発注' && !isNonProductLine(l.productName, l.productId) && l.quantity - (l.allocatedQty || 0) > 0) unordered++;
+  }
+  const open = inv().instructions.filter((i) => i.status === 'open');
+  const intl = (i: ShipInstruction) => i.warehouse !== 'domestic';
+  const reservedGroups = new Set(inv().allocations.filter((a) => a.status === 'reserved').map((a) => `${a.clinicName}|${a.warehouse}`));
+  const now = Date.now();
+  const inTransit = inv().instructions.filter((i) => i.status === 'shipped' && now - new Date(i.shippedAt || i.createdAt).getTime() < 30 * 86400000 && (instructionView(i) as any).delivery?.code !== 'delivered').length;
+  const inboundTodo = Object.values(inv().inbound).filter((r) => {
+    if (r.received || r.excluded || r.cancelled) return false;
+    const st = inboundState(r).code;
+    return st === 'no_tracking' || (r.warehouse === 'domestic' && ['arrived', 'kick', 'handcarry'].includes(st));
+  }).length;
+  res.json({
+    unordered,
+    allocatable: plans.filter((p) => p.plan.type !== 'none').length,
+    reserved: reservedGroups.size,
+    needInvoice: open.filter((i) => intl(i) && !i.invoiceNo).length,
+    needAwb: open.filter((i) => intl(i) && i.invoiceNo && !i.awbNo).length,
+    toShip: open.filter((i) => !intl(i) || (i.invoiceNo && i.awbNo)).length,
+    inTransit,
+    inboundTodo,
+  });
+});
+
 app.get('/api/inventory/order-plans', async (_req, res) => {
   await loadInventory();
   res.json({ plans: orderPlans() });
@@ -5407,13 +5438,16 @@ app.post('/api/inventory/allocate-order', async (req, res) => {
   }
   if (items.length === 0) return res.status(400).json({ error: '引き当てられる在庫がありません' });
   const now = new Date().toISOString();
+  const ids: string[] = [];
   for (const it of items) {
     const line = p.lines.find((l: any) => l.productId === it.productId);
-    inv().allocations.push({ id: moveId(), orderId: p.orderId, productId: it.productId, productName: line?.productName || '', clinicName: p.clinicName, warehouse: it.warehouse, qty: it.qty, status: 'reserved', createdAt: now });
+    const id = moveId();
+    ids.push(id);
+    inv().allocations.push({ id, orderId: p.orderId, productId: it.productId, productName: line?.productName || '', clinicName: p.clinicName, warehouse: it.warehouse, qty: it.qty, status: 'reserved', createdAt: now });
   }
   applyAllocationsToOrders();
   await saveInventory();
-  res.json({ created: items.length });
+  res.json({ created: items.length, ids });
 });
 
 app.get('/api/inventory/allocation-candidates', async (_req, res) => {
@@ -5445,9 +5479,37 @@ app.post('/api/inventory/allocations', async (req, res) => {
   inv().allocations.push(...created);
   applyAllocationsToOrders();
   await saveInventory();
-  res.json({ created: created.length });
+  res.json({ created: created.length, ids: created.map((a) => a.id) });
 });
 
+// 元に戻す：いま作った引当をまとめて取り消す
+app.post('/api/inventory/allocations/cancel-many', async (req, res) => {
+  await loadInventory();
+  const ids = new Set((Array.isArray(req.body?.ids) ? req.body.ids : []).map(String));
+  let n = 0;
+  for (const a of inv().allocations) {
+    if (ids.has(a.id) && a.status === 'reserved') {
+      a.status = 'cancelled';
+      n++;
+    }
+  }
+  applyAllocationsToOrders();
+  await saveInventory();
+  res.json({ cancelled: n });
+});
+// 元に戻す：取り消した引当を戻す（空き在庫があるときだけ）
+app.post('/api/inventory/allocations/:id/restore', async (req, res) => {
+  await loadInventory();
+  const a = inv().allocations.find((x) => x.id === req.params.id);
+  if (!a || a.status !== 'cancelled') return res.status(400).json({ error: '戻せる引当ではありません' });
+  const key = stockKey(a.productId, a.productName);
+  const free = (inv().stock[a.warehouse][key]?.qty || 0) - reservedQty(a.warehouse, key);
+  if (a.qty > free) return res.status(400).json({ error: 'その間に在庫が使われたため戻せません' });
+  a.status = 'reserved';
+  applyAllocationsToOrders();
+  await saveInventory();
+  res.json({ ok: true });
+});
 app.post('/api/inventory/allocations/:id/cancel', async (req, res) => {
   await loadInventory();
   const a = inv().allocations.find((x) => x.id === req.params.id);
@@ -5544,6 +5606,35 @@ app.post('/api/inventory/instructions/:id/ship', async (req, res) => {
   res.json({ instruction: instructionView(si) });
 });
 
+// 元に戻す：出荷完了を取り消す（在庫を戻し、出荷待ちに戻す）
+app.post('/api/inventory/instructions/:id/unship', async (req, res) => {
+  await loadInventory();
+  const si = inv().instructions.find((x) => x.id === req.params.id);
+  if (!si || si.status !== 'shipped') return res.status(400).json({ error: '出荷済みの出荷依頼ではありません' });
+  for (const l of si.lines) addStock(si.warehouse, l.productId, l.productName, l.qty, 'unreceive', 'staff', `${si.id} ${si.orderId}`, '出荷完了の取り消し');
+  inv().allocations.filter((a) => a.instructionId === si.id).forEach((a) => (a.status = 'instructed'));
+  si.status = 'open';
+  delete si.shippedAt;
+  delete si.shippedBy;
+  applyAllocationsToOrders();
+  await saveInventory();
+  res.json({ ok: true });
+});
+// 元に戻す：取り消した出荷依頼を戻す（引当がまだ引当済みのときだけ）
+app.post('/api/inventory/instructions/:id/restore', async (req, res) => {
+  await loadInventory();
+  const si = inv().instructions.find((x) => x.id === req.params.id);
+  if (!si || si.status !== 'cancelled') return res.status(400).json({ error: '戻せる出荷依頼ではありません' });
+  const allocs = inv().allocations.filter((a) => si.lines.some((l) => l.allocationId === a.id));
+  if (allocs.some((a) => a.status !== 'reserved')) return res.status(400).json({ error: 'その間に引当が変わったため戻せません' });
+  allocs.forEach((a) => {
+    a.status = 'instructed';
+    a.instructionId = si.id;
+  });
+  si.status = 'open';
+  await saveInventory();
+  res.json({ ok: true });
+});
 // 社内：国内倉庫の入荷の承認（韓国・シンガポールは倉庫の担当者が押す）
 app.post('/api/inventory/inbound/:poId/receive', async (req, res) => {
   await loadInventory();

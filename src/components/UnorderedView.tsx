@@ -4,6 +4,9 @@ import { Order, OrderLine } from '../types';
 import { isShippingOrFee, openRakurakuWithCopiedId } from '../utils';
 import { isQuoteOrder } from '../utils/salesCalculations';
 import { getConfiguredUrls } from '../api';
+import { FlowSteps } from './flow/FlowSteps';
+import { ColorLegend } from './flow/ColorLegend';
+import { notifyDone, notifyError } from './flow/UndoToast';
 
 // 未発注（作り直し版）。1明細1行の軽い一覧で、国内・韓国・シンガポールの空き在庫を並べ、
 // 在庫があればその場で引き当てる（入荷・在庫の「引当」と同じ）。無ければ楽楽販売で発注する。
@@ -54,12 +57,14 @@ export function UnorderedView({
   onOpenClinicStatus,
   onDataUpdated,
   onShowClassic,
+  onNavigate,
 }: {
   orders: Order[];
   onSelectOrderLine: (order: Order, lineKey?: string) => void;
   onOpenClinicStatus?: (clinicName: string) => void;
   onDataUpdated?: () => void;
   onShowClassic: () => void;
+  onNavigate?: (tab: string) => void;
 }) {
   const { rakurakuBaseUrl } = getConfiguredUrls();
   const [tab, setTab] = useState<Tab>('paid');
@@ -139,20 +144,31 @@ export function UnorderedView({
 
   const stockCount = useMemo(() => shown.filter((r) => cands.has(`${r.order.orderId}|${r.line.productId}`)).length, [shown, cands]);
 
+  const planItems = (targets: Row[]) =>
+    targets.flatMap((r) => (cands.get(`${r.order.orderId}|${r.line.productId}`)?.suggest || []).map((s) => ({ orderId: r.order.orderId, productId: r.line.productId, warehouse: s.warehouse, qty: s.qty })));
+  /** 押す前に見せる「何が起きるか」 */
+  const preview = (targets: Row[]) => {
+    const items = planItems(targets);
+    if (items.length === 0) return '選んだ明細に確保できる在庫はありません';
+    const byWh = WH_IDS.map((w) => [w, items.filter((i) => i.warehouse === w).reduce((n, i) => n + i.qty, 0)] as const).filter(([, n]) => n > 0);
+    return `${byWh.map(([w, n]) => `${WH_SHORT[w]}倉庫から${n}点`).join('・')}を確保します。確保した明細は未発注の一覧から消えます。`;
+  };
   const allocate = async (targets: Row[]) => {
-    const items = targets.flatMap((r) => (cands.get(`${r.order.orderId}|${r.line.productId}`)?.suggest || []).map((s) => ({ orderId: r.order.orderId, productId: r.line.productId, warehouse: s.warehouse, qty: s.qty })));
-    if (items.length === 0) return setNotice({ text: '選んだ明細に引き当てられる在庫がありません', error: true });
-    const summary = items.map((i) => `${i.orderId} ${WH_SHORT[i.warehouse]}×${i.qty}`).join('、');
-    if (!confirm(`在庫から引き当てます。\n${summary}\n\n引き当てた分は未発注から外れ、「入荷・在庫」の引当済みになります。よろしいですか？`)) return;
+    const items = planItems(targets);
+    if (items.length === 0) return notifyError('選んだ明細に確保できる在庫がありません');
     setBusy(true);
     try {
       const j = await api('/api/inventory/allocations', { method: 'POST', body: JSON.stringify({ items }) });
-      setNotice({ text: `${j.created}件を引き当てました。出荷指示は「入荷・在庫 → 引当・出荷指示」から出せます` });
       setSelected(new Set());
       loadStock();
       onDataUpdated?.();
+      notifyDone(`${items.reduce((n, i) => n + i.qty, 0)}点を在庫から確保しました（次は「引当・出荷指示」で倉庫へ出荷依頼）`, async () => {
+        await api('/api/inventory/allocations/cancel-many', { method: 'POST', body: JSON.stringify({ ids: j.ids }) });
+        loadStock();
+        onDataUpdated?.();
+      });
     } catch (e: any) {
-      setNotice({ text: e.message, error: true });
+      notifyError(e.message);
     } finally {
       setBusy(false);
     }
@@ -191,6 +207,7 @@ export function UnorderedView({
 
   return (
     <div className="space-y-3">
+      <FlowSteps current="unordered" onNavigate={onNavigate} />
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold text-slate-900 flex items-center gap-2">
@@ -200,6 +217,7 @@ export function UnorderedView({
           <p className="text-xs text-slate-500 mt-1">まだ手配していない明細です（送料・手数料、在庫から引き当て済みの分は除く）。在庫があれば引き当て、無ければ楽楽販売で発注します。</p>
         </div>
         <div className="flex flex-wrap gap-2 text-xs">
+          <ColorLegend />
           <button onClick={exportCsv} className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-semibold text-slate-700 hover:bg-slate-50">
             <Download className="w-3.5 h-3.5" />
             CSV
@@ -284,7 +302,7 @@ export function UnorderedView({
           <span className="font-bold">{selRows.length}明細を選択中</span>
           <button disabled={busy} onClick={() => allocate(selRows)} className="inline-flex items-center gap-1 rounded-lg bg-emerald-500 px-3 py-1 font-bold disabled:opacity-50">
             <Boxes className="w-3.5 h-3.5" />
-            在庫から引当（在庫がある分）
+            在庫から確保（在庫がある分）
           </button>
           <button onClick={() => orderInRakuraku(selRows)} className="inline-flex items-center gap-1 rounded-lg bg-white/15 px-3 py-1 font-bold">
             <ExternalLink className="w-3.5 h-3.5" />
@@ -293,6 +311,7 @@ export function UnorderedView({
           <button onClick={() => setSelected(new Set())} className="ml-auto text-white/70 hover:text-white">
             選択を解除
           </button>
+          <div className="basis-full text-[11px] text-white/70">{preview(selRows)}</div>
         </div>
       )}
 
@@ -394,8 +413,8 @@ export function UnorderedView({
                   </td>
                   <td className="px-2 py-1.5 text-right whitespace-nowrap">
                     {tab !== 'stale' && c ? (
-                      <button disabled={busy} onClick={() => allocate([r])} className="rounded-lg bg-emerald-600 text-white px-2.5 py-1 font-bold disabled:opacity-50">
-                        在庫から引当
+                      <button disabled={busy} onClick={() => allocate([r])} title={preview([r])} className="rounded-lg bg-amber-500 hover:bg-amber-600 text-white px-2.5 py-1 font-bold disabled:opacity-50">
+                        在庫から確保
                       </button>
                     ) : (
                       <button onClick={() => orderInRakuraku([r])} className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 font-bold text-slate-700 hover:bg-slate-50">
