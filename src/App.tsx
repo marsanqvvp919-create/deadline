@@ -30,6 +30,7 @@ import { ClinicMasterView } from './components/ClinicMasterView';
 import { InventoryView, ShippingInstructionsPage } from './components/InventoryView';
 import { UnorderedView } from './components/UnorderedView';
 import { UndoToastHost } from './components/flow/UndoToast';
+import { UpdateNotice } from './components/flow/UpdateNotice';
 import { ArrivalTrackingView } from './components/ArrivalTrackingView';
 import { CustomsManagementView } from './components/CustomsManagementView';
 import { CoolMissingView } from './components/CoolMissingView';
@@ -1219,6 +1220,7 @@ export default function App() {
           )}
 
           <UndoToastHost />
+          <UpdateNotice />
           {activeTab === 'shipping_instructions' && <ShippingInstructionsPage onNavigate={(t) => setActiveTab(t as ViewTab)} />}
 
           {activeTab === 'shipping_calc' && (
