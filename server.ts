@@ -5415,7 +5415,157 @@ app.get('/api/inventory/flow', async (_req, res) => {
     toShip: open.filter((i) => !intl(i) || (i.invoiceNo && i.awbNo)).length,
     inTransit,
     inboundTodo,
+    unpaid: invOrders().filter((o) => !/見積|出荷済|納品済|キャンセル/.test(String(o.status || '')) && o.orderState === '進行中' && o.paymentStatus !== '入金済' && o.paymentStatus !== '売掛・締日決済' && (o.lines as any[]).some((l) => l.stage === '未発注' && !isNonProductLine(l.productName, l.productId))).length,
+    vendorWait: Object.values(inv().inbound).filter((r) => !r.received && !r.excluded && !r.cancelled && ['no_tracking', 'tracking', 'in_transit'].includes(inboundState(r).code)).length,
+    leaks: leakChecks().byStep,
   });
+});
+
+// --- 漏れチェック：流れ（入金 → 未発注 → ベンダー出荷 → 入荷 → 引当 → 出荷指示 → 出荷 → クール伝票 → 追跡・到着）の
+// 段ごとに目安の日数を決め、過ぎても次に進んでいないものを拾う。楽楽販売・在庫・配送会社のデータから毎回計算する
+const LEAK_DAYS = { paidNotOrdered: 2, vendorNotShipped: 7, arrivedNotReceived: 2, reservedNoRequest: 2, docsNotMade: 2, notShipped: 2, coolAfterCustoms: 1, notDelivered: 7, rakurakuNotUpdated: 3 };
+type LeakStep = 'unordered' | 'vendor' | 'inbound' | 'allocate' | 'instruct' | 'ship' | 'cool' | 'deliver';
+interface LeakItem {
+  id: string;
+  orderId: string;
+  clinic: string;
+  text: string;
+  days: number | null;
+}
+const daysSince = (v: string | null | undefined) => {
+  const t = new Date(String(v || '').replace(/\//g, '-').replace(' ', 'T')).getTime();
+  return isNaN(t) ? null : Math.floor((Date.now() - t) / 86400000);
+};
+function leakChecks() {
+  const rules: { id: string; step: LeakStep; title: string; hint: string; tab: string; items: LeakItem[] }[] = [];
+  const add = (id: string, step: LeakStep, title: string, hint: string, tab: string, items: LeakItem[]) => rules.push({ id, step, title, hint, tab, items: items.sort((a, b) => (b.days ?? 0) - (a.days ?? 0)) });
+  const active = invOrders().filter((o) => !/見積|出荷済|納品済|キャンセル/.test(String(o.status || '')) && o.orderState === '進行中');
+  const D = LEAK_DAYS;
+
+  // 1. 入金済なのに未発注（在庫からの確保もしていない）
+  add('paid_not_ordered', 'unordered', '入金済なのに発注していない', `入金から${D.paidNotOrdered}日以上たっても未発注のまま（在庫からの確保もなし）`, 'procurement',
+    active.flatMap((o) => {
+      if (o.paymentStatus !== '入金済') return [];
+      const lines = (o.lines as any[]).filter((l) => l.stage === '未発注' && !isNonProductLine(l.productName, l.productId) && l.quantity - (l.allocatedQty || 0) > 0);
+      const d = daysSince(o.paymentDate || o.orderDate);
+      if (!lines.length || d === null || d < D.paidNotOrdered) return [];
+      return [{ id: o.orderId, orderId: o.orderId, clinic: o.customerName, text: lines.map((l) => `${l.productName} ${l.quantity - (l.allocatedQty || 0)}`).join('、'), days: d }];
+    }));
+
+  const inbound = Object.values(inv().inbound).filter((r) => !r.received && !r.excluded && !r.cancelled);
+  // 2. 発注したのにベンダーが出していない（追跡番号が入らない）
+  add('vendor_not_shipped', 'vendor', 'ベンダーが出していない（追跡番号なし）', `発注から${D.vendorNotShipped}日以上、追跡番号が入っていない（キック・持込は除く）`, 'inventory_management',
+    inbound.flatMap((r) => {
+      const d = daysSince(r.poDate);
+      if (inboundState(r).code !== 'no_tracking' || d === null || d < D.vendorNotShipped) return [];
+      return [{ id: r.poId, orderId: r.orderId, clinic: r.clinicName, text: `${r.poId} ${r.supplierName}：${r.lines.map((l) => `${l.productName} ${l.qty}`).join('、')}`, days: d }];
+    }));
+  // 3. 倉庫に着いたのに入荷の承認がない／入荷の配送で例外
+  add('arrived_not_received', 'inbound', '倉庫に着いたのに入荷していない', `配達完了から${D.arrivedNotReceived}日以上、倉庫の承認がない。配送で例外が出たものも含む`, 'inventory_management',
+    inbound.flatMap((r) => {
+      const st = inboundState(r);
+      if (st.code === 'arrived') {
+        const at = st.tracking.filter((t: any) => t.status === 'delivered').map((t: any) => t.deliveredAt || t.lastEventAt || '').sort().pop();
+        const d = daysSince(at);
+        if (d !== null && d < D.arrivedNotReceived) return [];
+        return [{ id: r.poId, orderId: r.orderId, clinic: r.clinicName, text: `${r.poId} ${WAREHOUSES[r.warehouse]}に到着・承認待ち`, days: d }];
+      }
+      const ex = st.tracking.find((t: any) => t.status === 'exception');
+      return ex ? [{ id: r.poId, orderId: r.orderId, clinic: r.clinicName, text: `${r.poId} 配送の例外：${ex.statusText || '要確認'}`, days: daysSince(ex.lastEventAt) }] : [];
+    }));
+  // 4. 入荷数が発注数より少ない（直近30日の入荷）
+  add('inbound_shortage', 'inbound', '入荷数が発注数より少ない', '倉庫が承認した数が、入荷予定の数に足りない（直近30日）', 'inventory_management',
+    Object.values(inv().inbound).flatMap((r) => {
+      const d = daysSince(r.receivedAt);
+      if (!r.received || !r.shortage || d === null || d > 30) return [];
+      const short = r.lines.filter((l) => l.receivedQty !== null && l.receivedQty !== undefined && l.receivedQty < l.qty);
+      return [{ id: r.poId, orderId: r.orderId, clinic: r.clinicName, text: `${r.poId}：${short.map((l) => `${l.productName} ${l.receivedQty}/${l.qty}`).join('、')}`, days: d }];
+    }));
+
+  // 5. 在庫があるのに確保していない入金済の伝票
+  add('stock_not_allocated', 'allocate', '在庫があるのに確保していない', '入金済で、倉庫の在庫から出せる伝票', 'shipping_instructions',
+    orderPlans()
+      .filter((p: any) => p.paymentStatus === '入金済' && p.plan.type !== 'none')
+      .map((p: any) => ({ id: p.orderId, orderId: p.orderId, clinic: p.clinicName, text: p.lines.map((l: any) => `${l.productName} ${l.need}`).join('、'), days: daysSince(p.orderDate) })));
+  // 6. 確保したのに倉庫へ出荷依頼していない
+  const reserved = new Map<string, Allocation[]>();
+  for (const a of inv().allocations.filter((x) => x.status === 'reserved')) reserved.set(a.orderId, [...(reserved.get(a.orderId) || []), a]);
+  add('reserved_no_request', 'allocate', '確保したのに出荷依頼していない', `在庫を確保してから${D.reservedNoRequest}日以上、倉庫へ出荷依頼していない`, 'shipping_instructions',
+    Array.from(reserved.entries()).flatMap(([orderId, list]) => {
+      const d = daysSince(list.map((a) => a.createdAt).sort()[0]);
+      if (d === null || d < D.reservedNoRequest) return [];
+      return [{ id: orderId, orderId, clinic: list[0].clinicName, text: list.map((a) => `${a.productName} ${a.qty}（${WAREHOUSES[a.warehouse]}）`).join('、'), days: d }];
+    }));
+
+  const open = inv().instructions.filter((i) => i.status === 'open');
+  // 7. 出荷依頼したのにインボイス・送り状がない
+  add('docs_not_made', 'instruct', 'インボイス・送り状を作っていない', `出荷依頼から${D.docsNotMade}日以上、インボイスか送り状（AWB）がない`, 'shipping_instructions',
+    open.flatMap((i) => {
+      const d = daysSince(i.createdAt);
+      if (i.warehouse === 'domestic' || (i.invoiceNo && i.awbNo) || d === null || d < D.docsNotMade) return [];
+      return [{ id: i.id, orderId: i.orderId, clinic: i.clinicName, text: `${i.id} ${WAREHOUSES[i.warehouse]}：${!i.invoiceNo ? 'インボイス' : '送り状（AWB）'}がまだ`, days: d }];
+    }));
+  // 8. 準備ができたのに倉庫が出荷していない
+  add('not_shipped', 'ship', '倉庫が出荷していない', `送り状を作ってから（国内は出荷依頼から）${D.notShipped}日以上、出荷完了になっていない`, 'shipping_instructions',
+    open.flatMap((i) => {
+      const ready = i.warehouse === 'domestic' ? i.createdAt : i.invoiceNo && i.awbNo ? i.awbCreatedAt || i.createdAt : null;
+      const d = daysSince(ready);
+      if (!ready || d === null || d < D.notShipped) return [];
+      return [{ id: i.id, orderId: i.orderId, clinic: i.clinicName, text: `${i.id} ${WAREHOUSES[i.warehouse]}${i.awbNo ? `・${i.awbCarrier || ''} ${i.awbNo}` : ''}`, days: d }];
+    }));
+
+  // 9. クール伝票（佐川）：通関が済んだのに国内の伝票番号がない／クール手配が未完了
+  if (!isDemo()) {
+    const ships = (serverRakurakuStore.shipments || []) as any[];
+    const blank = (v: any) => !v || v === '—';
+    const notDone = (s: any) => blank(s.deliveredDate) && !/完了|キャンセル|納品/.test(String(s.shipStatus || ''));
+    add('cool_no_slip', 'cool', '通関後にクール伝票がない', `通関が済んでから${D.coolAfterCustoms}日以上、佐川のクール伝票（国内追跡番号）が入っていない`, 'arrival_tracking',
+      ships.flatMap((s) => {
+        const d = daysSince(blank(s.customsClearedDate) ? '' : s.customsClearedDate);
+        if (!notDone(s) || d === null || d < D.coolAfterCustoms || (s.domesticTrackingNos || []).length) return [];
+        return [{ id: s.shipmentId, orderId: s.orderId, clinic: s.customerName, text: `${s.shipmentId} 通関 ${s.customsClearedDate}${blank(s.trackingNo) ? '' : `・国際 ${s.trackingNo}`}`, days: d }];
+      }));
+    add('cool_not_arranged', 'cool', 'クール手配が終わっていない', 'クール申請・委任状・伝票のどれかが「未」のまま（配達前のもの）', 'arrival_tracking',
+      ships.filter((s) => s.isCoolMissing && notDone(s) && !blank(s.shippedDate === '—' ? s.warehouseShippedDate : s.shippedDate)).map((s) => ({
+        id: s.shipmentId,
+        orderId: s.orderId,
+        clinic: s.customerName,
+        text: `${s.shipmentId} 申請 ${s.coolApplicationStatus}／委任状 ${s.powerOfAttorneyStatus}／伝票 ${s.slipStatus}`,
+        days: daysSince(blank(s.warehouseShippedDate) ? s.shippedDate : s.warehouseShippedDate),
+      })));
+  }
+
+  // 10. 追跡：配送の例外、日数がたっても届かない、届いたのに楽楽販売が出荷済みになっていない
+  const shipped = inv().instructions.filter((i) => i.status === 'shipped');
+  add('delivery_problem', 'deliver', '配送が止まっている・例外', `配送の例外、または出荷から${D.notDelivered}日以上たっても配達完了にならない`, 'shipping_instructions',
+    shipped.flatMap((i) => {
+      const v: any = instructionView(i);
+      const d = daysSince(i.shippedAt || i.createdAt);
+      if (v.delivery?.code === 'delivered' || d === null || d > 60) return [];
+      if (v.delivery?.code === 'exception') return [{ id: i.id, orderId: i.orderId, clinic: i.clinicName, text: `${i.id} 例外：${v.delivery.label}`, days: d }];
+      return d >= D.notDelivered ? [{ id: i.id, orderId: i.orderId, clinic: i.clinicName, text: `${i.id} ${v.delivery?.label || '配送状況が取れていない'}`, days: d }] : [];
+    }));
+  const orderById = new Map(invOrders().map((o) => [o.orderId, o]));
+  add('rakuraku_not_updated', 'deliver', '届いたのに楽楽販売が出荷済みでない', `配達完了から${D.rakurakuNotUpdated}日以上、楽楽販売の明細が出荷完了になっていない`, 'shipping_instructions',
+    shipped.flatMap((i) => {
+      const v: any = instructionView(i);
+      const d = daysSince(i.shippedAt);
+      if (v.delivery?.code !== 'delivered' || d === null || d < D.rakurakuNotUpdated || d > 60) return [];
+      const ids = i.orderIds?.length ? i.orderIds : [i.orderId];
+      const behind = ids.filter((id) => {
+        const o = orderById.get(id);
+        return o && (o.lines as any[]).some((l) => i.lines.some((x) => x.orderId === id || !x.orderId) && i.lines.some((x) => x.productId === l.productId) && l.stage !== '出荷完了');
+      });
+      return behind.length ? [{ id: i.id, orderId: behind.join(','), clinic: i.clinicName, text: `${i.id} 配達完了・楽楽販売の出荷日が未入力`, days: d }] : [];
+    }));
+
+  const byStep: Partial<Record<LeakStep, number>> = {};
+  for (const r of rules) byStep[r.step] = (byStep[r.step] || 0) + r.items.length;
+  return { rules, byStep, total: rules.reduce((n, r) => n + r.items.length, 0), days: D, generatedAt: new Date().toISOString() };
+}
+app.get('/api/inventory/leaks', async (_req, res) => {
+  await loadInventory();
+  res.json(leakChecks());
 });
 
 app.get('/api/inventory/order-plans', async (_req, res) => {

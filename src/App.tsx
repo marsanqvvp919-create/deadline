@@ -15,6 +15,7 @@ import { isWithinPeriod, parseYmd, startOfToday, currentYearMonth } from './util
 import { isCoolMissingShipment, isCustomsNgShipment, isOpenShipment } from './utils/customsUtils';
 import { Navbar } from './components/Navbar';
 import { SettingsModal, SettingsTab } from './components/SettingsModal';
+import { LeakCheckView } from './components/LeakCheckView';
 import { DetailDrawer } from './components/DetailDrawer';
 import { DashboardView } from './components/DashboardView';
 import { SalesDashboardView } from './components/SalesDashboardView';
@@ -92,7 +93,7 @@ import {
 } from 'lucide-react';
 
 const KNOWN_TABS: ViewTab[] = [
-  'dashboard', 'morning_meeting', 'alerts', 'procurement', 'unshipped_clinics', 'partial_shipment', 'overdue',
+  'leak_check', 'dashboard', 'morning_meeting', 'alerts', 'procurement', 'unshipped_clinics', 'partial_shipment', 'overdue',
   'customs_management', 'cool_missing', 'kanto_customs_ng', 'unmatched_sheets', 'inventory_management', 'shipping_calc', 'shipping_instructions', 'invoices',
   'sheet_import', 'arrival_tracking', 'products', 'clinics', 'carrier_settings', 'bulk_deliveries', 'portal_admin',
   'sales_dashboard', 'sales_rep_sales', 'sales_clinic_master', 'reorder_prediction', 'rep_ranking',
@@ -136,6 +137,22 @@ export default function App() {
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTab | undefined>(undefined);
+  // 漏れチェックの件数（左メニューの赤い数字）。5分ごとと、作業のあとに取り直す
+  const [leakTotal, setLeakTotal] = useState(0);
+  useEffect(() => {
+    const load = () =>
+      fetch('/api/inventory/leaks')
+        .then((r) => (r.ok ? r.json() : null))
+        .then((j) => j && setLeakTotal(j.total || 0))
+        .catch(() => {});
+    load();
+    const t = setInterval(load, 5 * 60 * 1000);
+    window.addEventListener('flow-refresh', load);
+    return () => {
+      clearInterval(t);
+      window.removeEventListener('flow-refresh', load);
+    };
+  }, []);
   // 以前の「配送会社API連携」ページは「設定」の中に移した
   useEffect(() => {
     if (activeTab !== 'carrier_settings') return;
@@ -692,6 +709,14 @@ export default function App() {
     match?: ViewTab[];
   }[] = [
     {
+      id: 'leak_check',
+      group: 'today',
+      label: '漏れチェック',
+      icon: ShieldAlert,
+      badge: leakTotal ? `${leakTotal}` : null,
+      badgeColor: 'bg-rose-600 text-white font-bold',
+    },
+    {
       id: 'morning_meeting',
       group: 'today',
       label: '朝の納期会議',
@@ -1001,6 +1026,7 @@ export default function App() {
             />
           )}
 
+          {activeTab === 'leak_check' && <LeakCheckView onNavigate={(t) => setActiveTab(t as ViewTab)} />}
           {activeTab === 'procurement' &&
             (procurementClassic ? (
               <div className="space-y-2">

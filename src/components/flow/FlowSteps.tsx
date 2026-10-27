@@ -3,30 +3,35 @@ import { ChevronRight } from 'lucide-react';
 import { demoHeaders } from '../../utils/demo';
 import { TONE, Tone } from './tone';
 
-// 画面上部のステップ表示：未発注 → 在庫を確保 → 倉庫へ出荷依頼 → インボイス → 送り状（AWB） → 出荷 → 配達。
-// 今いる場所を色で示し、各ステップに残りの件数を出す。押すとその画面へ移る
-export type FlowStepId = 'unordered' | 'allocate' | 'request' | 'invoice' | 'awb' | 'ship' | 'deliver' | 'inbound';
+// 画面上部のステップ表示：入金 → 未発注 → ベンダー出荷 → 入荷 → 引当 → 出荷指示 → 出荷 → クール伝票 → 追跡・到着（紙の流れと同じ順）。
+// 今いる場所を色で示し、各段に残りの件数と、目安の日数を過ぎた「漏れ」の件数を赤で出す。押すとその画面へ移る
+export type FlowStepId = 'unpaid' | 'unordered' | 'vendor' | 'inbound' | 'allocate' | 'instruct' | 'ship' | 'cool' | 'deliver';
 interface Counts {
+  unpaid: number;
   unordered: number;
+  vendorWait: number;
+  inboundTodo: number;
   allocatable: number;
   reserved: number;
   needInvoice: number;
   needAwb: number;
   toShip: number;
   inTransit: number;
-  inboundTodo: number;
+  leaks?: Partial<Record<FlowStepId, number>>;
 }
-const STEPS: { id: FlowStepId; label: string; key: keyof Counts; tab: string; tone: Tone; hint: string }[] = [
-  { id: 'unordered', label: '未発注', key: 'unordered', tab: 'procurement', tone: 'action', hint: '発注するか、在庫から確保する明細' },
-  { id: 'allocate', label: '在庫を確保', key: 'allocatable', tab: 'shipping_instructions', tone: 'action', hint: '在庫で出せる伝票' },
-  { id: 'request', label: '倉庫へ出荷依頼', key: 'reserved', tab: 'shipping_instructions', tone: 'action', hint: '確保済みで、まだ依頼していないもの' },
-  { id: 'invoice', label: 'インボイス', key: 'needInvoice', tab: 'shipping_instructions', tone: 'action', hint: 'インボイスを作るもの' },
-  { id: 'awb', label: '送り状（AWB）', key: 'needAwb', tab: 'shipping_instructions', tone: 'action', hint: '送り状を作るもの' },
-  { id: 'ship', label: '出荷', key: 'toShip', tab: 'shipping_instructions', tone: 'waiting', hint: '倉庫の出荷待ち' },
-  { id: 'deliver', label: '配達', key: 'inTransit', tab: 'shipping_instructions', tone: 'waiting', hint: '配送中' },
+const STEPS: { id: FlowStepId; label: string; count: (c: Counts) => number | null; tab: string; tone: Tone; hint: string }[] = [
+  { id: 'unpaid', label: '入金待ち', count: (c) => c.unpaid, tab: 'procurement', tone: 'waiting', hint: '未発注の明細があり、まだ入金がない伝票' },
+  { id: 'unordered', label: '未発注', count: (c) => c.unordered, tab: 'procurement', tone: 'action', hint: '発注するか、在庫から確保する明細' },
+  { id: 'vendor', label: 'ベンダー出荷', count: (c) => c.vendorWait, tab: 'inventory_management', tone: 'waiting', hint: 'ベンダーから倉庫へ向かっている・追跡番号待ちの発注' },
+  { id: 'inbound', label: '入荷', count: (c) => c.inboundTodo, tab: 'inventory_management', tone: 'action', hint: '追跡番号を入れる・国内倉庫で受け取るなど、入荷で作業が必要なもの' },
+  { id: 'allocate', label: '引当', count: (c) => c.allocatable, tab: 'shipping_instructions', tone: 'action', hint: '在庫で出せる伝票' },
+  { id: 'instruct', label: '出荷指示', count: (c) => c.reserved + c.needInvoice + c.needAwb, tab: 'shipping_instructions', tone: 'action', hint: '出荷依頼・インボイス・送り状（AWB）を作るもの' },
+  { id: 'ship', label: '出荷', count: (c) => c.toShip, tab: 'shipping_instructions', tone: 'waiting', hint: '倉庫の出荷待ち' },
+  { id: 'cool', label: 'クール伝票', count: (c) => c.leaks?.cool ?? 0, tab: 'arrival_tracking', tone: 'action', hint: '通関後に佐川のクール伝票を登録するもの' },
+  { id: 'deliver', label: '追跡・到着', count: (c) => c.inTransit, tab: 'arrival_tracking', tone: 'waiting', hint: '配送中' },
 ];
 
-export function FlowSteps({ current, onNavigate }: { current: FlowStepId; onNavigate?: (tab: string) => void }) {
+export function FlowSteps({ current, onNavigate }: { current?: FlowStepId; onNavigate?: (tab: string) => void }) {
   const [counts, setCounts] = useState<Counts | null>(null);
   const load = useCallback(() => {
     fetch('/api/inventory/flow', { headers: demoHeaders() })
@@ -46,34 +51,29 @@ export function FlowSteps({ current, onNavigate }: { current: FlowStepId; onNavi
     <div className="rounded-xl border border-slate-200 bg-white px-2 py-2 overflow-x-auto">
       <div className="flex items-stretch gap-1 min-w-max">
         {STEPS.map((s, i) => {
-          const n = counts ? counts[s.key] : null;
+          const n = counts ? s.count(counts) : null;
+          const leak = counts?.leaks?.[s.id] || 0;
           const here = s.id === current;
           const tone: Tone = n === 0 ? 'done' : s.tone;
           return (
             <React.Fragment key={s.id}>
-              <button
-                onClick={() => go(s.tab)}
-                title={s.hint}
-                className={`flex flex-col items-start rounded-lg border px-3 py-1.5 text-left transition ${here ? 'ring-2 ring-indigo-500 ring-offset-1' : ''} ${TONE[tone]}`}
-              >
-                <span className="text-[10px] font-bold opacity-80">
-                  {i + 1}. {s.label}
-                </span>
-                <span className="text-base font-black font-mono leading-tight">{n === null ? '…' : n === 0 ? '✓' : n}</span>
-              </button>
+              <div className={`relative flex rounded-lg border transition ${here ? 'ring-2 ring-indigo-500 ring-offset-1' : ''} ${TONE[tone]}`}>
+                <button onClick={() => go(s.tab)} title={s.hint} className="flex flex-col items-start px-3 py-1.5 text-left w-24">
+                  <span className="text-[10px] font-bold opacity-80 whitespace-nowrap">
+                    {i + 1}. {s.label}
+                  </span>
+                  <span className="text-base font-black font-mono leading-tight">{n === null ? '…' : n === 0 ? '✓' : n}</span>
+                </button>
+                {leak > 0 && (
+                  <button onClick={() => go('leak_check')} title="目安の日数を過ぎて止まっているもの（漏れチェックを開く）" className="absolute -top-2 -right-1.5 rounded-full bg-rose-600 px-1.5 text-[10px] font-black text-white shadow">
+                    漏れ{leak}
+                  </button>
+                )}
+              </div>
               {i < STEPS.length - 1 && <ChevronRight className="w-4 h-4 text-slate-300 self-center shrink-0" />}
             </React.Fragment>
           );
         })}
-        <span className="mx-2 w-px bg-slate-200" />
-        <button
-          onClick={() => go('inventory_management')}
-          title="追跡番号を入れる・国内倉庫で受け取るなど、入荷であなたの作業が必要なもの"
-          className={`flex flex-col items-start rounded-lg border px-3 py-1.5 text-left ${current === 'inbound' ? 'ring-2 ring-indigo-500 ring-offset-1' : ''} ${TONE[counts && counts.inboundTodo === 0 ? 'done' : 'action']}`}
-        >
-          <span className="text-[10px] font-bold opacity-80">入荷の作業</span>
-          <span className="text-base font-black font-mono leading-tight">{counts ? (counts.inboundTodo === 0 ? '✓' : counts.inboundTodo) : '…'}</span>
-        </button>
       </div>
     </div>
   );
