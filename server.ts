@@ -326,7 +326,6 @@ const CLINIC_FIELD_MAP: Record<string, string[]> = {
   directorName: ['院長名', '担当医師', '代表者名', '代表者', 'directorName'],
   salesRep: ['109978', '担当者', '担当者（ユーザ）', '担当営業', '営業担当', 'salesRep'],
   currency: ['110167', '販売通貨', '通貨', 'currency'],
-  commissionRate: ['110109', '紹介手数料率', '手数料率', 'commissionRate'],
   phone: ['電話番号', 'TEL', 'tel', 'phone'],
   email: ['メールアドレス1', 'メールアドレス2', 'メールアドレス', 'E-mail', 'mail', 'email'],
   postalCode: ['クリニック住所：郵便番号', '郵便番号', '〒', 'postalCode'],
@@ -844,7 +843,7 @@ function transformCsvToClinics(csvText: string): any[] {
       directorName: getVal(row, 'directorName') || '',
       salesRep: getVal(row, 'salesRep') || '未設定',
       currency: getVal(row, 'currency') || 'JPY',
-      commissionRate: parseFloat(getVal(row, 'commissionRate')) || 0,
+      commissionRate: 0, // 紹介手数料率は使わない（楽楽販売から読まない）
       phone: getVal(row, 'phone') || '',
       email: getVal(row, 'email') || '',
       postalCode: getVal(row, 'postalCode') || '',

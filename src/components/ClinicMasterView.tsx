@@ -246,7 +246,6 @@ export const ClinicMasterView: React.FC<ClinicMasterViewProps> = ({
       '院長名',
       '担当営業',
       '販売通貨',
-      '紹介手数料率%',
       '電話番号',
       'メールアドレス',
       '郵便番号',
@@ -262,7 +261,6 @@ export const ClinicMasterView: React.FC<ClinicMasterViewProps> = ({
       `"${c.directorName}"`,
       `"${c.salesRep}"`,
       `"${c.currency}"`,
-      c.commissionRate,
       `"${c.phone}"`,
       `"${c.email}"`,
       `"${c.postalCode}"`,
@@ -391,7 +389,7 @@ export const ClinicMasterView: React.FC<ClinicMasterViewProps> = ({
       </div>
 
       {/* Metrics Row */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5">
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-3.5">
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs">
           <span className="text-xs font-medium text-slate-500 block">全登録医院数</span>
           <div className="mt-1 flex items-baseline gap-2">
@@ -417,18 +415,6 @@ export const ClinicMasterView: React.FC<ClinicMasterViewProps> = ({
               {clinics.filter((c) => !c.salesRep || c.salesRep === '未設定' || c.salesRep === '未割当').length}
             </span>
             <span className="text-xs text-slate-500">院</span>
-          </div>
-        </div>
-
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs">
-          <span className="text-xs font-medium text-slate-500 block">平均紹介手数料率</span>
-          <div className="mt-1 flex items-baseline gap-2">
-            <span className="text-2xl font-bold text-blue-600 font-mono">
-              {(
-                clinics.reduce((acc, c) => acc + (c.commissionRate || 0), 0) / (clinics.length || 1)
-              ).toFixed(1)}%
-            </span>
-            <span className="text-xs text-slate-500">平均</span>
           </div>
         </div>
       </div>
@@ -684,17 +670,6 @@ export const ClinicMasterView: React.FC<ClinicMasterViewProps> = ({
                   value={editForm.salesRep || ''}
                   onChange={(e) => setEditForm({ ...editForm, salesRep: e.target.value })}
                   className="w-full p-2 bg-slate-50 border border-slate-300 rounded-lg"
-                />
-              </div>
-
-              <div>
-                <label className="font-bold text-slate-700 block mb-1">紹介手数料率 (%)</label>
-                <input
-                  type="number"
-                  step="0.5"
-                  value={editForm.commissionRate || 0}
-                  onChange={(e) => setEditForm({ ...editForm, commissionRate: parseFloat(e.target.value) || 0 })}
-                  className="w-full p-2 bg-slate-50 border border-slate-300 rounded-lg font-mono"
                 />
               </div>
 

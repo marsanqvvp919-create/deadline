@@ -1363,10 +1363,6 @@ export const ClinicProductStatusDrawer: React.FC<ClinicProductStatusDrawerProps>
                             <span className="text-slate-500">販売通貨</span>
                             <span className="font-mono text-slate-800">{clinicInfo.currency}</span>
                           </div>
-                          <div className="flex justify-between py-1.5 border-b border-slate-100">
-                            <span className="text-slate-500">紹介手数料率</span>
-                            <span className="font-mono font-bold text-indigo-700">{clinicInfo.commissionRate}%</span>
-                          </div>
                         </div>
 
                         <div className="space-y-2">
