@@ -58,7 +58,19 @@ interface Draft {
   clinicOptions: { id: string; name: string; nameEn: string }[];
 }
 
-export function InvoiceDialog({ instructionId, onClose, onIssued }: { instructionId: string; onClose: () => void; onIssued: () => void }) {
+/** ダイアログの枠（embedded のときは枠なしで中身だけ） */
+export function DialogFrame({ embedded, onClose, width = 'max-w-3xl', children }: { embedded?: boolean; onClose: () => void; width?: string; children: React.ReactNode }) {
+  if (embedded) return <div className="space-y-4">{children}</div>;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60" onClick={onClose}>
+      <div className={`bg-white rounded-2xl shadow-2xl ${width} w-full max-h-[90vh] overflow-auto p-5 space-y-4`} onClick={(e) => e.stopPropagation()}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+export function InvoiceDialog({ instructionId, onClose, onIssued, embedded, onReady }: { instructionId: string; onClose: () => void; onIssued: () => void; embedded?: boolean; onReady?: (issued: boolean) => void }) {
   const [data, setData] = useState<Draft | null>(null);
   const [error, setError] = useState('');
   const [productMap, setProductMap] = useState<Record<string, string>>({});
@@ -70,7 +82,10 @@ export function InvoiceDialog({ instructionId, onClose, onIssued }: { instructio
   const load = (refresh = false) => {
     setError('');
     api(`/api/invoice/draft/${instructionId}${refresh ? '?refresh=1' : ''}`)
-      .then(setData)
+      .then((j) => {
+        setData(j);
+        onReady?.(!!j.issued);
+      })
       .catch((e) => setError(e.message));
   };
   useEffect(() => load(), [instructionId]);
@@ -87,6 +102,7 @@ export function InvoiceDialog({ instructionId, onClose, onIssued }: { instructio
       setIssued({ shipment: j.shipment, settings: j.settings });
       await downloadInvoicePdf('invoice', j);
       onIssued();
+      onReady?.(true);
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -96,8 +112,8 @@ export function InvoiceDialog({ instructionId, onClose, onIssued }: { instructio
 
   const d = data?.draft;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-auto p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
+    <DialogFrame embedded={embedded} onClose={onClose}>
+      {!embedded && (
         <div className="flex items-start justify-between">
           <div>
             <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
@@ -110,6 +126,7 @@ export function InvoiceDialog({ instructionId, onClose, onIssued }: { instructio
             <X className="w-5 h-5" />
           </button>
         </div>
+      )}
         {error && <div className="rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs px-3 py-2">{error}</div>}
         {!data && !error && (
           <div className="py-10 text-center text-slate-400">
@@ -232,7 +249,6 @@ export function InvoiceDialog({ instructionId, onClose, onIssued }: { instructio
             </>
           )
         )}
-      </div>
-    </div>
+    </DialogFrame>
   );
 }

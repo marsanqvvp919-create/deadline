@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { demoHeaders } from '../utils/demo';
-import { Loader2, Plane, Settings, X } from 'lucide-react';
+import { CheckCircle2, Loader2, Plane, Settings, X } from 'lucide-react';
+import { DialogFrame, InvoiceDialog } from './InvoiceDialog';
 
 // AWB（航空貨物の送り状）。DHL Express は MyDHL API、FedEx は Ship API で発行してラベルPDFを保存する。
 // API の登録がない間・ほかの配送会社は、AWB番号を手入力する
@@ -165,8 +166,9 @@ export function FedexSettings({ onClose }: { onClose?: () => void }) {
   );
 }
 
-export function AwbDialog({ instructionId, onClose, onDone }: { instructionId: string; onClose: () => void; onDone: () => void }) {
+export function AwbDialog({ instructionId, onClose, onDone, embedded }: { instructionId: string; onClose: () => void; onDone: () => void; embedded?: boolean }) {
   const [draft, setDraft] = useState<any>(null);
+  const [done, setDone] = useState<{ awbNo: string; awbCarrier?: string; awbLabel?: boolean } | null>(null);
   const [dhlConfigured, setDhlConfigured] = useState(false);
   const [fedexConfigured, setFedexConfigured] = useState(false);
   const [carrier, setCarrier] = useState<'DHL' | 'FedEx'>('DHL');
@@ -179,6 +181,7 @@ export function AwbDialog({ instructionId, onClose, onDone }: { instructionId: s
     api(`/api/awb/draft/${instructionId}`)
       .then((j) => {
         setDraft(j.draft);
+        if (j.awbNo) setDone({ awbNo: j.awbNo, awbCarrier: j.awbCarrier, awbLabel: j.awbLabel });
         setDhlConfigured(j.dhlConfigured);
         setFedexConfigured(j.fedexConfigured);
         if (!j.dhlConfigured && j.fedexConfigured) setCarrier('FedEx');
@@ -190,9 +193,10 @@ export function AwbDialog({ instructionId, onClose, onDone }: { instructionId: s
     setBusy(true);
     setError('');
     try {
-      await fn();
+      const j = await fn();
       onDone();
-      onClose();
+      if (embedded) setDone(j.instruction);
+      else onClose();
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -201,8 +205,8 @@ export function AwbDialog({ instructionId, onClose, onDone }: { instructionId: s
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[92vh] overflow-auto p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
+    <DialogFrame embedded={embedded} onClose={onClose} width="max-w-4xl">
+      {!embedded && (
         <div className="flex items-start justify-between">
           <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
             <Plane className="w-5 h-5 text-amber-600" />
@@ -212,9 +216,23 @@ export function AwbDialog({ instructionId, onClose, onDone }: { instructionId: s
             <X className="w-5 h-5" />
           </button>
         </div>
+      )}
+        {done && (
+          <div className="rounded-xl border-2 border-emerald-500 bg-emerald-50 p-4 space-y-2 text-sm">
+            <div className="font-bold text-emerald-800 flex items-center gap-1.5">
+              <CheckCircle2 className="w-5 h-5" />
+              送り状 {done.awbCarrier || ''} {done.awbNo} を発行しました
+            </div>
+            {done.awbLabel && (
+              <a href={`/api/awb/label/${instructionId}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded border border-indigo-300 bg-indigo-50 px-2 py-1 text-[11px] font-bold text-indigo-800">
+                送り状のラベルPDF
+              </a>
+            )}
+          </div>
+        )}
         {error && <div className="rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs px-3 py-2 whitespace-pre-wrap">{error}</div>}
 
-        {draft && (
+        {draft && !done && (
           <>
             <div className="text-xs text-slate-600">
               インボイス <b>{draft.invoiceNo}</b>・申告価格 <b>{draft.declaredValue.toLocaleString()} {draft.currency}</b>・{draft.items.length}品目（インボイスの内容から作っています。住所は英語住所を分けたものなので、赤い欄を埋めて確認してください）
@@ -302,6 +320,7 @@ export function AwbDialog({ instructionId, onClose, onDone }: { instructionId: s
             </div>
           </>
         )}
+        {!done && (
         <div className="rounded-xl border border-slate-200 p-3 space-y-2 text-xs">
           <div className="font-bold text-slate-700">AWB番号を手入力（FedEx・DHLのサイトで作った場合など）</div>
           <div className="flex flex-wrap items-center gap-2">
@@ -316,6 +335,50 @@ export function AwbDialog({ instructionId, onClose, onDone }: { instructionId: s
               登録
             </button>
           </div>
+        </div>
+        )}
+    </DialogFrame>
+  );
+}
+
+/** インボイス → 送り状（AWB）を1つの画面で続けて作る */
+export function ShipDocsDialog({ instructionId, onClose, onChanged }: { instructionId: string; onClose: () => void; onChanged: () => void }) {
+  const [invoiceReady, setInvoiceReady] = useState(false);
+  const step = (n: number, title: string, active: boolean, children: React.ReactNode) => (
+    <section className={`rounded-xl border p-4 space-y-3 ${active ? 'border-slate-200' : 'border-dashed border-slate-200 bg-slate-50/60'}`}>
+      <div className="flex items-center gap-2 text-sm font-bold text-slate-900">
+        <span className={`inline-flex w-6 h-6 items-center justify-center rounded-full text-xs ${active ? 'bg-indigo-600 text-white' : 'bg-slate-200 text-slate-500'}`}>{n}</span>
+        {title}
+      </div>
+      {children}
+    </section>
+  );
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[92vh] overflow-auto p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between">
+          <div>
+            <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+              <Plane className="w-5 h-5 text-amber-600" />
+              インボイスと送り状（{instructionId}）
+            </h3>
+            <p className="text-[11px] text-slate-500">上でインボイスを発行すると、そのまま下で送り状（AWB）を作れます。</p>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-700" aria-label="閉じる">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        {step(1, 'インボイス', true, <InvoiceDialog embedded instructionId={instructionId} onClose={onClose} onIssued={onChanged} onReady={setInvoiceReady} />)}
+        {step(
+          2,
+          '送り状（AWB）',
+          invoiceReady,
+          invoiceReady ? <AwbDialog embedded instructionId={instructionId} onClose={onClose} onDone={onChanged} /> : <div className="text-xs text-slate-400">インボイスを発行すると、ここで送り状を作れます（品目・申告価格はインボイスから入ります）。</div>
+        )}
+        <div className="flex justify-end">
+          <button onClick={onClose} className="rounded-lg border border-slate-300 px-4 py-1.5 text-xs font-bold text-slate-700">
+            閉じる
+          </button>
         </div>
       </div>
     </div>

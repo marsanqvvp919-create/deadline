@@ -3,8 +3,8 @@ import { demoHeaders, isInventoryDemo, setInventoryDemo } from '../utils/demo';
 import { Boxes, CheckCircle2, Copy, Check, ExternalLink, KeyRound, PackageCheck, RefreshCw, Search, Truck, Upload, X, Ban, RotateCcw, History, Warehouse, ClipboardList, Send } from 'lucide-react';
 import { PasswordChooser, passwordOk } from './ClinicPortalAccess';
 import { Order } from '../types';
-import { InvoiceDialog, InvoicePdfButtons } from '../invoice/InvoiceDialog';
-import { AwbDialog, DhlSettings, FedexSettings } from '../invoice/AwbDialog';
+import { InvoicePdfButtons } from '../invoice/InvoiceDialog';
+import { DhlSettings, FedexSettings, ShipDocsDialog } from '../invoice/AwbDialog';
 import { FlowSteps } from './flow/FlowSteps';
 import { ColorLegend } from './flow/ColorLegend';
 import { notifyDone, notifyError } from './flow/UndoToast';
@@ -697,8 +697,7 @@ function WarehouseAccessPanel({ data, onSaved }: { data: InventoryData; onSaved:
 function InstructionBoard({ instructions, onSaved }: { instructions: Instruction[]; onSaved: () => void }) {
   const [filter, setFilter] = useState<'open' | 'shipped' | 'all'>('open');
   const [wh, setWh] = useState<'all' | WarehouseId>('all');
-  const [invoiceFor, setInvoiceFor] = useState<string | null>(null);
-  const [awbFor, setAwbFor] = useState<string | null>(null);
+  const [docsFor, setDocsFor] = useState<string | null>(null);
   const [ship, setShip] = useState<{ id: string; carrier: string; tracking: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const run = async (fn: () => Promise<any>, done?: string, undo?: () => Promise<any>) => {
@@ -729,8 +728,8 @@ function InstructionBoard({ instructions, onSaved }: { instructions: Instruction
   const next = (i: Instruction): { label: string; preview: string; onClick: () => void } | { wait: string } | null => {
     if (i.status !== 'open') return null;
     const intl = i.warehouse !== 'domestic';
-    if (intl && !i.invoiceNo) return { label: 'インボイスを作る', preview: 'インボイスアプリのマスタで内容を確認してから発行します（番号が付きます）', onClick: () => setInvoiceFor(i.id) };
-    if (intl && !i.awbNo) return { label: '送り状（AWB）を作る', preview: 'インボイスの内容から送り状を作ります。住所を確認してから発行します', onClick: () => setAwbFor(i.id) };
+    if (intl && !i.invoiceNo) return { label: 'インボイスと送り状を作る', preview: 'インボイスを確認して発行し、同じ画面で続けて送り状（AWB）も作れます', onClick: () => setDocsFor(i.id) };
+    if (intl && !i.awbNo) return { label: '送り状（AWB）を作る', preview: 'インボイスの内容から送り状を作ります。住所を確認してから発行します', onClick: () => setDocsFor(i.id) };
     if (!intl) return { label: '出荷完了にする', preview: '国内倉庫の在庫から引き、出荷済みにします', onClick: () => setShip({ id: i.id, carrier: '', tracking: '' }) };
     return { wait: `${WH_NAME[i.warehouse]}の担当者が出荷するのを待っています` };
   };
@@ -882,8 +881,7 @@ function InstructionBoard({ instructions, onSaved }: { instructions: Instruction
           );
         })}
       </div>
-      {invoiceFor && <InvoiceDialog instructionId={invoiceFor} onClose={() => setInvoiceFor(null)} onIssued={onSaved} />}
-      {awbFor && <AwbDialog instructionId={awbFor} onClose={() => setAwbFor(null)} onDone={onSaved} />}
+      {docsFor && <ShipDocsDialog instructionId={docsFor} onClose={() => setDocsFor(null)} onChanged={onSaved} />}
     </section>
   );
 }

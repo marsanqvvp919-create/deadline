@@ -6477,7 +6477,7 @@ app.get('/api/awb/draft/:siId', async (req, res) => {
   if (!si) return res.status(404).json({ error: '出荷指示が見つかりません' });
   try {
     await loadAwbSettings();
-    res.json({ draft: await awbDraft(si), dhlConfigured: isDemo() || !!awbSettings.dhl?.username, fedexConfigured: isDemo() || !!awbSettings.fedex?.apiKey, awbNo: si.awbNo || null, demo: isDemo() });
+    res.json({ draft: await awbDraft(si), dhlConfigured: isDemo() || !!awbSettings.dhl?.username, fedexConfigured: isDemo() || !!awbSettings.fedex?.apiKey, awbNo: si.awbNo || null, awbCarrier: si.awbCarrier || null, awbLabel: !!si.awbLabel, demo: isDemo() });
   } catch (e: any) {
     res.status(400).json({ error: e?.message || String(e) });
   }
