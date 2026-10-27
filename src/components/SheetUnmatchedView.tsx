@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useUrlState } from '../utils/listState';
-import { AlertCircle, CheckCircle2, Copy, ExternalLink, Layers, RefreshCw, Search, Truck } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Copy, Download, ExternalLink, Layers, List, RefreshCw, Search, Truck } from 'lucide-react';
 import { getRakurakuUrl } from '../utils/customsUtils';
 import { useSharedNotes } from '../utils/sharedNotes';
 
@@ -92,6 +92,189 @@ function dayDiffLabel(sheetDate: string, rakurakuDate?: string): string {
   return diff > 0 ? `${diff}日後` : `${-diff}日前`;
 }
 
+/** チェックリストの1行：照合できない理由と、やることを文章にしたもの */
+type CheckKind = 'invoice' | 'waiting' | 'near' | 'multiple' | 'none' | 'elsewhere' | 'date' | 'bulk';
+interface CheckItem {
+  key: string;
+  kind: CheckKind;
+  rowNumber: number;
+  shipDate: string;
+  origin: string;
+  courier: string;
+  invoiceNo: string;
+  clinicName: string;
+  trackingNo: string;
+  reason: string;
+  todo: string;
+  shipments: Candidate[];
+}
+const CHECK_KIND: Record<CheckKind, { label: string; className: string }> = {
+  invoice: { label: 'インボイス番号で候補あり', className: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
+  waiting: { label: '楽楽が出荷待ちのまま', className: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
+  near: { label: '出荷日の近い候補あり', className: 'bg-sky-100 text-sky-800 border-sky-200' },
+  multiple: { label: '候補が複数', className: 'bg-amber-100 text-amber-800 border-amber-200' },
+  none: { label: '候補なし', className: 'bg-rose-100 text-rose-800 border-rose-200' },
+  elsewhere: { label: '別の受注に登録済み', className: 'bg-rose-100 text-rose-800 border-rose-200' },
+  date: { label: '出荷日がずれている', className: 'bg-amber-100 text-amber-800 border-amber-200' },
+  bulk: { label: '一括発注（対応不要）', className: 'bg-indigo-100 text-indigo-800 border-indigo-200' },
+};
+const digitsOf = (v: string) => (v || '').replace(/\D/g, '');
+function buildChecklist(rows: UnmatchedRow[], issues: MatchedIssue[]): CheckItem[] {
+  const out: CheckItem[] = [];
+  for (const r of rows) {
+    const base = { key: digitsOf(r.trackingNo) || `row-${r.rowNumber}`, rowNumber: r.rowNumber, shipDate: r.shipDate, origin: r.origin, courier: r.courier, invoiceNo: r.invoiceNo, clinicName: r.clinicName, trackingNo: r.trackingNo, shipments: r.candidates };
+    const name = r.nameVariants?.length ? `（名前の表記ゆれ：シート「${r.nameVariants[0].sheetName}」／楽楽「${r.nameVariants[0].matchedName}」）` : '';
+    const c = r.candidates[0];
+    if (r.kind === 'bulk') {
+      out.push({ ...base, kind: 'bulk', reason: `${r.bulkGroupLabel || '一括発注'}は本部名の受注にまとめて登録するため、院ごとの出荷が楽楽にない`, todo: '対応不要（確認だけ）' });
+    } else if (r.kind === 'single' && c) {
+      const kind: CheckKind = c.reason === 'インボイス番号が一致' ? 'invoice' : c.reason === '出荷待ち' ? 'waiting' : 'near';
+      const why =
+        kind === 'invoice'
+          ? `シートの追跡番号が楽楽のどの出荷にも入っていない。インボイス番号（${c.warehouseInvoiceNo || r.invoiceNo}）が同じ出荷 ${c.shipmentId} がある`
+          : kind === 'waiting'
+            ? `シートでは出荷済みだが、楽楽の ${c.shipmentId}（受注 ${c.orderId}）は出荷待ちのまま・追跡番号なし`
+            : `シートの追跡番号が楽楽にない。同じクリニックで出荷日の近い ${c.shipmentId}（出荷日 ${c.shippedDate}）に追跡番号がない`;
+      out.push({ ...base, kind, reason: why + name, todo: `楽楽の ${c.shipmentId} の出荷番号に ${r.trackingNo} を入れる` });
+    } else if (r.kind === 'multiple') {
+      out.push({ ...base, kind: 'multiple', reason: `同じクリニックに追跡番号のない出荷が${r.candidates.length}件あり、どれの荷物か決められない${name}`, todo: 'インボイス・商品から正しい出荷を選び、その出荷番号に追跡番号を入れる' });
+    } else {
+      out.push({ ...base, kind: 'none', reason: `${r.noCandidateReason || '楽楽にこのクリニックの対象の出荷が見つからない'}${name}`, todo: '楽楽で受注・出荷が作られているか確認する（なければ担当者へ）。名前の違いなら顧客名をそろえる' });
+    }
+  }
+  for (const i of issues) {
+    const base = { key: `${i.issue}:${digitsOf(i.trackingNo) || i.rowNumber}`, rowNumber: i.rowNumber, shipDate: i.shipDate, origin: i.origin, courier: i.courier, invoiceNo: i.invoiceNo, clinicName: i.clinicName, trackingNo: i.trackingNo, shipments: i.shipments };
+    if (i.issue === 'registered_elsewhere') {
+      out.push({ ...base, kind: 'elsewhere', reason: `追跡番号が別の出荷 ${i.shipments.map((sh) => `${sh.shipmentId}（${sh.customerName}・受注 ${sh.orderId}）`).join('、')} に登録されている`, todo: '登録先が正しいか確認し、違えば楽楽で正しい出荷に付け替える' });
+    } else {
+      out.push({ ...base, kind: 'date', reason: `シートの出荷日 ${i.shipDate} と楽楽の出荷日 ${i.rakurakuShipDate} が違う（${dayDiffLabel(i.shipDate, i.rakurakuShipDate)}）`, todo: '実際に出た日を確認し、楽楽の出荷日を直す（遵守率に影響）' });
+    }
+  }
+  return out;
+}
+
+function ChecklistView({ items, marks, setMark, onCopy, copied, rakurakuUrl }: { items: CheckItem[]; marks: Record<string, { by?: string; at: string }>; setMark: (k: string, v: { by?: string; at: string } | null) => void; onCopy: (id: string) => void; copied: string | null; rakurakuUrl: string }) {
+  const [kind, setKind] = useState<'all' | CheckKind>('all');
+  const [onlyOpen, setOnlyOpen] = useState(true);
+  const [q, setQ] = useState('');
+  const kinds = (Object.keys(CHECK_KIND) as CheckKind[]).filter((k) => items.some((i) => i.kind === k));
+  const open = (k: CheckKind | 'all') => items.filter((i) => (k === 'all' ? i.kind !== 'bulk' : i.kind === k) && !marks[i.key]).length;
+  const shown = items
+    .filter((i) => (kind === 'all' ? i.kind !== 'bulk' : i.kind === kind))
+    .filter((i) => !onlyOpen || !marks[i.key])
+    .filter((i) => !q.trim() || [i.clinicName, i.trackingNo, i.invoiceNo, i.reason].some((v) => (v || '').toLowerCase().includes(q.trim().toLowerCase())))
+    .sort((a, b) => (marks[a.key] ? 1 : 0) - (marks[b.key] ? 1 : 0) || (b.shipDate || '').localeCompare(a.shipDate || ''));
+  const downloadCsv = () => {
+    const esc = (v: string) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const head = ['チェック', '理由の種類', 'シート行', '出荷日', '出荷元', 'クーリエ', 'INVOICE', 'クリニック', '追跡番号', '照合できない理由', 'やること', '楽楽の出荷'];
+    const lines = shown.map((i) => [marks[i.key] ? '済' : '', CHECK_KIND[i.kind].label, String(i.rowNumber), i.shipDate, i.origin, i.courier, i.invoiceNo, i.clinicName, i.trackingNo, i.reason, i.todo, i.shipments.map((s) => s.shipmentId).join(' ')].map(esc).join(','));
+    const blob = new Blob(['﻿' + [head.map(esc).join(','), ...lines].join('\r\n')], { type: 'text/csv' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `楽楽販売と未照合_チェックリスト_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+  };
+  return (
+    <div className="bg-white border border-slate-200 rounded-2xl shadow-xs overflow-hidden">
+      <div className="p-3 border-b border-slate-100 space-y-2">
+        <div className="flex flex-wrap items-center gap-1.5 text-xs">
+          <button onClick={() => setKind('all')} className={`rounded-lg border px-2.5 py-1 font-bold ${kind === 'all' ? 'bg-slate-900 border-slate-900 text-white' : 'bg-white border-slate-200 text-slate-700'}`}>
+            すべて（未チェック {open('all')}）
+          </button>
+          {kinds.map((k) => (
+            <button key={k} onClick={() => setKind(k)} className={`rounded-lg border px-2.5 py-1 font-bold ${kind === k ? 'ring-2 ring-slate-900 ring-offset-1' : ''} ${CHECK_KIND[k].className}`}>
+              {CHECK_KIND[k].label} {open(k)}
+            </button>
+          ))}
+        </div>
+        <div className="flex flex-wrap items-center gap-3 text-xs">
+          <label className="flex items-center gap-1.5 font-semibold text-slate-700">
+            <input type="checkbox" checked={onlyOpen} onChange={(e) => setOnlyOpen(e.target.checked)} />
+            未チェックだけ表示
+          </label>
+          <div className="relative">
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2" />
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="クリニック・追跡番号・INVOICE" className="pl-7 pr-2 py-1 border border-slate-300 rounded-lg w-60" />
+          </div>
+          <span className="text-slate-500">{shown.length}件</span>
+          <button onClick={downloadCsv} className="ml-auto inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2.5 py-1 font-bold text-slate-700 hover:bg-slate-50">
+            <Download className="w-3.5 h-3.5" />
+            このリストをCSVで保存
+          </button>
+        </div>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead className="bg-slate-50 text-slate-500">
+            <tr>
+              <th className="px-3 py-2 w-16 text-left">チェック</th>
+              <th className="px-2 py-2 text-left w-40">理由の種類</th>
+              <th className="px-2 py-2 text-left w-48">クリニック・追跡番号</th>
+              <th className="px-2 py-2 text-left">照合できない理由</th>
+              <th className="px-2 py-2 text-left w-72">やること</th>
+              <th className="px-2 py-2 text-left w-44">楽楽の出荷</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {shown.length === 0 && (
+              <tr>
+                <td colSpan={6} className="px-3 py-8 text-center font-bold text-emerald-700">
+                  未チェックのものはありません
+                </td>
+              </tr>
+            )}
+            {shown.map((i) => {
+              const m = marks[i.key];
+              return (
+                <tr key={i.key} className={m ? 'bg-slate-50 text-slate-400' : 'hover:bg-amber-50/30'}>
+                  <td className="px-3 py-2 align-top">
+                    <label className="flex flex-col items-start gap-0.5 cursor-pointer">
+                      <input type="checkbox" className="w-4 h-4 accent-emerald-600" checked={!!m} onChange={() => setMark(i.key, m ? null : { at: new Date().toISOString() })} />
+                      {m && <span className="text-[10px] text-emerald-700 font-bold">{new Date(m.at).toLocaleDateString('ja-JP', { month: 'numeric', day: 'numeric' })}済</span>}
+                    </label>
+                  </td>
+                  <td className="px-2 py-2 align-top">
+                    <span className={`inline-block rounded-md border px-1.5 py-0.5 text-[11px] font-bold ${CHECK_KIND[i.kind].className}`}>{CHECK_KIND[i.kind].label}</span>
+                    <div className="text-[10px] text-slate-400 mt-0.5">
+                      シート{i.rowNumber}行目・{i.shipDate || '—'}
+                    </div>
+                  </td>
+                  <td className="px-2 py-2 align-top">
+                    <div className={`font-bold ${m ? '' : 'text-slate-900'}`}>{i.clinicName || '（名前なし）'}</div>
+                    <div className="font-mono">{i.trackingNo}</div>
+                    <div className="text-[10px] text-slate-400">
+                      {[i.origin, i.courier, i.invoiceNo && `INV ${i.invoiceNo}`].filter(Boolean).join('・')}
+                    </div>
+                  </td>
+                  <td className={`px-2 py-2 align-top leading-relaxed ${m ? '' : 'text-slate-700'}`}>{i.reason}</td>
+                  <td className={`px-2 py-2 align-top leading-relaxed font-semibold ${m ? '' : 'text-indigo-800'}`}>{i.todo}</td>
+                  <td className="px-2 py-2 align-top space-y-1">
+                    {i.shipments.slice(0, 4).map((sh) => (
+                      <div key={sh.shipmentId} className="flex items-center gap-1">
+                        <span className="font-mono font-bold">{sh.shipmentId}</span>
+                        <button onClick={() => onCopy(sh.shipmentId)} title="出荷IDをコピー" className="rounded border border-slate-300 bg-white px-1 py-0.5">
+                          <Copy className="w-3 h-3" />
+                        </button>
+                        {copied === sh.shipmentId && <span className="text-[10px] text-emerald-700">コピー済</span>}
+                      </div>
+                    ))}
+                    {i.shipments.length > 4 && <div className="text-[10px] text-slate-400">ほか{i.shipments.length - 4}件</div>}
+                    {i.shipments.length > 0 && (
+                      <a href={rakurakuUrl} target="_blank" rel="noopener noreferrer" onClick={() => onCopy(i.shipments[0].shipmentId)} className="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-700">
+                        楽楽販売で開く <ExternalLink className="w-3 h-3" />
+                      </a>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 export async function fetchSheetUnmatched(refresh = false): Promise<UnmatchedResponse> {
   const res = await fetch(`/api/shipment-sheet/unmatched${refresh ? '?refresh=1' : ''}`);
   return res.json();
@@ -118,6 +301,7 @@ export const SheetUnmatchedView: React.FC<{ onCountChange?: (count: number | nul
   // 対応済みの印（チームで共有）。キーは追跡番号（シートの行が並べ替わっても同じ行を指すように）
   const [doneMarks, setDoneMark] = useSharedNotes<{ by?: string; at: string }>('unmatched_done');
   const [showDone, setShowDone] = useState(false);
+  const [mode, setMode] = useUrlState<'list' | 'cards'>('mode', 'list');
   // 件数（バッジ）：一括発注（湘南美容など）と対応済みの行は数えない
   useEffect(() => {
     if (!data?.success) return;
@@ -212,7 +396,7 @@ export const SheetUnmatchedView: React.FC<{ onCountChange?: (count: number | nul
           </button>
         </div>
 
-        {data?.success && (
+        {data?.success && mode === 'cards' && (
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 pt-3 border-t border-slate-100">
             <button
               type="button"
@@ -238,7 +422,7 @@ export const SheetUnmatchedView: React.FC<{ onCountChange?: (count: number | nul
           </div>
         )}
 
-        {data?.success && (
+        {data?.success && mode === 'cards' && (
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <button
               type="button"
@@ -265,6 +449,22 @@ export const SheetUnmatchedView: React.FC<{ onCountChange?: (count: number | nul
         )}
       </div>
 
+      {data?.success && (
+        <div className="flex items-center gap-1.5 text-xs">
+          <button onClick={() => setMode('list')} className={`inline-flex items-center gap-1 rounded-lg border px-3 py-1.5 font-bold ${mode === 'list' ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-slate-300 text-slate-700'}`}>
+            <List className="w-3.5 h-3.5" />
+            チェックリスト
+          </button>
+          <button onClick={() => setMode('cards')} className={`rounded-lg border px-3 py-1.5 font-bold ${mode === 'cards' ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-slate-300 text-slate-700'}`}>
+            くわしい表示（候補ごと）
+          </button>
+        </div>
+      )}
+
+      {data?.success && mode === 'list' && (
+        <ChecklistView items={buildChecklist(rows, issues)} marks={doneMarks} setMark={setDoneMark} onCopy={copyShipmentId} copied={copied} rakurakuUrl={rakurakuUrl} />
+      )}
+
       {loading && !data && (
         <div className="bg-white border border-slate-200 rounded-2xl p-8 text-center text-sm text-slate-500">照合しています…</div>
       )}
@@ -284,7 +484,7 @@ export const SheetUnmatchedView: React.FC<{ onCountChange?: (count: number | nul
         </div>
       )}
 
-      {data?.success && view !== 'unmatched' && (
+      {data?.success && mode === 'cards' && view !== 'unmatched' && (
         <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-xs">
           <div className="px-4 py-3 border-b border-slate-100 text-xs text-slate-600">
             {view === 'registered_elsewhere'
@@ -349,7 +549,7 @@ export const SheetUnmatchedView: React.FC<{ onCountChange?: (count: number | nul
         </div>
       )}
 
-      {data?.success && view === 'unmatched' && rows.length === 0 && (
+      {data?.success && mode === 'cards' && view === 'unmatched' && rows.length === 0 && (
         <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-5 flex items-center gap-3">
           <CheckCircle2 className="w-5 h-5 text-emerald-600" />
           <p className="text-sm font-bold text-emerald-800">
@@ -358,7 +558,7 @@ export const SheetUnmatchedView: React.FC<{ onCountChange?: (count: number | nul
         </div>
       )}
 
-      {data?.success && view === 'unmatched' && rows.length > 0 && (
+      {data?.success && mode === 'cards' && view === 'unmatched' && rows.length > 0 && (
         <div className="space-y-3">
           <label className="flex items-center gap-2 text-xs text-slate-600">
             <input type="checkbox" checked={showDone} onChange={(e) => setShowDone(e.target.checked)} />
