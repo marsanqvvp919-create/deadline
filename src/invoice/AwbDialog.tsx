@@ -44,7 +44,7 @@ function PartyForm({ title, value, onChange }: { title: string; value: any; onCh
   );
 }
 
-export function DhlSettings({ onClose }: { onClose: () => void }) {
+export function DhlSettings({ onClose }: { onClose?: () => void }) {
   const [cur, setCur] = useState<any>(null);
   const [form, setForm] = useState({ username: '', password: '', accountNumber: '', env: 'test' });
   const [msg, setMsg] = useState<{ text: string; error?: boolean } | null>(null);
@@ -63,9 +63,11 @@ export function DhlSettings({ onClose }: { onClose: () => void }) {
           <Settings className="w-4 h-4" />
           DHL Express（MyDHL API）の登録
         </span>
-        <button onClick={onClose} className="text-slate-400 hover:text-slate-700" aria-label="閉じる">
-          <X className="w-4 h-4" />
-        </button>
+        {onClose && (
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-700" aria-label="閉じる">
+            <X className="w-4 h-4" />
+          </button>
+        )}
       </div>
       <p className="text-slate-500">
         DHLの法人口座で MyDHL API（発送用）を申し込むと、利用者名・パスワードが発行されます。口座番号は請求先のDHL口座（9桁）です。最初は「テスト」で試し、問題なければ「本番」にしてください。
