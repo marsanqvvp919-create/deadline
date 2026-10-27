@@ -5526,8 +5526,9 @@ function leakChecks() {
     add('cool_no_slip', 'cool', '通関後にクール伝票がない', `通関が済んでから${D.coolAfterCustoms}日以上、佐川のクール伝票（国内追跡番号）が入っていない（通関から30日以内）`, 'arrival_tracking',
       ships.flatMap((s) => {
         const d = daysSince(blank(s.customsClearedDate) ? '' : s.customsClearedDate);
-        if (d === null || d < D.coolAfterCustoms || d > 30 || (s.domesticTrackingNos || []).length || (s.extraTrackingNos || []).length || !notDone(s)) return [];
-        return [{ id: s.shipmentId, orderId: s.orderId, clinic: clinicOf(s), text: `${s.shipmentId} 通関 ${s.customsClearedDate}${blank(s.trackingNo) ? '' : `・国際 ${s.trackingNo}`}`, days: d }];
+        // クール便の出荷（クール申請の欄が入っているもの）だけ
+        if (blank(s.coolApplicationStatus) || d === null || d < D.coolAfterCustoms || d > 30 || (s.domesticTrackingNos || []).length || (s.extraTrackingNos || []).length || !notDone(s)) return [];
+        return [{ id: s.shipmentId, orderId: s.orderId, clinic: clinicOf(s), text: `${s.shipmentId} 通関 ${s.customsClearedDate}${blank(s.trackingNo) ? '' : `・国際 ${s.trackingNo}`}・伝票 ${s.slipStatus || '—'}`, days: d }];
       }));
     add('cool_not_arranged', 'cool', 'クール手配が終わっていない', 'クール申請・委任状・伝票のどれかが「未」のまま（出荷から30日以内で、配達前のもの）', 'arrival_tracking',
       ships
