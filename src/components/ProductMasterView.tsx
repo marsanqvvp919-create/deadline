@@ -210,7 +210,11 @@ export const ProductMasterView: React.FC<ProductMasterViewProps> = ({
       if (!list.some((x) => x.supplierName === p.supplierName && x.costPrice === p.costPrice && x.costCurrency === p.costCurrency)) list.push(p);
       map.set(p.productId, list);
     }
-    return Array.from(map.values()).map((items) => ({ main: items.find((x) => x.status === '取扱中') || items[0], items }));
+    return Array.from(map.values()).map((all) => {
+      // 仕入先のある行があれば、仕入先も単価も空の行は外す
+      const items = all.some((x) => x.supplierName) ? all.filter((x) => x.supplierName || x.costPrice > 0) : all;
+      return { main: items.find((x) => x.status === '取扱中') || items[0], items };
+    });
   }, [filteredProducts]);
   const uniqueCount = (list: ProductItem[]) => new Set(list.map((p) => p.productId)).size;
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
