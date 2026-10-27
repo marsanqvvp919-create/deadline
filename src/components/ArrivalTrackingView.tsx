@@ -401,7 +401,7 @@ export const ArrivalTrackingView: React.FC<{
       setCarrierStatus(map);
       const errs = Object.values(json.errors);
       // 取得できた件数を先に出し、未設定・回数制限などのお知らせは後ろに添える
-      const notes = errs.map((e) => (e.includes('未設定') ? `${e}（メニュー「配送会社API連携」で設定できます）` : e));
+      const notes = errs.map((e) => (e.includes('未設定') ? `${e}（左下の「設定」→「配送会社API」で設定できます）` : e));
       setCarrierMessage([`${json.results.length}件の最新状況を取得しました`, ...notes].join('／'));
       fetchSavedCarrierStatuses().then((snap) => snap && setDhlInfo(snap.dhl));
     } catch (e: any) {
@@ -546,7 +546,7 @@ export const ArrivalTrackingView: React.FC<{
           {fedexInfo?.autoEnabled && (
             <span className={fedexInfo.lastError ? 'text-rose-700 font-bold' : 'text-slate-500'}>
               {fedexInfo.lastError
-                ? `FedEx の自動取得でエラー：${fedexInfo.lastError}（配送会社API連携で確認してください）`
+                ? `FedEx の自動取得でエラー：${fedexInfo.lastError}（左下の「設定」→「配送会社API」で確認してください）`
                 : `FedEx は2時間ごとに自動で取得しています（最終 ${fedexInfo.lastAutoRunAt ? new Date(fedexInfo.lastAutoRunAt).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }) : '—'}）`}
             </span>
           )}
@@ -663,7 +663,7 @@ export const ArrivalTrackingView: React.FC<{
                             ? '追跡番号の誤りの可能性：どの運送会社にも該当がありません。楽楽販売の追跡番号を確認してください'
                             : boxes.length === 0
                               ? '追跡番号がありません（または国際郵便など、DHL・FedEx 以外の番号）'
-                              : '国内配送（佐川・ヤマトなど）の番号の可能性があります。「配送会社API連携」で荷物追跡APIを設定すると状況を取得します'}
+                              : '国内配送（佐川・ヤマトなど）の番号の可能性があります。左下の「設定」→「配送会社API」で荷物追跡APIを設定すると状況を取得します'}
                       </div>
                     )
                   )}

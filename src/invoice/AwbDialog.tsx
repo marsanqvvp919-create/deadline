@@ -315,7 +315,7 @@ export function AwbDialog({ instructionId, onClose, onDone, embedded }: { instru
                   {carrier === 'FedEx' && <span className="text-amber-800">FedEx International Priority・送料は自社口座、関税は受取人払い</span>}
                 </div>
               ) : (
-                <div className="text-amber-800">{carrier === 'DHL' ? 'DHL の MyDHL API' : 'FedEx の Ship API'}がまだ登録されていません。「配送会社API連携」の画面で登録すると、ここで発行できます。それまでは下で番号を手入力してください。</div>
+                <div className="text-amber-800">{carrier === 'DHL' ? 'DHL の MyDHL API' : 'FedEx の Ship API'}がまだ登録されていません。左下の「設定」→「配送会社API」で登録すると、ここで発行できます。それまでは下で番号を手入力してください。</div>
               )}
             </div>
           </>

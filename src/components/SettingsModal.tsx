@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { getConfiguredUrls, saveConnectionConfig, fetchServerIp, ConnectionMode } from '../api';
 import { getSalesRepsList, addSalesRep, removeSalesRep } from '../utils/salesRepMapping';
+import { CarrierSettingsView } from './CarrierSettingsView';
 import {
   X,
   CheckCircle,
@@ -21,9 +22,11 @@ interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSaved: () => void;
+  initialTab?: SettingsTab;
 }
+export type SettingsTab = 'connection' | 'carriers' | 'sales_reps' | 'tuning';
 
-export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, onSaved }) => {
+export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, onSaved, initialTab }) => {
   const current = getConfiguredUrls();
   const [mode, setMode] = useState<ConnectionMode>(current.mode);
   const [rakurakuBaseUrl, setRakurakuBaseUrl] = useState(current.rakurakuBaseUrl);
@@ -39,7 +42,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
 
   const [salesRepsList, setSalesRepsList] = useState<string[]>(() => getSalesRepsList());
   const [newRepName, setNewRepName] = useState<string>('');
-  const [settingsTab, setSettingsTab] = useState<'connection' | 'sales_reps' | 'tuning'>('connection');
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>('connection');
+  useEffect(() => {
+    if (isOpen) setSettingsTab(initialTab || 'connection');
+  }, [isOpen, initialTab]);
   const [refreshInterval, setRefreshInterval] = useState<string>(() => localStorage.getItem('nouki_refresh_interval') || '5');
 
   useEffect(() => {
@@ -174,12 +180,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 animate-in fade-in duration-150">
-      <div className="bg-white rounded-xl shadow-2xl border border-slate-200 w-full max-w-2xl overflow-hidden max-h-[90vh] flex flex-col">
+      <div className="bg-white rounded-xl shadow-2xl border border-slate-200 w-full max-w-3xl overflow-hidden max-h-[90vh] flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-slate-50 shrink-0">
           <div className="flex items-center gap-2">
             <Database className="w-5 h-5 text-blue-600" />
-            <h2 className="text-base font-bold text-slate-900">データ接続・運用設定</h2>
+            <h2 className="text-base font-bold text-slate-900">設定</h2>
           </div>
           <button
             onClick={onClose}
@@ -200,7 +206,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                 : 'border-transparent text-slate-600 hover:text-slate-900'
             }`}
           >
-            接続・API設定
+            楽楽販売との接続
+          </button>
+          <button
+            type="button"
+            onClick={() => setSettingsTab('carriers')}
+            className={`px-4 py-2.5 text-xs font-bold border-b-2 transition cursor-pointer ${
+              settingsTab === 'carriers'
+                ? 'border-blue-600 text-blue-700 bg-white'
+                : 'border-transparent text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            配送会社API
           </button>
           <button
             type="button"
@@ -307,7 +324,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
             </div>
           )}
 
-          {settingsTab === 'tuning' ? (
+          {settingsTab === 'carriers' ? (
+            <CarrierSettingsView />
+          ) : settingsTab === 'tuning' ? (
             <div className="space-y-5">
               {/* 1. 自動データ更新間隔 */}
               <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2">
@@ -600,6 +619,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
         )}
 
           {/* Standalone HTML Info */}
+          {settingsTab !== 'carriers' && (
           <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-xs space-y-1">
             <div className="font-semibold text-slate-800 flex items-center justify-between">
               <span>📄 Vite / Node.js不要の単一HTML版（ダウンロード）</span>
@@ -616,10 +636,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
               パソコンに何もインストールせず、単一のHTMLファイルとしてブラウザや社内サーバー・GASで動作させることも可能です。
             </p>
           </div>
+          )}
         </div>
 
         {/* Footer */}
         <div className="px-6 py-4 border-t border-slate-200 bg-slate-50 flex items-center justify-between shrink-0">
+          {settingsTab === 'carriers' ? (
+            <span className="text-[11px] text-slate-500">配送会社のキーは、それぞれの「保存」で保存されます。</span>
+          ) : (
           <button
             type="button"
             onClick={handleResetData}
@@ -627,14 +651,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
           >
             データをリセットして楽々連携のみにする
           </button>
+          )}
           <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={onClose}
               className="px-3 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition cursor-pointer"
             >
-              キャンセル
+              {settingsTab === 'carriers' ? '閉じる' : 'キャンセル'}
             </button>
+            {settingsTab !== 'carriers' && (
             <button
               type="button"
               onClick={handleSave}
@@ -642,6 +668,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
             >
               設定を保存して反映
             </button>
+            )}
           </div>
         </div>
       </div>

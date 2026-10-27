@@ -14,7 +14,7 @@ import { syncAndDiffOrders } from './utils/syncEngine';
 import { isWithinPeriod, parseYmd, startOfToday, currentYearMonth } from './utils';
 import { isCoolMissingShipment, isCustomsNgShipment, isOpenShipment } from './utils/customsUtils';
 import { Navbar } from './components/Navbar';
-import { SettingsModal } from './components/SettingsModal';
+import { SettingsModal, SettingsTab } from './components/SettingsModal';
 import { DetailDrawer } from './components/DetailDrawer';
 import { DashboardView } from './components/DashboardView';
 import { SalesDashboardView } from './components/SalesDashboardView';
@@ -39,7 +39,6 @@ import { KantoCustomsNgView } from './components/KantoCustomsNgView';
 import { SheetUnmatchedView, fetchOpenUnmatchedCount } from './components/SheetUnmatchedView';
 import { SheetImportView } from './components/SheetImportView';
 import { ActionListView } from './components/ActionListView';
-import { CarrierSettingsView } from './components/CarrierSettingsView';
 import { MorningMeetingView } from './components/MorningMeetingView';
 import { CarrierStatus, fetchSavedCarrierStatuses } from './utils/carriers';
 import { attentionCounts } from './utils/meeting';
@@ -136,6 +135,14 @@ export default function App() {
   const [serverIp, setServerIp] = useState<string>('34.34.226.81');
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
+  const [settingsTab, setSettingsTab] = useState<SettingsTab | undefined>(undefined);
+  // 以前の「配送会社API連携」ページは「設定」の中に移した
+  useEffect(() => {
+    if (activeTab !== 'carrier_settings') return;
+    setSettingsTab('carriers');
+    setIsSettingsOpen(true);
+    setActiveTab('procurement');
+  }, [activeTab]);
   const [isDailyDigestOpen, setIsDailyDigestOpen] = useState<boolean>(false);
 
   // 最終取得成功時刻が古いときの警告（止まったデータを、それと分からないまま表示しない）
@@ -798,13 +805,6 @@ export default function App() {
       badge: null,
     },
     {
-      id: 'carrier_settings',
-      group: 'admin',
-      label: '配送会社API連携',
-      icon: Truck,
-      badge: null,
-    },
-    {
       id: 'portal_admin',
       group: 'admin',
       label: 'お客様の管理画面',
@@ -908,6 +908,7 @@ export default function App() {
           <button
             type="button"
             onClick={() => {
+              setSettingsTab(undefined);
               setIsSettingsOpen(true);
               setIsMobileNavOpen(false);
             }}
@@ -919,10 +920,10 @@ export default function App() {
               </div>
               <div className="text-left">
                 <div className="font-bold text-slate-100 flex items-center gap-1.5">
-                  <span>システム設定</span>
+                  <span>設定</span>
                 </div>
                 <div className="text-[10px] text-slate-400 font-mono font-normal">
-                  {serverIp ? `サーバーIP: ${serverIp}` : '楽楽販売 API連携設定'}
+                  楽楽販売・配送会社API など
                 </div>
               </div>
             </div>
@@ -1195,7 +1196,7 @@ export default function App() {
 
           {activeTab === 'sheet_import' && <SheetImportView />}
 
-          {activeTab === 'carrier_settings' && <CarrierSettingsView />}
+
 
           {activeTab === 'portal_admin' && <PortalAdminView />}
 
@@ -1279,6 +1280,7 @@ export default function App() {
       {/* Settings Modal (GAS URL & Rakuraku Base URL Config) */}
       <SettingsModal
         isOpen={isSettingsOpen}
+        initialTab={settingsTab}
         onClose={() => setIsSettingsOpen(false)}
         onSaved={() => loadData(true)}
       />
