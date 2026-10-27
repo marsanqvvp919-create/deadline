@@ -840,9 +840,8 @@ export default function App() {
   ];
   const currentNav = deliveryNavItems.find((item) => (item.match || [item.id]).includes(activeTab));
   const currentGroup = NAV_GROUPS.find((g) => g.id === currentNav?.group);
-  useEffect(() => {
-    document.title = currentNav ? `${currentNav.label} | ${APP_NAME}` : APP_NAME;
-  }, [currentNav?.label]);
+  // ブラウザのタブ名（読み込み中の画面より後ろなので、フックではなくここで直接入れる）
+  document.title = currentNav ? `${currentNav.label} | ${APP_NAME}` : APP_NAME;
 
   return (
     <div className="min-h-screen flex bg-gradient-to-br from-slate-50 via-slate-100 to-indigo-50/60 text-slate-900 font-sans antialiased">
