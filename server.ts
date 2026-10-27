@@ -6375,7 +6375,7 @@ async function createFedexShipment(si: ShipInstruction, d: any) {
   const cur = fedexCurrency(String(d.currency || 'JPY'));
   const party = (p: AwbParty) => ({
     contact: { personName: p.fullName || p.companyName, companyName: p.companyName, phoneNumber: String(p.phone || '').replace(/[^\d+]/g, ''), ...(p.email ? { emailAddress: p.email } : {}) },
-    address: { streetLines: fedexStreetLines(p), city: p.cityName, postalCode: p.postalCode, countryCode: p.countryCode },
+    address: { streetLines: fedexStreetLines(p), city: p.cityName, postalCode: String(p.postalCode || '').replace(/[^0-9A-Za-z]/g, ''), countryCode: p.countryCode },
   });
   const body = {
     labelResponseOptions: 'LABEL',
