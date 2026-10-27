@@ -92,6 +92,10 @@ import {
   Boxes,
 } from 'lucide-react';
 
+// ソフト名（左上・上部の帯・ブラウザのタブに出す）
+const APP_NAME = '納期管理システム';
+const APP_TAGLINE = '受注から到着まで ― 楽楽販売 連携';
+
 const KNOWN_TABS: ViewTab[] = [
   'leak_check', 'dashboard', 'morning_meeting', 'alerts', 'procurement', 'unshipped_clinics', 'partial_shipment', 'overdue',
   'customs_management', 'cool_missing', 'kanto_customs_ng', 'unmatched_sheets', 'inventory_management', 'shipping_calc', 'shipping_instructions', 'invoices',
@@ -232,16 +236,6 @@ export default function App() {
     return () => clearInterval(timer);
   }, [cooldownRemainingSec, lastManualFetchTime]);
 
-  useEffect(() => {
-    // 今日のダイジェストは1日1回だけ自動で開く（以降はヘッダーのボタンから）
-    try {
-      const today = new Date().toLocaleDateString('ja-JP');
-      if (localStorage.getItem('nouki_seen_digest_date') !== today) {
-        setIsDailyDigestOpen(true);
-        localStorage.setItem('nouki_seen_digest_date', today);
-      }
-    } catch {}
-  }, []);
 
   const [clinics, setClinics] = useState<ClinicItem[]>(() => getLocalClinics());
   const [shipments, setShipments] = useState<ShipmentItem[]>(() => getLocalShipments());
@@ -695,6 +689,13 @@ export default function App() {
     { id: 'analysis', label: '分析' },
     { id: 'admin', label: '管理' },
   ];
+  // グループごとの色（左メニューの見出し・選択中・アイコン、上部の帯と見出しで同じ色を使う）
+  const GROUP_THEME: Record<string, { dot: string; label: string; icon: string; active: string; chip: string; bar: string }> = {
+    today: { dot: 'bg-rose-400', label: 'text-rose-300', icon: 'text-rose-300', active: 'bg-gradient-to-r from-rose-500 to-pink-500 border-rose-400', chip: 'bg-rose-50 text-rose-700 border-rose-200', bar: 'from-rose-500 via-pink-500 to-orange-400' },
+    shipping: { dot: 'bg-sky-400', label: 'text-sky-300', icon: 'text-sky-300', active: 'bg-gradient-to-r from-sky-500 to-indigo-500 border-sky-400', chip: 'bg-sky-50 text-sky-700 border-sky-200', bar: 'from-sky-500 via-indigo-500 to-violet-500' },
+    analysis: { dot: 'bg-emerald-400', label: 'text-emerald-300', icon: 'text-emerald-300', active: 'bg-gradient-to-r from-emerald-500 to-teal-500 border-emerald-400', chip: 'bg-emerald-50 text-emerald-700 border-emerald-200', bar: 'from-emerald-500 via-teal-500 to-cyan-500' },
+    admin: { dot: 'bg-violet-400', label: 'text-violet-300', icon: 'text-violet-300', active: 'bg-gradient-to-r from-violet-500 to-fuchsia-500 border-violet-400', chip: 'bg-violet-50 text-violet-700 border-violet-200', bar: 'from-violet-500 via-fuchsia-500 to-pink-500' },
+  };
   // 通関・輸入はクール手配漏れ・通関NGをタブで含む
   const CUSTOMS_TABS: ViewTab[] = ['customs_management', 'cool_missing', 'kanto_customs_ng'];
   // 配送状況：到着トラッキング・一括発注の配送・通関・輸入を1つの画面にまとめ、中をタブで切り替える
@@ -837,9 +838,14 @@ export default function App() {
       badge: null,
     },
   ];
+  const currentNav = deliveryNavItems.find((item) => (item.match || [item.id]).includes(activeTab));
+  const currentGroup = NAV_GROUPS.find((g) => g.id === currentNav?.group);
+  useEffect(() => {
+    document.title = currentNav ? `${currentNav.label} | ${APP_NAME}` : APP_NAME;
+  }, [currentNav?.label]);
 
   return (
-    <div className="min-h-screen flex bg-slate-100 text-slate-900 font-sans antialiased">
+    <div className="min-h-screen flex bg-gradient-to-br from-slate-50 via-slate-100 to-indigo-50/60 text-slate-900 font-sans antialiased">
       
       {/* Mobile Nav Backdrop */}
       {isMobileNavOpen && (
@@ -851,23 +857,19 @@ export default function App() {
 
       {/* Left Sidebar Navigation (Permanently Fixed on Desktop) */}
       <aside
-        className={`fixed inset-y-0 left-0 z-40 w-64 bg-slate-900 text-white flex flex-col border-r border-slate-800 transition-transform duration-200 ease-in-out shadow-2xl lg:shadow-none ${
+        className={`fixed inset-y-0 left-0 z-40 w-64 bg-gradient-to-b from-slate-950 via-slate-900 to-indigo-950 text-white flex flex-col border-r border-slate-800 transition-transform duration-200 ease-in-out shadow-2xl lg:shadow-none ${
           isMobileNavOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
         }`}
       >
         {/* Brand Header */}
         <div className="p-4.5 border-b border-slate-800 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center font-extrabold text-white shadow-xs border border-blue-500">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-rose-500 via-violet-500 to-sky-500 flex items-center justify-center font-black text-lg text-white shadow-lg ring-1 ring-white/20">
               納
             </div>
             <div>
-              <span className="font-bold text-sm tracking-tight text-white block">
-                納期管理システム
-              </span>
-              <span className="text-[10px] text-slate-400 font-medium block">
-                楽楽販売 リアルタイム連携
-              </span>
+              <span className="font-black text-[15px] tracking-tight text-white block">{APP_NAME}</span>
+              <span className="text-[10px] text-slate-400 font-medium block">{APP_TAGLINE}</span>
             </div>
           </div>
           <button
@@ -887,7 +889,10 @@ export default function App() {
           <div className="space-y-1">
             {NAV_GROUPS.map((group) => (
               <div key={group.id} className="space-y-1 pt-2 first:pt-0">
-                <div className="px-3 text-[10px] font-bold tracking-wider text-slate-400">{group.label}</div>
+                <div className={`px-3 flex items-center gap-1.5 text-[10px] font-bold tracking-wider ${GROUP_THEME[group.id].label}`}>
+                  <span className={`w-1.5 h-1.5 rounded-full ${GROUP_THEME[group.id].dot}`} />
+                  {group.label}
+                </div>
             {deliveryNavItems.filter((item) => item.group === group.id).map((item) => {
               const isActive = (item.match || [item.id]).includes(activeTab);
               const Icon = item.icon;
@@ -901,18 +906,18 @@ export default function App() {
                   }}
                   className={`w-full flex items-center justify-between px-3.5 py-2.2 rounded-xl text-xs font-bold transition cursor-pointer active:translate-y-px border ${
                     isActive
-                      ? 'bg-blue-600 border-blue-500 text-white shadow-xs'
-                      : 'border-transparent text-slate-300 hover:text-white hover:bg-slate-800/80 hover:border-slate-700'
+                      ? `${GROUP_THEME[group.id].active} text-white shadow-md`
+                      : 'border-transparent text-slate-300 hover:text-white hover:bg-white/5 hover:border-white/10'
                   }`}
                 >
                   <div className="flex items-center gap-2.5 truncate flex-1 min-w-0 mr-2">
-                    <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-white' : 'text-slate-400'}`} />
+                    <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-white' : GROUP_THEME[group.id].icon}`} />
                     <span className="truncate">{item.label}</span>
                   </div>
                   {item.badge !== null && (
                     <span
                       className={`text-[10px] font-mono px-1.5 py-0.2 rounded-full font-bold shadow-2xs shrink-0 ${
-                        isActive ? 'bg-white text-blue-700' : item.badgeColor
+                        isActive ? 'bg-white text-slate-800' : item.badgeColor
                       }`}
                     >
                       {item.badge}
@@ -977,12 +982,17 @@ export default function App() {
           >
             <Menu className="w-5 h-5" />
           </button>
-          <span className="text-sm font-bold">納期管理システム</span>
+          <span className="text-sm font-bold">{APP_NAME}</span>
           <div className="w-6" />
         </div>
 
         {/* Global Filter Bar (Navbar) */}
         <Navbar
+          appName={APP_NAME}
+          pageTitle={currentNav?.label || ''}
+          groupLabel={currentGroup?.label || ''}
+          groupChip={currentGroup ? GROUP_THEME[currentGroup.id].chip : ''}
+          groupBar={currentGroup ? GROUP_THEME[currentGroup.id].bar : 'from-slate-400 to-slate-500'}
           totalAlertsCount={totalAlertsCount}
           highSeverityCount={highSeverityCount}
           generatedAt={deliveryData.generatedAt || ''}

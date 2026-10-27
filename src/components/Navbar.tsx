@@ -14,6 +14,11 @@ import {
 } from 'lucide-react';
 
 interface NavbarProps {
+  appName?: string;
+  pageTitle?: string;
+  groupLabel?: string;
+  groupChip?: string;
+  groupBar?: string;
   totalAlertsCount: number;
   highSeverityCount: number;
   generatedAt: string;
@@ -36,6 +41,11 @@ interface NavbarProps {
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
+  appName = '',
+  pageTitle = '',
+  groupLabel = '',
+  groupChip = '',
+  groupBar = 'from-slate-400 to-slate-500',
   totalAlertsCount,
   highSeverityCount,
   generatedAt,
@@ -121,7 +131,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   const errorInfo = getErrorInfo();
 
   return (
-    <header className="sticky top-0 z-30 bg-white border-b border-slate-200 shadow-xs">
+    <header className="sticky top-0 z-30 bg-white/90 backdrop-blur border-b border-slate-200 shadow-xs">
+      <div className={`h-1 bg-gradient-to-r ${groupBar}`} />
       {/* 1. サンプルデータ表示中の常時バナー（要件3） */}
       {isSampleMode && (
         <div className="bg-amber-500 text-slate-900 px-4 h-8 flex items-center justify-between text-xs font-bold shadow-xs select-none">
@@ -219,7 +230,18 @@ export const Navbar: React.FC<NavbarProps> = ({
       )}
 
       {/* Main Filter Bar */}
-      <div className="px-4 sm:px-6 py-2.5 flex flex-wrap items-center justify-end gap-3">
+      <div className="px-4 sm:px-6 py-2 flex flex-wrap items-center justify-end gap-3">
+        {/* Left: ソフト名 › グループ › 今の画面 */}
+        <div className="flex items-center gap-2 min-w-0 mr-auto">
+          <span className="hidden md:inline text-xs font-black tracking-tight text-slate-400 whitespace-nowrap">{appName}</span>
+          {groupLabel && (
+            <>
+              <span className="hidden md:inline text-slate-300">›</span>
+              <span className={`rounded-full border px-2 py-0.5 text-[11px] font-bold whitespace-nowrap ${groupChip}`}>{groupLabel}</span>
+            </>
+          )}
+          {pageTitle && <span className="text-base font-black text-slate-900 truncate">{pageTitle}</span>}
+        </div>
         {/* Right: Status, Alerts Badge, Refresh, Settings */}
         <div className="flex items-center gap-2.5 shrink-0 ml-auto">
           {/* Alerts Badge Button */}
