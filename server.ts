@@ -6206,7 +6206,10 @@ const COUNTRY_CODES: [RegExp, string][] = [
 const countryCode = (v: string) => (/^[A-Z]{2}$/.test(String(v || '').trim()) ? String(v).trim() : COUNTRY_CODES.find(([re]) => re.test(String(v || '')))?.[1] || '');
 /** 英語住所を DHL の住所欄（45文字×3行・市区町村）に分ける。画面で直せる下書き */
 function splitEnglishAddress(addressEn: string, postal: string) {
+  // 郵便番号が別欄にないときは英語住所の中から拾う。末尾の「(Tokyo, Japan)」のような重複は外す
+  if (!String(postal || '').trim()) postal = String(addressEn || '').match(/\b\d{3}-\d{4}\b/)?.[0] || '';
   const parts = String(addressEn || '')
+    .replace(/\([^)]*\)\s*$/, '')
     .replace(/\s+/g, ' ')
     .split(',')
     .map((x) => x.trim())
