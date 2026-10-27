@@ -5,6 +5,7 @@ import { isShippingOrFee, openRakurakuWithCopiedId } from '../utils';
 import { isQuoteOrder } from '../utils/salesCalculations';
 import { getConfiguredUrls } from '../api';
 import { FlowSteps } from './flow/FlowSteps';
+import { useCoolFlags } from '../utils/coolFlags';
 import { ColorLegend } from './flow/ColorLegend';
 import { notifyDone, notifyError } from './flow/UndoToast';
 
@@ -67,6 +68,7 @@ export function UnorderedView({
   onNavigate?: (tab: string) => void;
 }) {
   const { rakurakuBaseUrl } = getConfiguredUrls();
+  const [coolFlags] = useCoolFlags();
   const [tab, setTab] = useState<Tab>('paid');
   const [q, setQ] = useState('');
   const [rep, setRep] = useState('all');
@@ -370,7 +372,10 @@ export function UnorderedView({
                     <div className="text-[10px] text-slate-400">{r.order.salesRep}</div>
                   </td>
                   <td className="px-2 py-1.5 font-semibold text-slate-800 max-w-56">
-                    <span className="line-clamp-2">{r.line.productName}</span>
+                    <span className="line-clamp-2">
+                      {coolFlags[r.line.productId] && <span className="mr-1 text-sky-600" title="クール便が必要">❄</span>}
+                      {r.line.productName}
+                    </span>
                   </td>
                   <td className="px-2 py-1.5 text-right font-mono font-bold whitespace-nowrap">
                     {r.need}

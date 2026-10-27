@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { ProductItem, Order } from '../types';
 import { fetchProductsMaster, saveLocalProducts, getLocalProducts } from '../api';
+import { useCoolFlags } from '../utils/coolFlags';
 import {
   Package,
   Search,
@@ -53,6 +54,8 @@ export const ProductMasterView: React.FC<ProductMasterViewProps> = ({
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [selectedSupplier, setSelectedSupplier] = useState<string>('all');
   const [selectedStatus, setSelectedStatus] = useState<string>('all');
+  const [coolFlags, setCool] = useCoolFlags();
+  const [coolOnly, setCoolOnly] = useState(false);
 
   // Modals & Drawer States
   const [isSchemaModalOpen, setIsSchemaModalOpen] = useState<boolean>(false);
@@ -182,6 +185,7 @@ export const ProductMasterView: React.FC<ProductMasterViewProps> = ({
       if (selectedCategory !== 'all' && p.category !== selectedCategory) return false;
       if (selectedSupplier !== 'all' && p.supplierName !== selectedSupplier) return false;
       if (selectedStatus !== 'all' && p.status !== selectedStatus) return false;
+      if (coolOnly && !coolFlags[p.productId]) return false;
 
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
@@ -195,7 +199,7 @@ export const ProductMasterView: React.FC<ProductMasterViewProps> = ({
 
       return true;
     });
-  }, [products, selectedCategory, selectedSupplier, selectedStatus, searchQuery]);
+  }, [products, selectedCategory, selectedSupplier, selectedStatus, searchQuery, coolOnly, coolFlags]);
 
   // CSVエクスポート
   const handleExportCsv = () => {
@@ -403,6 +407,12 @@ export const ProductMasterView: React.FC<ProductMasterViewProps> = ({
             ))}
           </select>
 
+          {/* クール便 */}
+          <label className={`flex items-center gap-1.5 text-xs font-bold rounded-lg border px-2.5 py-2 cursor-pointer ${coolOnly ? 'bg-sky-600 border-sky-600 text-white' : 'bg-sky-50 border-sky-200 text-sky-800'}`}>
+            <input type="checkbox" checked={coolOnly} onChange={(e) => setCoolOnly(e.target.checked)} className="accent-sky-600" />
+            ❄ クール便の商品だけ（{new Set(products.filter((p) => coolFlags[p.productId]).map((p) => p.productId)).size}）
+          </label>
+
           {/* ステータス */}
           <select
             value={selectedStatus}
@@ -426,6 +436,7 @@ export const ProductMasterView: React.FC<ProductMasterViewProps> = ({
               <tr>
                 <th className="py-3 px-3.5">楽楽ID</th>
                 <th className="py-3 px-3.5">商品名 / 規格</th>
+                <th className="py-3 px-3.5 text-center" title="クール便が必要な商品。押して切り替えます（チームで共有）">❄ クール</th>
                 <th className="py-3 px-3.5">カテゴリ</th>
                 <th className="py-3 px-3.5 text-right">標準販売単価</th>
                 <th className="py-3 px-3.5 text-right">仕入単価 (原価)</th>
@@ -459,6 +470,19 @@ export const ProductMasterView: React.FC<ProductMasterViewProps> = ({
                       <div className="text-[11px] text-slate-500 font-normal">
                         {p.spec}
                       </div>
+                    </td>
+                    <td className="py-3 px-3.5 text-center whitespace-nowrap">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setCool(p.productId, !coolFlags[p.productId]).catch((err) => setToastMessage(err.message));
+                        }}
+                        title={coolFlags[p.productId] ? 'クール便が必要（押すと「不要」にします）' : 'クール便は不要（押すと「要」にします）'}
+                        className={`rounded-full border px-2 py-0.5 text-[11px] font-bold transition ${coolFlags[p.productId] ? 'bg-sky-600 border-sky-600 text-white' : 'bg-white border-slate-200 text-slate-400 hover:border-sky-300 hover:text-sky-700'}`}
+                      >
+                        {coolFlags[p.productId] ? '❄ 要' : '不要'}
+                      </button>
                     </td>
                     <td className="py-3 px-3.5 whitespace-nowrap text-slate-600">
                       {p.category || '—'}

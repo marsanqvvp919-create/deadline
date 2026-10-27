@@ -38,7 +38,8 @@ interface StockRow {
 interface Instruction {
   id: string;
   orderId: string;
-  lines: { productName: string; qty: number }[];
+  lines: { productName: string; qty: number; cool?: boolean }[];
+  cool?: boolean;
   status: 'open' | 'shipped' | 'cancelled';
   memo: string;
   carrier: string;
@@ -273,7 +274,10 @@ function InstructionCard({ si, slug, onDone }: { si: Instruction; slug: string; 
     <div className={`rounded-xl border bg-white p-4 space-y-3 ${si.status === 'open' ? 'border-amber-300' : 'border-slate-200'}`}>
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
-          <div className="font-mono font-bold text-indigo-700">{si.id}</div>
+          <div className="font-mono font-bold text-indigo-700">
+            {si.id}
+            {si.cool && <span className="ml-2 rounded-full bg-sky-600 px-2 py-0.5 text-[11px] font-bold text-white">❄ クール便 / COOL</span>}
+          </div>
           <div className="text-[11px] text-slate-500">
             指示日 / Issued {fmt(si.createdAt)}・注文 / Order {si.orderId}
           </div>
@@ -305,7 +309,10 @@ function InstructionCard({ si, slug, onDone }: { si: Instruction; slug: string; 
         <tbody>
           {si.lines.map((l, i) => (
             <tr key={i} className="border-b border-slate-50">
-              <td className="py-1.5 font-semibold">{l.productName}</td>
+              <td className="py-1.5 font-semibold">
+                {l.cool && <span className="mr-1 text-sky-600" title="クール便 / Keep cold">❄</span>}
+                {l.productName}
+              </td>
               <td className="py-1.5 text-right font-mono font-bold">{l.qty}</td>
             </tr>
           ))}

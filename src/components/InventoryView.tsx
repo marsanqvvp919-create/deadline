@@ -4,6 +4,7 @@ import { Boxes, CheckCircle2, Copy, Check, ExternalLink, KeyRound, PackageCheck,
 import { PasswordChooser, passwordOk } from './ClinicPortalAccess';
 import { Order } from '../types';
 import { InvoicePdfButtons } from '../invoice/InvoiceDialog';
+import { useCoolFlags } from '../utils/coolFlags';
 import { DhlSettings, FedexSettings, ShipDocsDialog } from '../invoice/AwbDialog';
 import { FlowSteps } from './flow/FlowSteps';
 import { ColorLegend } from './flow/ColorLegend';
@@ -90,7 +91,8 @@ interface Instruction {
   warehouseName: string;
   orderId: string;
   clinicName: string;
-  lines: { productName: string; qty: number }[];
+  cool?: boolean;
+  lines: { productName: string; qty: number; cool?: boolean }[];
   status: 'open' | 'shipped' | 'cancelled';
   memo: string;
   carrier: string;
@@ -767,10 +769,11 @@ function InstructionBoard({ instructions, onSaved }: { instructions: Instruction
                   <div className="font-bold">
                     <span className="font-mono text-indigo-700">{i.id}</span>
                     <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5">{i.warehouseName}</span>
+                    {i.cool && <span className="ml-2 rounded-full bg-sky-600 px-2 py-0.5 text-[11px] text-white">❄ クール便</span>}
                     <span className="ml-2 text-sm">{i.clinicName}</span>
                     <span className="ml-2 font-normal text-slate-500">{i.orderId}</span>
                   </div>
-                  <div className="text-slate-600 mt-0.5">{i.lines.map((l: any) => `${i.orderId.includes(',') && l.orderId ? `[${l.orderId}] ` : ''}${l.productName} × ${l.qty}`).join('、')}</div>
+                  <div className="text-slate-600 mt-0.5">{i.lines.map((l: any) => `${l.cool ? '❄' : ''}${i.orderId.includes(',') && l.orderId ? `[${l.orderId}] ` : ''}${l.productName} × ${l.qty}`).join('、')}</div>
                 </div>
                 <div className="flex items-start gap-1.5">
                   {nx && 'label' in nx && (
@@ -926,6 +929,8 @@ const planLabel = (p: OrderPlan['plan']) =>
 /** 伝票1枚の引当（明細ごとの空き在庫と、案の倉庫を示す） */
 function OrderPlanCard({ op, onDone, onError }: { op: OrderPlan; onDone: () => void; onError: (m: string) => void }) {
   const [busy, setBusy] = useState(false);
+  const [coolFlags] = useCoolFlags();
+  const hasCool = op.lines.some((l) => coolFlags[l.productId]);
   const [single, setSingle] = useState<WarehouseId | ''>(op.plan.singleOptions[0] || '');
   const planned = (productId: string, w: WarehouseId) => op.plan.allocations.filter((a) => a.productId === productId && a.warehouse === w).reduce((n, a) => n + a.qty, 0);
   const missingOf = (productId: string) => op.plan.missing.find((m) => m.productId === productId)?.qty || 0;
@@ -957,6 +962,7 @@ function OrderPlanCard({ op, onDone, onError }: { op: OrderPlan; onDone: () => v
           <span className={`rounded px-1.5 py-0.5 ${op.paymentStatus === '入金済' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>{op.paymentStatus || '—'}</span>
           {op.latestDate && <span className={`rounded px-1.5 py-0.5 font-bold ${dl !== null && dl < 0 ? 'bg-rose-100 text-rose-700' : dl !== null && dl <= 7 ? 'bg-amber-100 text-amber-800' : 'text-slate-500'}`}>最長納期 {op.latestDate.slice(5)}{dl !== null && (dl < 0 ? `（${-dl}日超過）` : `（あと${dl}日）`)}</span>}
           {op.partlyAllocated && <span className="rounded bg-indigo-50 text-indigo-700 px-1.5 py-0.5">一部引当済み</span>}
+          {hasCool && <span className="rounded-full bg-sky-600 text-white px-2 py-0.5 font-bold">❄ クール便</span>}
         </div>
         <span className={`rounded-full border px-2.5 py-0.5 text-[11px] font-bold ${PLAN_STYLE[op.plan.type]}`}>{planLabel(op.plan)}</span>
       </div>
@@ -976,7 +982,10 @@ function OrderPlanCard({ op, onDone, onError }: { op: OrderPlan; onDone: () => v
         <tbody>
           {op.lines.map((l) => (
             <tr key={l.productId} className="border-t border-slate-50">
-              <td className="px-3 py-1.5 font-semibold text-slate-800 truncate" title={l.productName}>{l.productName}</td>
+              <td className="px-3 py-1.5 font-semibold text-slate-800 truncate" title={l.productName}>
+                {coolFlags[l.productId] && <span className="mr-1 text-sky-600" title="クール便が必要">❄</span>}
+                {l.productName}
+              </td>
               <td className="px-2 py-1.5 text-right font-mono font-bold">{l.need}</td>
               {WH_IDS.map((w) => {
                 const n = l.stock[w] || 0;

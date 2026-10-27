@@ -5021,6 +5021,7 @@ const stockList = (w: WarehouseId) =>
 // --- 社内の画面
 app.get('/api/inventory', async (_req, res) => {
   await loadInventory();
+  await loadProductFlags().catch(() => {});
   const inbound = Object.values(inv().inbound)
     .sort((a, b) => (b.poDate || '').localeCompare(a.poDate || '') || b.poId.localeCompare(a.poId))
     .map((r) => inboundView(r));
@@ -5313,6 +5314,8 @@ function instructionView(i: ShipInstruction, _forWarehouse = false) {
   return {
     ...i,
     delivery,
+    cool: i.lines.some((l) => isCoolProduct(l.productId)),
+    lines: i.lines.map((l) => ({ ...l, cool: isCoolProduct(l.productId) })),
     warehouseName: WAREHOUSES[i.warehouse],
     destination: {
       name: c?.clinicName || i.clinicName,
@@ -5451,6 +5454,63 @@ app.get('/api/inventory/flow', async (_req, res) => {
   });
 });
 
+// --- クール便の要・不要（商品ごと）。商品マスタの画面で切り替え、Cloud Storage の product-flags.json に保存する。
+// 最初の1回だけ、ボツリヌストキシン製剤・ヒアルロン酸溶解（ヒアルロニダーゼ）・ピーリング製剤・ビタミンCを「要」にする
+interface ProductFlags {
+  cool: Record<string, boolean>;
+  seededAt?: string;
+}
+const PRODUCT_FLAGS_OBJECT = 'product-flags.json';
+let productFlags: ProductFlags = { cool: {} };
+let productFlagsLoad: Promise<void> | null = null;
+const COOL_SEED_CATEGORIES = ['ボツリヌストキシン製剤', 'ヒアルロン酸溶解', 'ピーリング製剤'];
+const COOL_SEED_NAME = /botul|botox|botuliz|nabota|xeomin|dysport|meditox|neuronox|liztox|hutox|hitox|coretox|innotox|wondertox|toxta|rentox|relatox|ボトックス|ボツリヌス|hyaluronidase|ヒアルロニダーゼ|liporase|hyalase|hylenex|peel|ピール|ピーリング|vitamin\s*c\b|ビタミン\s*c/i;
+async function saveProductFlags() {
+  if (!CACHE_BUCKET) return;
+  await new Storage().bucket(CACHE_BUCKET).file(PRODUCT_FLAGS_OBJECT).save(JSON.stringify(productFlags), { contentType: 'application/json', resumable: false });
+}
+async function loadProductFlags() {
+  if (!productFlagsLoad) {
+    productFlagsLoad = (async () => {
+      if (!CACHE_BUCKET) return;
+      try {
+        const [buf] = await new Storage().bucket(CACHE_BUCKET).file(PRODUCT_FLAGS_OBJECT).download();
+        productFlags = { cool: {}, ...JSON.parse(buf.toString('utf-8')) };
+      } catch (e: any) {
+        if (e?.code !== 404) {
+          productFlagsLoad = null;
+          throw e;
+        }
+      }
+    })();
+  }
+  await productFlagsLoad;
+  // 商品マスタが読めたら、最初の1回だけ「要」の初期値を入れる
+  const products = (serverRakurakuStore.products || []) as any[];
+  if (!productFlags.seededAt && products.length) {
+    for (const p of products) {
+      if (!p.productId || p.productId in productFlags.cool) continue;
+      if (COOL_SEED_CATEGORIES.includes(String(p.category || '')) || COOL_SEED_NAME.test(String(p.productName || ''))) productFlags.cool[p.productId] = true;
+    }
+    productFlags.seededAt = new Date().toISOString();
+    await saveProductFlags().catch((e) => console.warn('[ProductFlags] save failed:', e?.message || e));
+  }
+}
+const isCoolProduct = (productId?: string) => !!(productId && productFlags.cool[productId]);
+
+app.get('/api/product-flags', async (_req, res) => {
+  await loadProductFlags();
+  res.json({ cool: Object.fromEntries(Object.entries(productFlags.cool).filter(([, v]) => v)), seededAt: productFlags.seededAt || null });
+});
+app.post('/api/product-flags/cool', async (req, res) => {
+  await loadProductFlags();
+  const productId = String(req.body?.productId || '').trim();
+  if (!productId) return res.status(400).json({ error: '商品IDがありません' });
+  productFlags.cool[productId] = !!req.body?.cool;
+  await saveProductFlags();
+  res.json({ ok: true, productId, cool: productFlags.cool[productId] });
+});
+
 // --- 漏れチェック：流れ（入金 → 未発注 → ベンダー出荷 → 入荷 → 引当 → 出荷指示 → 出荷 → クール伝票 → 追跡・到着）の
 // 段ごとに目安の日数を決め、過ぎても次に進んでいないものを拾う。楽楽販売・在庫・配送会社のデータから毎回計算する
 const LEAK_DAYS = { paidNotOrdered: 2, vendorNotShipped: 7, arrivedNotReceived: 2, reservedNoRequest: 2, docsNotMade: 2, notShipped: 2, coolAfterCustoms: 1, notDelivered: 7, rakurakuNotUpdated: 3 };
@@ -5549,6 +5609,12 @@ function leakChecks() {
   if (!isDemo()) {
     const ships = (serverRakurakuStore.shipments || []) as any[];
     const blank = (v: any) => !v || v === '—';
+    // クール対象の商品を含む出荷（出荷管理の明細の商品ID、なければ受注の明細で判定）
+    const coolShip = new Set<string>();
+    for (const x of ships) if (isCoolProduct(x.lineRef?.productId)) coolShip.add(x.shipmentId);
+    const orderCool = new Set(invOrders().filter((o) => (o.lines as any[]).some((l) => isCoolProduct(l.productId))).map((o) => o.orderId));
+    for (const x of ships) if (!x.lineRef?.productId && orderCool.has(x.orderId)) coolShip.add(x.shipmentId);
+    const isCoolShip = (x: any) => coolShip.has(x.shipmentId) || !blank(x.coolApplicationStatus);
     const clinicOf = (s: any) => (blank(s.customerName) ? invOrders().find((o) => o.orderId === s.orderId)?.customerName || '' : s.customerName);
     // 配達済み（楽楽販売の配達日・出荷状態、または追跡で配達完了）は対象外
     const tracked = (s: any) => [s.trackingNo, ...(s.extraTrackingNos || [])].map((n) => String(n || '').replace(/\D/g, '')).filter((d) => d.length >= 10);
@@ -5557,20 +5623,20 @@ function leakChecks() {
       ships.flatMap((s) => {
         const d = daysSince(blank(s.customsClearedDate) ? '' : s.customsClearedDate);
         // クール便の出荷（クール申請の欄が入っているもの）だけ
-        if (blank(s.coolApplicationStatus) || d === null || d < D.coolAfterCustoms || d > 30 || (s.domesticTrackingNos || []).length || (s.extraTrackingNos || []).length || !notDone(s)) return [];
+        if (!isCoolShip(s) || d === null || d < D.coolAfterCustoms || d > 30 || (s.domesticTrackingNos || []).length || (s.extraTrackingNos || []).length || !notDone(s)) return [];
         return [{ id: s.shipmentId, orderId: s.orderId, clinic: clinicOf(s), text: `${s.shipmentId} 通関 ${s.customsClearedDate}${blank(s.trackingNo) ? '' : `・国際 ${s.trackingNo}`}・伝票 ${s.slipStatus || '—'}`, days: d }];
       }));
-    add('cool_not_arranged', 'cool', 'クール手配が終わっていない', 'クール申請・委任状・伝票のどれかが「未」のまま（出荷から30日以内で、配達前のもの）', 'arrival_tracking',
+    add('cool_not_arranged', 'cool', 'クール手配が終わっていない', 'クール対象の商品があるのにクール手配がない、またはクール申請・委任状・伝票のどれかが「未」（出荷から30日以内・配達前）', 'arrival_tracking',
       ships
         .filter((s) => {
           const d = daysSince(blank(s.warehouseShippedDate) ? (blank(s.shippedDate) ? '' : s.shippedDate) : s.warehouseShippedDate);
-          return s.isCoolMissing && d !== null && d <= 30 && notDone(s);
+          return (s.isCoolMissing || (coolShip.has(s.shipmentId) && blank(s.coolApplicationStatus))) && d !== null && d <= 30 && notDone(s);
         })
         .map((s) => ({
         id: s.shipmentId,
         orderId: s.orderId,
         clinic: clinicOf(s),
-        text: `${s.shipmentId} 申請 ${s.coolApplicationStatus}／委任状 ${s.powerOfAttorneyStatus}／伝票 ${s.slipStatus}`,
+        text: blank(s.coolApplicationStatus) ? `${s.shipmentId} クール対象の商品あり・クール手配の記録なし` : `${s.shipmentId} 申請 ${s.coolApplicationStatus}／委任状 ${s.powerOfAttorneyStatus}／伝票 ${s.slipStatus}`,
         days: daysSince(blank(s.warehouseShippedDate) ? s.shippedDate : s.warehouseShippedDate),
       })));
   }
@@ -5605,6 +5671,7 @@ function leakChecks() {
 }
 app.get('/api/inventory/leaks', async (_req, res) => {
   await loadInventory();
+  await loadProductFlags();
   res.json(leakChecks());
 });
 
@@ -6791,6 +6858,7 @@ app.post('/api/warehouse/logout', (_req, res) => {
 });
 app.get('/api/warehouse/data', async (req, res) => {
   const w = await warehouseFromRequest(req);
+  await loadProductFlags().catch(() => {});
   if (!w) return res.status(401).json({ error: 'login_required' });
   const inbound = Object.values(inv().inbound)
     .filter((r) => r.warehouse === w && !r.excluded && !r.cancelled)
