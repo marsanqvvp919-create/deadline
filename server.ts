@@ -5441,11 +5441,14 @@ function leakChecks() {
   const add = (id: string, step: LeakStep, title: string, hint: string, tab: string, items: LeakItem[]) => rules.push({ id, step, title, hint, tab, items: items.sort((a, b) => (b.days ?? 0) - (a.days ?? 0)) });
   const active = invOrders().filter((o) => !/見積|出荷済|納品済|キャンセル/.test(String(o.status || '')) && o.orderState === '進行中');
   const D = LEAK_DAYS;
+  // 在庫から出せる入金済の伝票（5で「確保していない」として出すので、1の「発注していない」からは外す）
+  const allocatablePaid = orderPlans().filter((p: any) => p.paymentStatus === '入金済' && p.plan.type !== 'none');
+  const allocatableIds = new Set(allocatablePaid.map((p: any) => p.orderId));
 
   // 1. 入金済なのに未発注（在庫からの確保もしていない）
-  add('paid_not_ordered', 'unordered', '入金済なのに発注していない', `入金から${D.paidNotOrdered}日以上たっても未発注のまま（在庫からの確保もなし）`, 'procurement',
+  add('paid_not_ordered', 'unordered', '入金済なのに発注していない', `入金から${D.paidNotOrdered}日以上たっても未発注のまま（在庫でも出せないもの）`, 'procurement',
     active.flatMap((o) => {
-      if (o.paymentStatus !== '入金済') return [];
+      if (o.paymentStatus !== '入金済' || allocatableIds.has(o.orderId)) return [];
       const lines = (o.lines as any[]).filter((l) => l.stage === '未発注' && !isNonProductLine(l.productName, l.productId) && l.quantity - (l.allocatedQty || 0) > 0);
       const d = daysSince(o.paymentDate || o.orderDate);
       if (!lines.length || d === null || d < D.paidNotOrdered) return [];
@@ -5484,9 +5487,7 @@ function leakChecks() {
 
   // 5. 在庫があるのに確保していない入金済の伝票
   add('stock_not_allocated', 'allocate', '在庫があるのに確保していない', '入金済で、倉庫の在庫から出せる伝票', 'shipping_instructions',
-    orderPlans()
-      .filter((p: any) => p.paymentStatus === '入金済' && p.plan.type !== 'none')
-      .map((p: any) => ({ id: p.orderId, orderId: p.orderId, clinic: p.clinicName, text: p.lines.map((l: any) => `${l.productName} ${l.need}`).join('、'), days: daysSince(p.orderDate) })));
+    allocatablePaid.map((p: any) => ({ id: p.orderId, orderId: p.orderId, clinic: p.clinicName, text: p.lines.map((l: any) => `${l.productName} ${l.need}`).join('、'), days: daysSince(p.orderDate) })));
   // 6. 確保したのに倉庫へ出荷依頼していない
   const reserved = new Map<string, Allocation[]>();
   for (const a of inv().allocations.filter((x) => x.status === 'reserved')) reserved.set(a.orderId, [...(reserved.get(a.orderId) || []), a]);
@@ -5518,18 +5519,26 @@ function leakChecks() {
   if (!isDemo()) {
     const ships = (serverRakurakuStore.shipments || []) as any[];
     const blank = (v: any) => !v || v === '—';
-    const notDone = (s: any) => blank(s.deliveredDate) && !/完了|キャンセル|納品/.test(String(s.shipStatus || ''));
-    add('cool_no_slip', 'cool', '通関後にクール伝票がない', `通関が済んでから${D.coolAfterCustoms}日以上、佐川のクール伝票（国内追跡番号）が入っていない`, 'arrival_tracking',
+    const clinicOf = (s: any) => (blank(s.customerName) ? invOrders().find((o) => o.orderId === s.orderId)?.customerName || '' : s.customerName);
+    // 配達済み（楽楽販売の配達日・出荷状態、または追跡で配達完了）は対象外
+    const tracked = (s: any) => [s.trackingNo, ...(s.extraTrackingNos || [])].map((n) => String(n || '').replace(/\D/g, '')).filter((d) => d.length >= 10);
+    const notDone = (s: any) => blank(s.deliveredDate) && !/完了|キャンセル|納品/.test(String(s.shipStatus || '')) && !tracked(s).some((d) => resolvedStatusForClient(d)?.status === 'delivered');
+    add('cool_no_slip', 'cool', '通関後にクール伝票がない', `通関が済んでから${D.coolAfterCustoms}日以上、佐川のクール伝票（国内追跡番号）が入っていない（通関から30日以内）`, 'arrival_tracking',
       ships.flatMap((s) => {
         const d = daysSince(blank(s.customsClearedDate) ? '' : s.customsClearedDate);
-        if (!notDone(s) || d === null || d < D.coolAfterCustoms || (s.domesticTrackingNos || []).length) return [];
-        return [{ id: s.shipmentId, orderId: s.orderId, clinic: s.customerName, text: `${s.shipmentId} 通関 ${s.customsClearedDate}${blank(s.trackingNo) ? '' : `・国際 ${s.trackingNo}`}`, days: d }];
+        if (d === null || d < D.coolAfterCustoms || d > 30 || (s.domesticTrackingNos || []).length || (s.extraTrackingNos || []).length || !notDone(s)) return [];
+        return [{ id: s.shipmentId, orderId: s.orderId, clinic: clinicOf(s), text: `${s.shipmentId} 通関 ${s.customsClearedDate}${blank(s.trackingNo) ? '' : `・国際 ${s.trackingNo}`}`, days: d }];
       }));
-    add('cool_not_arranged', 'cool', 'クール手配が終わっていない', 'クール申請・委任状・伝票のどれかが「未」のまま（配達前のもの）', 'arrival_tracking',
-      ships.filter((s) => s.isCoolMissing && notDone(s) && !blank(s.shippedDate === '—' ? s.warehouseShippedDate : s.shippedDate)).map((s) => ({
+    add('cool_not_arranged', 'cool', 'クール手配が終わっていない', 'クール申請・委任状・伝票のどれかが「未」のまま（出荷から30日以内で、配達前のもの）', 'arrival_tracking',
+      ships
+        .filter((s) => {
+          const d = daysSince(blank(s.warehouseShippedDate) ? (blank(s.shippedDate) ? '' : s.shippedDate) : s.warehouseShippedDate);
+          return s.isCoolMissing && d !== null && d <= 30 && notDone(s);
+        })
+        .map((s) => ({
         id: s.shipmentId,
         orderId: s.orderId,
-        clinic: s.customerName,
+        clinic: clinicOf(s),
         text: `${s.shipmentId} 申請 ${s.coolApplicationStatus}／委任状 ${s.powerOfAttorneyStatus}／伝票 ${s.slipStatus}`,
         days: daysSince(blank(s.warehouseShippedDate) ? s.shippedDate : s.warehouseShippedDate),
       })));
