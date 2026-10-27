@@ -39,6 +39,37 @@ export const LEAK_STEPS: { id: string; label: string }[] = [
   { id: 'deliver', label: '追跡・到着' },
 ];
 
+/** 佐川のクール伝票番号を入れて、楽楽販売の「国内追跡番号」に書く */
+function CoolSlipInput({ shipmentId, onDone }: { shipmentId: string; onDone: () => void }) {
+  const [no, setNo] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ text: string; error?: boolean } | null>(null);
+  const save = async () => {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const r = await fetch('/api/rakuraku/domestic-tracking', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ shipmentId, domesticTrackingNo: no }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || `エラー（${r.status}）`);
+      setMsg({ text: `楽楽販売に ${j.domesticTrackingNo} を書きました` });
+      setTimeout(onDone, 1500);
+    } catch (e: any) {
+      setMsg({ text: e.message, error: true });
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <span className="flex flex-wrap items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+      <input value={no} onChange={(e) => setNo(e.target.value)} placeholder="佐川の伝票番号（12桁）" inputMode="numeric" className="w-44 rounded border border-slate-300 px-2 py-0.5 font-mono" />
+      <button disabled={busy || no.replace(/\D/g, '').length !== 12} onClick={save} className="rounded bg-amber-500 hover:bg-amber-600 px-2.5 py-0.5 font-bold text-white disabled:opacity-40">
+        {busy ? '書き込み中…' : '楽楽販売に登録'}
+      </button>
+      {msg && <span className={msg.error ? 'text-rose-600' : 'text-emerald-700 font-bold'}>{msg.text}</span>}
+    </span>
+  );
+}
+
 export function LeakCheckView({ onNavigate }: { onNavigate: (tab: string) => void }) {
   const [data, setData] = useState<Leaks | null>(null);
   const [error, setError] = useState('');
@@ -102,7 +133,20 @@ export function LeakCheckView({ onNavigate }: { onNavigate: (tab: string) => voi
                       </div>
                       {r.items.length > 0 && (
                         <div className="mt-1.5 ml-6 space-y-1">
-                          {shown.map((it) => (
+                          {shown.map((it) =>
+                            r.step === 'cool' ? (
+                              <div key={it.id} className="grid grid-cols-[6rem_minmax(0,14rem)_minmax(0,1fr)_4.5rem] items-center gap-2 rounded-lg px-2 py-1">
+                                <span className="font-mono font-bold text-indigo-700 truncate">{it.orderId || '—'}</span>
+                                <span className="font-semibold text-slate-800 truncate">{it.clinic}</span>
+                                <span className="flex flex-wrap items-center gap-x-3 gap-y-1 min-w-0">
+                                  <span className="text-slate-600 truncate" title={it.text}>
+                                    {it.text}
+                                  </span>
+                                  <CoolSlipInput shipmentId={it.id} onDone={load} />
+                                </span>
+                                <span className={`text-right font-mono font-bold ${it.days !== null && it.days >= 7 ? 'text-rose-600' : 'text-amber-700'}`}>{it.days === null ? '—' : `${it.days}日`}</span>
+                              </div>
+                            ) : (
                             <button key={it.id} onClick={() => onNavigate(r.tab)} className="w-full grid grid-cols-[6rem_minmax(0,14rem)_minmax(0,1fr)_4.5rem_1rem] items-center gap-2 rounded-lg px-2 py-1 text-left hover:bg-slate-50">
                               <span className="font-mono font-bold text-indigo-700 truncate">{it.orderId || '—'}</span>
                               <span className="font-semibold text-slate-800 truncate">{it.clinic}</span>
@@ -112,7 +156,8 @@ export function LeakCheckView({ onNavigate }: { onNavigate: (tab: string) => voi
                               <span className={`text-right font-mono font-bold ${it.days !== null && it.days >= 7 ? 'text-rose-600' : 'text-amber-700'}`}>{it.days === null ? '—' : `${it.days}日`}</span>
                               <ChevronRight className="w-4 h-4 text-slate-300" />
                             </button>
-                          ))}
+                            )
+                          )}
                           {r.items.length > 8 && (
                             <button onClick={() => setOpen({ ...open, [r.id]: !open[r.id] })} className="ml-2 text-[11px] font-bold text-indigo-700">
                               {open[r.id] ? '少なく表示' : `ほか${r.items.length - 8}件を表示`}

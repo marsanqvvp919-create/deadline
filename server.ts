@@ -2482,6 +2482,37 @@ async function writeTrackingSplit(rows: string[][], source: string) {
   return results;
 }
 
+// 佐川のクール伝票（国内追跡番号）をこのシステムで入力し、楽楽販売の出荷管理「国内追跡番号」に書く（インポート 100758）。
+// 国際追跡番号の欄は今の値をそのまま送る（空にしない）。人が1件ずつ入力したときだけ書く
+app.post('/api/rakuraku/domestic-tracking', async (req, res) => {
+  const shipmentId = String(req.body?.shipmentId || '').trim();
+  const raw = String(req.body?.domesticTrackingNo || '').trim();
+  const nums = parseTrackingNumbers(raw);
+  const rows = (serverRakurakuStore.shipments || []).filter((x: any) => x.shipmentId === shipmentId);
+  if (!rows.length) return res.status(404).json({ error: `出荷 ${shipmentId} が見つかりません（楽楽販売の同期を待ってから試してください）` });
+  if (!nums.length || nums.some((d) => d.length !== 12)) return res.status(400).json({ error: '佐川の伝票番号（12桁の数字）を入れてください' });
+  const cur = rows[0];
+  if (String(cur.domesticTrackingNo || '').trim()) return res.status(400).json({ error: `この出荷にはすでに国内追跡番号 ${cur.domesticTrackingNo} が入っています（楽楽販売で直してください）` });
+  const value = nums.map((d) => d.replace(/^(\d{4})(\d{4})(\d{4})$/, '$1-$2-$3')).join(' ');
+  const row = [shipmentId, String(cur.internationalTrackingNo || '').trim(), value];
+  try {
+    const r = await importCsvToRakuraku(toCsv(TRACKING_SPLIT_COLUMNS, [row]), TRACKING_SPLIT_IMPORT_ID, 'domestic_tracking_import.csv');
+    trackingSplitLog.unshift({ at: new Date().toISOString(), source: 'クール伝票の入力', rows: 1, results: [{ rows: 1, ...r, firstId: shipmentId, lastId: shipmentId }] });
+    trackingSplitLog = trackingSplitLog.slice(0, 20);
+    if (r.failureCount > 0 || r.succeedCount === 0) return res.status(400).json({ error: `楽楽販売に書き込めませんでした（成功 ${r.succeedCount}・失敗 ${r.failureCount}・${r.status}）` });
+    // 次の同期を待たずに反映する（漏れチェック・追跡にすぐ出す）
+    for (const x of rows) {
+      x.domesticTrackingNo = value;
+      x.domesticTrackingNos = nums;
+      x.extraTrackingNos = Array.from(new Set([...(x.extraTrackingNos || []), ...nums]));
+    }
+    console.log('[Domestic Tracking] written', shipmentId, value);
+    res.json({ ok: true, shipmentId, domesticTrackingNo: value });
+  } catch (e: any) {
+    res.status(502).json({ error: `楽楽販売への書き込みでエラー：${e?.message || JSON.stringify(e?.json || e).slice(0, 300)}` });
+  }
+});
+
 // 振り分けを楽楽販売に書き込む（limit で件数を絞れる。ids で出荷IDを指定もできる）。
 // manualRows：崩れた番号を調べて直したもの [出荷ID, 国際追跡番号, 国内追跡番号]（2つの欄が空の出荷だけ書く）
 app.post('/api/rakuraku/split-tracking', async (req, res) => {
