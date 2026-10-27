@@ -201,6 +201,27 @@ export const ProductMasterView: React.FC<ProductMasterViewProps> = ({
     });
   }, [products, selectedCategory, selectedSupplier, selectedStatus, searchQuery, coolOnly, coolFlags]);
 
+  // 同じ商品IDの行（仕入先ごとに楽楽販売の商品マスタに登録されている）を1行にまとめ、中で仕入先を分ける
+  const groupedProducts = useMemo(() => {
+    const map = new Map<string, ProductItem[]>();
+    for (const p of filteredProducts) {
+      const list = map.get(p.productId) || [];
+      // 仕入先・仕入単価・通貨がまったく同じ行は1つにする
+      if (!list.some((x) => x.supplierName === p.supplierName && x.costPrice === p.costPrice && x.costCurrency === p.costCurrency)) list.push(p);
+      map.set(p.productId, list);
+    }
+    return Array.from(map.values()).map((items) => ({ main: items.find((x) => x.status === '取扱中') || items[0], items }));
+  }, [filteredProducts]);
+  const uniqueCount = (list: ProductItem[]) => new Set(list.map((p) => p.productId)).size;
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const toggleExpand = (id: string) =>
+    setExpanded((cur) => {
+      const n = new Set(cur);
+      n.has(id) ? n.delete(id) : n.add(id);
+      return n;
+    });
+  const costText = (p: ProductItem) => (p.costCurrency && p.costCurrency !== 'JPY' ? `${p.costPrice.toLocaleString()} ${p.costCurrency}` : `¥${p.costPrice.toLocaleString()}`);
+
   // CSVエクスポート
   const handleExportCsv = () => {
     const headers = ['商品ID', '商品名', 'カテゴリ', '規格', '標準販売単価', '仕入単価', '通貨', '仕入先名', '製造国', '下限納期', '上限納期', 'ステータス', '備考'];
@@ -310,7 +331,7 @@ export const ProductMasterView: React.FC<ProductMasterViewProps> = ({
             <span className="text-slate-300">|</span>
             <span className="text-slate-500">最終更新: {lastSyncTime ? formatDateTime(lastSyncTime) : '—'}</span>
             <span className="text-slate-300">|</span>
-            <span className="font-semibold text-slate-700">登録品目数: {products.length} 品目</span>
+            <span className="font-semibold text-slate-700">登録品目数: {uniqueCount(products)} 品目（仕入先ごとの登録 {products.length} 行）</span>
           </div>
 
           {syncError && (
@@ -333,7 +354,7 @@ export const ProductMasterView: React.FC<ProductMasterViewProps> = ({
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs">
           <span className="text-xs font-medium text-slate-500 block">全登録商品数</span>
           <div className="mt-1 flex items-baseline gap-2">
-            <span className="text-2xl font-bold text-slate-900 font-mono">{products.length}</span>
+            <span className="text-2xl font-bold text-slate-900 font-mono">{uniqueCount(products)}</span>
             <span className="text-xs text-slate-500">品目</span>
           </div>
         </div>
@@ -362,7 +383,7 @@ export const ProductMasterView: React.FC<ProductMasterViewProps> = ({
           <span className="text-xs font-medium text-slate-500 block">仕入先が未入力</span>
           <div className="mt-1 flex items-baseline gap-2">
             <span className="text-2xl font-bold text-amber-600 font-mono">
-              {products.filter((p) => !p.supplierName).length}
+              {uniqueCount(products.filter((p) => !products.some((x) => x.productId === p.productId && x.supplierName)))}
             </span>
             <span className="text-xs text-slate-500">品目（楽楽販売で入力すると発注先がわかります）</span>
           </div>
@@ -450,14 +471,18 @@ export const ProductMasterView: React.FC<ProductMasterViewProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-slate-800">
-              {filteredProducts.map((p, idx) => {
+              {groupedProducts.map(({ main: p, items }, idx) => {
                 const stat = statOf(p);
                 const marginRate = marginOf(p);
+                const multi = items.length > 1;
+                const open = expanded.has(p.productId);
+                const costs = items.map((x) => x.costPrice).filter((v) => v > 0);
+                const sameCurrency = items.every((x) => (x.costCurrency || 'JPY') === (p.costCurrency || 'JPY'));
 
                 return (
+                  <React.Fragment key={`${p.productId}_${idx}`}>
                   <tr
-                    key={`${p.productId}_${idx}`}
-                    className="hover:bg-blue-50/40 transition cursor-pointer group"
+                    className={`hover:bg-blue-50/40 transition cursor-pointer group ${open ? 'bg-blue-50/40' : ''}`}
                     onClick={() => setSelectedProduct(p)}
                   >
                     <td className="py-3 px-3.5 font-mono font-bold text-blue-700 whitespace-nowrap">
@@ -491,15 +516,31 @@ export const ProductMasterView: React.FC<ProductMasterViewProps> = ({
                       ¥{p.standardPrice.toLocaleString()}
                     </td>
                     <td className="py-3 px-3.5 text-right font-mono text-slate-600 whitespace-nowrap">
-                      {p.costCurrency && p.costCurrency !== 'JPY'
-                        ? `${p.costPrice.toLocaleString()} ${p.costCurrency}`
-                        : `¥${p.costPrice.toLocaleString()}`}
+                      {multi && sameCurrency && costs.length > 1 && Math.min(...costs) !== Math.max(...costs)
+                        ? `${costText({ ...p, costPrice: Math.min(...costs) })}〜${Math.max(...costs).toLocaleString()}`
+                        : costText(p)}
                     </td>
                     <td className="py-3 px-3.5 text-right font-mono font-semibold text-emerald-700 whitespace-nowrap">
                       {marginRate !== null ? `${marginRate}%` : <span className="text-slate-400 font-normal">—</span>}
                     </td>
                     <td className="py-3 px-3.5 whitespace-nowrap text-slate-700">
-                      {p.supplierName || <span className="text-amber-700">未入力</span>}
+                      {multi ? (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleExpand(p.productId);
+                          }}
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[11px] font-bold text-indigo-800 hover:bg-indigo-100"
+                          title="仕入先ごとの単価・納期を見る"
+                        >
+                          仕入先 {items.length}社
+                          <span className="font-normal text-indigo-600 max-w-40 truncate">{items.map((x) => x.supplierName || '未入力').join('・')}</span>
+                          <ChevronRight className={`w-3.5 h-3.5 transition ${open ? 'rotate-90' : ''}`} />
+                        </button>
+                      ) : (
+                        p.supplierName || <span className="text-amber-700">未入力</span>
+                      )}
                     </td>
                     <td className="py-3 px-3.5 whitespace-nowrap text-slate-600">
                       {p.countryOfOrigin || '—'}
@@ -548,6 +589,43 @@ export const ProductMasterView: React.FC<ProductMasterViewProps> = ({
                       </div>
                     </td>
                   </tr>
+                  {multi && open && (
+                    <tr className="bg-indigo-50/40">
+                      <td />
+                      <td colSpan={12} className="px-3.5 pb-3 pt-1">
+                        <table className="w-full text-[11px] rounded-lg overflow-hidden border border-indigo-100 bg-white">
+                          <thead className="bg-indigo-50 text-indigo-800">
+                            <tr>
+                              <th className="px-2 py-1 text-left">仕入先</th>
+                              <th className="px-2 py-1 text-right">仕入単価</th>
+                              <th className="px-2 py-1 text-right">粗利率</th>
+                              <th className="px-2 py-1 text-left">製造国</th>
+                              <th className="px-2 py-1 text-left">納期</th>
+                              <th className="px-2 py-1 text-left">状況</th>
+                              <th className="px-2 py-1 text-left">メモ</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {items.map((x, j) => {
+                              const m = marginOf(x);
+                              return (
+                                <tr key={j} className="hover:bg-slate-50 cursor-pointer" onClick={() => setSelectedProduct(x)}>
+                                  <td className="px-2 py-1 font-bold text-slate-800">{x.supplierName || <span className="text-amber-700">未入力</span>}</td>
+                                  <td className="px-2 py-1 text-right font-mono">{costText(x)}</td>
+                                  <td className="px-2 py-1 text-right font-mono text-emerald-700">{m !== null ? `${m}%` : '—'}</td>
+                                  <td className="px-2 py-1">{x.countryOfOrigin || '—'}</td>
+                                  <td className="px-2 py-1 font-mono">{leadTimeText(x)}</td>
+                                  <td className="px-2 py-1">{x.status || '—'}</td>
+                                  <td className="px-2 py-1 text-slate-500 truncate max-w-60">{x.memo || ''}</td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </td>
+                    </tr>
+                  )}
+                  </React.Fragment>
                 );
               })}
             </tbody>
