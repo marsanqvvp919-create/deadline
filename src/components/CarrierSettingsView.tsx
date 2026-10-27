@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { CheckCircle2, AlertCircle, KeyRound, Truck } from 'lucide-react';
-import { DhlSettings } from '../invoice/AwbDialog';
+import { DhlSettings, FedexSettings } from '../invoice/AwbDialog';
 
 // 配送会社（FedEx・DHL）の追跡APIの認証情報を入力する画面。
 // 値はサーバー（Cloud Storage）に保存し、保存後は画面に表示しない。保存には管理用パスコードが必要。
@@ -125,6 +125,7 @@ export const CarrierSettingsView: React.FC = () => {
         <div className="text-sm font-bold text-slate-900">送り状（AWB）の作成</div>
         <p className="text-xs text-slate-500">「引当・出荷指示」で送り状を作るときに使います。下の「追跡」の設定とは別のキーです。</p>
         <DhlSettings />
+        <FedexSettings />
       </div>
       <div className="text-sm font-bold text-slate-900 pt-2">配送状況の追跡</div>
       <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-2">

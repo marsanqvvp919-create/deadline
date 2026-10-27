@@ -2,8 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { demoHeaders } from '../utils/demo';
 import { Loader2, Plane, Settings, X } from 'lucide-react';
 
-// AWB（航空貨物の送り状）。DHL Express は MyDHL API で発行してラベルPDFを保存する。
-// API の登録がない間・FedEx などは、AWB番号を手入力する
+// AWB（航空貨物の送り状）。DHL Express は MyDHL API、FedEx は Ship API で発行してラベルPDFを保存する。
+// API の登録がない間・ほかの配送会社は、AWB番号を手入力する
 
 async function api(path: string, init?: RequestInit) {
   const r = await fetch(path, { ...init, headers: { 'Content-Type': 'application/json', ...demoHeaders(), ...(init?.headers || {}) } });
@@ -99,9 +99,77 @@ export function DhlSettings({ onClose }: { onClose?: () => void }) {
   );
 }
 
+export function FedexSettings({ onClose }: { onClose?: () => void }) {
+  const [cur, setCur] = useState<any>(null);
+  const [form, setForm] = useState({ apiKey: '', secretKey: '', accountNumber: '', env: 'test' });
+  const [msg, setMsg] = useState<{ text: string; error?: boolean } | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    api('/api/awb/settings')
+      .then((j) => {
+        setCur(j.fedex);
+        if (j.fedex?.configured) setForm((f) => ({ ...f, env: j.fedex.env }));
+      })
+      .catch((e) => setMsg({ text: e.message, error: true }));
+  }, []);
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-3 text-xs">
+      <div className="flex items-center justify-between">
+        <span className="font-bold text-sm text-slate-900 flex items-center gap-1.5">
+          <Settings className="w-4 h-4" />
+          FedEx（Ship API）の登録
+        </span>
+        {onClose && (
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-700" aria-label="閉じる">
+            <X className="w-4 h-4" />
+          </button>
+        )}
+      </div>
+      <p className="text-slate-500">
+        FedEx Developer Portal のプロジェクトの API Key・Secret Key と、FedEx口座番号（9桁）を入れます。テスト用のキーは「テスト」、本番用のキーは「本番」を選んでください。保存するときにFedExへ接続して確かめます。
+        {cur?.configured && ` 登録済み：API Key ${cur.apiKey}・口座 ${cur.accountNumber}・${cur.env === 'production' ? '本番' : 'テスト'}`}
+      </p>
+      <div className="grid sm:grid-cols-2 gap-2">
+        <input value={form.apiKey} onChange={(e) => setForm({ ...form, apiKey: e.target.value })} placeholder={cur?.configured ? 'API Key（変えるときだけ）' : 'API Key'} className="rounded border border-slate-300 px-2 py-1.5 font-mono" autoComplete="off" />
+        <input type="password" value={form.secretKey} onChange={(e) => setForm({ ...form, secretKey: e.target.value })} placeholder={cur?.configured ? 'Secret Key（変えるときだけ）' : 'Secret Key'} className="rounded border border-slate-300 px-2 py-1.5 font-mono" autoComplete="new-password" />
+        <input value={form.accountNumber} onChange={(e) => setForm({ ...form, accountNumber: e.target.value })} placeholder="FedEx口座番号" className="rounded border border-slate-300 px-2 py-1.5 font-mono" autoComplete="off" />
+        <select value={form.env} onChange={(e) => setForm({ ...form, env: e.target.value })} className="rounded border border-slate-300 px-2 py-1.5">
+          <option value="test">テスト（実際の発送にはならない）</option>
+          <option value="production">本番</option>
+        </select>
+      </div>
+      <div className="flex items-center gap-3">
+        <button
+          disabled={busy}
+          onClick={() => {
+            setBusy(true);
+            setMsg(null);
+            api('/api/awb/settings', { method: 'POST', body: JSON.stringify({ fedex: form }) })
+              .then(() => api('/api/awb/settings'))
+              .then((j) => {
+                setCur(j.fedex);
+                setForm((f) => ({ ...f, apiKey: '', secretKey: '' }));
+                setMsg({ text: 'FedExに接続できました。保存しました' });
+              })
+              .catch((e) => setMsg({ text: e.message, error: true }))
+              .finally(() => setBusy(false));
+          }}
+          className="inline-flex items-center gap-1 rounded bg-slate-900 text-white px-3 py-1.5 font-bold disabled:opacity-50"
+        >
+          {busy && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+          保存
+        </button>
+        {msg && <span className={msg.error ? 'text-rose-600' : 'text-emerald-700 font-bold'}>{msg.text}</span>}
+      </div>
+    </div>
+  );
+}
+
 export function AwbDialog({ instructionId, onClose, onDone }: { instructionId: string; onClose: () => void; onDone: () => void }) {
   const [draft, setDraft] = useState<any>(null);
   const [dhlConfigured, setDhlConfigured] = useState(false);
+  const [fedexConfigured, setFedexConfigured] = useState(false);
+  const [carrier, setCarrier] = useState<'DHL' | 'FedEx'>('DHL');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [manual, setManual] = useState({ carrier: 'DHL', awbNo: '' });
@@ -112,6 +180,8 @@ export function AwbDialog({ instructionId, onClose, onDone }: { instructionId: s
       .then((j) => {
         setDraft(j.draft);
         setDhlConfigured(j.dhlConfigured);
+        setFedexConfigured(j.fedexConfigured);
+        if (!j.dhlConfigured && j.fedexConfigured) setCarrier('FedEx');
       })
       .catch((e) => setError(e.message));
   }, [instructionId]);
@@ -205,20 +275,29 @@ export function AwbDialog({ instructionId, onClose, onDone }: { instructionId: s
             </table>
 
             <div className="rounded-xl border-2 border-amber-300 bg-amber-50 p-3 space-y-2 text-xs">
-              <div className="font-bold text-amber-900">DHL Express で発行（MyDHL API）</div>
-              {dhlConfigured ? (
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="font-bold text-amber-900 mr-1">発行する配送会社</span>
+                {(['DHL', 'FedEx'] as const).map((c) => (
+                  <button key={c} onClick={() => setCarrier(c)} className={`rounded-lg border px-3 py-1 font-bold ${carrier === c ? 'bg-amber-600 border-amber-600 text-white' : 'bg-white border-amber-300 text-amber-900'}`}>
+                    {c === 'DHL' ? 'DHL Express' : 'FedEx'}
+                    {!(c === 'DHL' ? dhlConfigured : fedexConfigured) && '（未登録）'}
+                  </button>
+                ))}
+              </div>
+              {(carrier === 'DHL' ? dhlConfigured : fedexConfigured) ? (
                 <div className="flex flex-wrap items-center gap-2">
                   <label className="flex items-center gap-1">
                     発送予定日
                     <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="rounded border border-slate-300 px-2 py-1" />
                   </label>
-                  <button disabled={busy} onClick={() => run(() => api(`/api/awb/create/${instructionId}`, { method: 'POST', body: JSON.stringify({ draft: { ...draft, date } }) }))} className="inline-flex items-center gap-1.5 rounded-lg bg-amber-600 text-white px-4 py-2 text-sm font-bold disabled:opacity-50">
+                  <button disabled={busy} onClick={() => run(() => api(`/api/awb/create/${instructionId}`, { method: 'POST', body: JSON.stringify({ carrier, draft: { ...draft, date } }) }))} className="inline-flex items-center gap-1.5 rounded-lg bg-amber-600 text-white px-4 py-2 text-sm font-bold disabled:opacity-50">
                     {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plane className="w-4 h-4" />}
-                    DHLでAWBを発行してラベルを作る
+                    {carrier}でAWBを発行してラベルを作る
                   </button>
+                  {carrier === 'FedEx' && <span className="text-amber-800">FedEx International Priority・送料は自社口座、関税は受取人払い</span>}
                 </div>
               ) : (
-                <div className="text-amber-800">DHL の MyDHL API がまだ登録されていません。ページ上部の「DHL API設定」から登録すると、ここで発行できます。それまでは下で番号を手入力してください。</div>
+                <div className="text-amber-800">{carrier === 'DHL' ? 'DHL の MyDHL API' : 'FedEx の Ship API'}がまだ登録されていません。「配送会社API連携」の画面で登録すると、ここで発行できます。それまでは下で番号を手入力してください。</div>
               )}
             </div>
           </>

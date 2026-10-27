@@ -6151,10 +6151,11 @@ app.get('/api/invoice/doc/:siId', async (req, res) => {
   }
 });
 
-// --- AWB（航空貨物の送り状）。DHL Express は MyDHL API で発行してラベルPDFを保存する。FedEx・ほかは番号の手入力
+// --- AWB（航空貨物の送り状）。DHL Express は MyDHL API、FedEx は Ship API で発行してラベルPDFを保存する。ほかは番号の手入力
 // API の利用者名・パスワード・口座番号は Cloud Storage の awb-settings.json に保存し、画面にはパスワードを返さない
 interface AwbSettings {
   dhl?: { username: string; password: string; accountNumber: string; env: 'test' | 'production' };
+  fedex?: { apiKey: string; secretKey: string; accountNumber: string; env: 'test' | 'production' };
   shipperDefaults?: Partial<Record<WarehouseId, AwbParty>>;
 }
 interface AwbParty {
@@ -6335,13 +6336,129 @@ async function createDhlShipment(si: ShipInstruction, d: any) {
   return { awbNo, labelBase64: label?.content || '' };
 }
 
+/** FedEx の通貨コードは独自（円は JYE など） */
+const FEDEX_CURRENCY: Record<string, string> = { JPY: 'JYE', SGD: 'SID', KRW: 'WON', CHF: 'SFR', GBP: 'UKL', TWD: 'NTD' };
+const fedexCurrency = (c: string) => FEDEX_CURRENCY[c] || c;
+const fedexBase = (env: string) => (env === 'production' ? 'https://apis.fedex.com' : 'https://apis-sandbox.fedex.com');
+let fedexToken: { key: string; token: string; until: number } | null = null;
+async function fedexAccessToken(cfg: NonNullable<AwbSettings['fedex']>) {
+  const key = `${cfg.env}|${cfg.apiKey}`;
+  if (fedexToken && fedexToken.key === key && fedexToken.until > Date.now()) return fedexToken.token;
+  const res = await fetch(`${fedexBase(cfg.env)}/oauth/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ grant_type: 'client_credentials', client_id: cfg.apiKey, client_secret: cfg.secretKey }).toString(),
+    signal: AbortSignal.timeout(30000),
+  });
+  const j: any = await res.json().catch(() => ({}));
+  if (!res.ok || !j.access_token) throw new Error(`FedEx の認証に失敗しました（${res.status}）：${(j?.errors || []).map((e: any) => e.message || e.code).join(' / ') || 'API Key・Secret Key を確認してください'}`);
+  fedexToken = { key, token: j.access_token, until: Date.now() + (Number(j.expires_in) || 3600) * 1000 - 120000 };
+  return fedexToken.token;
+}
+/** FedEx の住所は1行35文字まで。住所1〜3をつないで35文字ずつに分け直す */
+function fedexStreetLines(p: AwbParty) {
+  const words = [p.addressLine1, p.addressLine2, p.addressLine3].filter(Boolean).join(', ').split(' ');
+  const lines: string[] = [''];
+  for (const w of words) {
+    const cur = lines[lines.length - 1];
+    if (cur && (cur + ' ' + w).length > 35) lines.push(w.slice(0, 35));
+    else lines[lines.length - 1] = cur ? `${cur} ${w}` : w.slice(0, 35);
+  }
+  return lines.filter(Boolean).slice(0, 3);
+}
+/** FedEx Ship API で発送を作る（追跡番号とラベルPDFを返す） */
+async function createFedexShipment(si: ShipInstruction, d: any) {
+  const cfg = awbSettings.fedex;
+  if (!cfg?.apiKey || !cfg?.secretKey || !cfg?.accountNumber) throw new Error('FedEx の Ship API（API Key・Secret Key・口座番号）が登録されていません');
+  const token = await fedexAccessToken(cfg);
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(String(d.date || '')) ? d.date : jstToday();
+  const cur = fedexCurrency(String(d.currency || 'JPY'));
+  const party = (p: AwbParty) => ({
+    contact: { personName: p.fullName || p.companyName, companyName: p.companyName, phoneNumber: String(p.phone || '').replace(/[^\d+]/g, ''), ...(p.email ? { emailAddress: p.email } : {}) },
+    address: { streetLines: fedexStreetLines(p), city: p.cityName, postalCode: p.postalCode, countryCode: p.countryCode },
+  });
+  const body = {
+    labelResponseOptions: 'LABEL',
+    accountNumber: { value: cfg.accountNumber },
+    requestedShipment: {
+      shipper: party(d.shipper),
+      recipients: [party(d.receiver)],
+      shipDatestamp: date,
+      serviceType: 'INTERNATIONAL_PRIORITY',
+      packagingType: 'YOUR_PACKAGING',
+      pickupType: 'USE_SCHEDULED_PICKUP',
+      shippingChargesPayment: { paymentType: 'SENDER', payor: { responsibleParty: { accountNumber: { value: cfg.accountNumber } } } },
+      labelSpecification: { imageType: 'PDF', labelStockType: 'PAPER_85X11_TOP_HALF_LABEL' },
+      customsClearanceDetail: {
+        dutiesPayment: { paymentType: 'RECIPIENT' },
+        isDocumentOnly: false,
+        totalCustomsValue: { amount: Number(d.declaredValue), currency: cur },
+        commercialInvoice: { shipmentPurpose: 'SOLD', customerReferences: [{ customerReferenceType: 'INVOICE_NUMBER', value: String(d.invoiceNo || '').slice(0, 30) }] },
+        commodities: d.items.map((it: any) => ({
+          description: it.description,
+          countryOfManufacture: it.manufacturerCountry,
+          quantity: Number(it.quantity),
+          quantityUnits: 'PCS',
+          unitPrice: { amount: Number(it.price), currency: cur },
+          customsValue: { amount: Number(it.price) * Number(it.quantity), currency: cur },
+          weight: { units: 'KG', value: Number(it.netWeight) },
+          ...(it.hsCode ? { harmonizedCode: it.hsCode } : {}),
+        })),
+      },
+      requestedPackageLineItems: d.packages.map((p: any, i: number) => ({
+        sequenceNumber: i + 1,
+        weight: { units: 'KG', value: Number(p.weight) },
+        dimensions: { length: Math.round(Number(p.length)), width: Math.round(Number(p.width)), height: Math.round(Number(p.height)), units: 'CM' },
+        ...(i === 0 ? { customerReferences: [{ customerReferenceType: 'CUSTOMER_REFERENCE', value: `${si.id} ${si.orderId}`.slice(0, 30) }] } : {}),
+      })),
+      totalPackageCount: d.packages.length,
+    },
+  };
+  const res = await fetch(`${fedexBase(cfg.env)}/ship/v1/shipments`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, 'X-locale': 'en_US' },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(60000),
+  });
+  const j: any = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const detail = (j?.errors || []).map((e: any) => [e.code, e.message].filter(Boolean).join(': ')).join(' / ');
+    throw new Error(`FedEx からエラーが返りました（${res.status}）：${detail || JSON.stringify(j).slice(0, 300)}`);
+  }
+  const ts = j?.output?.transactionShipments?.[0] || {};
+  const awbNo = String(ts.masterTrackingNumber || ts.pieceResponses?.[0]?.trackingNumber || '');
+  const doc = (ts.pieceResponses?.[0]?.packageDocuments || ts.shipmentDocuments || []).find((x: any) => x.encodedLabel) || {};
+  return { awbNo, labelBase64: doc.encodedLabel || '' };
+}
+
 app.get('/api/awb/settings', async (_req, res) => {
   await loadAwbSettings();
   const d = awbSettings.dhl;
-  res.json({ dhl: d ? { configured: true, username: d.username, accountNumber: d.accountNumber.replace(/.(?=.{3})/g, '*'), env: d.env } : { configured: false } });
+  const f = awbSettings.fedex;
+  res.json({
+    dhl: d ? { configured: true, username: d.username, accountNumber: d.accountNumber.replace(/.(?=.{3})/g, '*'), env: d.env } : { configured: false },
+    fedex: f ? { configured: true, apiKey: f.apiKey.replace(/.(?=.{4})/g, '*'), accountNumber: f.accountNumber.replace(/.(?=.{3})/g, '*'), env: f.env } : { configured: false },
+  });
 });
 app.post('/api/awb/settings', async (req, res) => {
   await loadAwbSettings();
+  if (req.body?.fedex) {
+    const f = req.body.fedex;
+    const apiKey = String(f.apiKey || '').trim();
+    const secretKey = String(f.secretKey || '').trim();
+    const accountNumber = String(f.accountNumber || '').trim();
+    const prev = awbSettings.fedex;
+    if (!accountNumber || (!apiKey && !prev?.apiKey) || (!secretKey && !prev?.secretKey)) return res.status(400).json({ error: 'API Key・Secret Key・口座番号を入れてください' });
+    awbSettings.fedex = { apiKey: apiKey || prev!.apiKey, secretKey: secretKey || prev!.secretKey, accountNumber, env: f.env === 'production' ? 'production' : 'test' };
+    fedexToken = null;
+    try {
+      await fedexAccessToken(awbSettings.fedex);
+    } catch (e: any) {
+      return res.status(400).json({ error: e?.message || String(e) });
+    }
+    await saveAwbSettings();
+    return res.json({ ok: true });
+  }
   const d = req.body?.dhl || {};
   const username = String(d.username || '').trim();
   const accountNumber = String(d.accountNumber || '').trim();
@@ -6357,7 +6474,7 @@ app.get('/api/awb/draft/:siId', async (req, res) => {
   if (!si) return res.status(404).json({ error: '出荷指示が見つかりません' });
   try {
     await loadAwbSettings();
-    res.json({ draft: await awbDraft(si), dhlConfigured: isDemo() || !!awbSettings.dhl?.username, awbNo: si.awbNo || null, demo: isDemo() });
+    res.json({ draft: await awbDraft(si), dhlConfigured: isDemo() || !!awbSettings.dhl?.username, fedexConfigured: isDemo() || !!awbSettings.fedex?.apiKey, awbNo: si.awbNo || null, demo: isDemo() });
   } catch (e: any) {
     res.status(400).json({ error: e?.message || String(e) });
   }
@@ -6372,14 +6489,15 @@ app.post('/api/awb/create/:siId', async (req, res) => {
   if (!d?.shipper || !d?.receiver || !Array.isArray(d?.packages) || !Array.isArray(d?.items)) return res.status(400).json({ error: '送り状の内容が足りません' });
   try {
     // サンプル：DHL には送らず、番号だけ作る
-    const r = isDemo() ? { awbNo: `99${String(Math.floor(Math.random() * 1e8)).padStart(8, '0')}`, labelBase64: '' } : await createDhlShipment(si, d);
-    if (!r.awbNo) throw new Error('DHL から AWB 番号が返りませんでした');
+    const carrier = req.body?.carrier === 'FedEx' ? 'FedEx' : 'DHL';
+    const r = isDemo() ? { awbNo: `99${String(Math.floor(Math.random() * 1e8)).padStart(8, '0')}`, labelBase64: '' } : carrier === 'FedEx' ? await createFedexShipment(si, d) : await createDhlShipment(si, d);
+    if (!r.awbNo) throw new Error(`${carrier} から AWB 番号が返りませんでした`);
     if (r.labelBase64 && CACHE_BUCKET) {
       await new Storage().bucket(CACHE_BUCKET).file(awbLabelObject(si.id)).save(Buffer.from(r.labelBase64, 'base64'), { contentType: 'application/pdf', resumable: false });
       si.awbLabel = true;
     }
     si.awbNo = r.awbNo;
-    si.awbCarrier = 'DHL';
+    si.awbCarrier = carrier;
     si.awbMode = 'api';
     si.awbCreatedAt = new Date().toISOString();
     // 次回もこの発送元で作れるように覚えておく
@@ -6388,7 +6506,7 @@ app.post('/api/awb/create/:siId', async (req, res) => {
     await saveInventory();
     res.json({ instruction: instructionView(si) });
   } catch (e: any) {
-    console.warn('[AWB] DHL create failed:', e?.message || e);
+    console.warn('[AWB] create failed:', e?.message || e);
     res.status(400).json({ error: e?.message || String(e) });
   }
 });
@@ -6398,7 +6516,7 @@ app.post('/api/awb/manual/:siId', async (req, res) => {
   if (!si) return res.status(404).json({ error: '出荷指示が見つかりません' });
   const awbNo = String(req.body?.awbNo || '').replace(/\s/g, '');
   if (!awbNo) {
-    if (si.awbMode === 'api') return res.status(400).json({ error: 'APIで発行したAWBは消せません（DHLで取り消してください）' });
+    if (si.awbMode === 'api') return res.status(400).json({ error: `APIで発行したAWBは消せません（${si.awbCarrier || 'DHL'}で取り消してください）` });
     delete si.awbNo;
     delete si.awbCarrier;
     delete si.awbMode;

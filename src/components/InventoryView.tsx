@@ -4,7 +4,7 @@ import { Boxes, CheckCircle2, Copy, Check, ExternalLink, KeyRound, PackageCheck,
 import { PasswordChooser, passwordOk } from './ClinicPortalAccess';
 import { Order } from '../types';
 import { InvoiceDialog, InvoicePdfButtons } from '../invoice/InvoiceDialog';
-import { AwbDialog, DhlSettings } from '../invoice/AwbDialog';
+import { AwbDialog, DhlSettings, FedexSettings } from '../invoice/AwbDialog';
 import { FlowSteps } from './flow/FlowSteps';
 import { ColorLegend } from './flow/ColorLegend';
 import { notifyDone, notifyError } from './flow/UndoToast';
@@ -1463,12 +1463,17 @@ export function ShippingInstructionsPage({ onNavigate }: { onNavigate?: (tab: st
             読み込み直す
           </button>
           <button onClick={() => setSettingsOpen(!settingsOpen)} className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-semibold text-slate-700 hover:bg-slate-50">
-            DHL API設定
+            送り状API設定
           </button>
         </div>
       </div>
       <DemoBar onChange={load} />
-      {settingsOpen && <DhlSettings onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && (
+        <div className="grid lg:grid-cols-2 gap-3 items-start">
+          <DhlSettings onClose={() => setSettingsOpen(false)} />
+          <FedexSettings onClose={() => setSettingsOpen(false)} />
+        </div>
+      )}
       {error && <div className="rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs px-3 py-2">{error}</div>}
       {data && <SampleStockBar data={data} onChange={load} />}
       {data ? <AllocationPanel data={data} onSaved={load} /> : !error && <div className="p-6 text-sm text-slate-500">読み込み中…</div>}
