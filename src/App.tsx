@@ -976,7 +976,7 @@ export default function App() {
         />
 
         {/* Main View Container */}
-        <main className="flex-1 p-4 sm:p-6 max-w-7xl w-full mx-auto">
+        <main className="flex-1 p-4 sm:p-5 max-w-[1920px] w-full mx-auto min-w-0">
           {staleInfo && (
             <div className="mb-4 px-4 py-2.5 rounded-xl border border-amber-300 bg-amber-50 text-amber-900 text-xs font-bold flex items-center gap-2">
               <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />

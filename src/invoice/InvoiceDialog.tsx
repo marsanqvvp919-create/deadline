@@ -35,7 +35,7 @@ export function InvoicePdfButtons({ source, label = true }: { source: string; la
     }
   };
   return (
-    <span className="inline-flex flex-wrap items-center gap-1.5">
+    <span className="inline-flex flex-wrap items-center gap-1.5 [td_&]:flex-nowrap">
       <button onClick={() => run('invoice')} disabled={!!busy} className="inline-flex items-center gap-1 rounded border border-indigo-300 bg-indigo-50 px-2 py-1 text-[11px] font-bold text-indigo-800 disabled:opacity-50">
         {busy === 'invoice' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
         Invoice PDF

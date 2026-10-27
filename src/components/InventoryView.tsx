@@ -188,7 +188,7 @@ function InboundCard({ rec, onSaved }: { rec: Inbound; onSaved: () => void }) {
   const locked = rec.received || rec.cancelled;
 
   return (
-    <div className={`rounded-xl border bg-white p-4 space-y-3 ${rec.excluded || rec.cancelled ? 'opacity-60' : ''}`}>
+    <div className={`min-w-0 rounded-xl border bg-white p-3 space-y-2 ${rec.excluded || rec.cancelled ? 'opacity-60' : ''}`}>
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
@@ -226,89 +226,9 @@ function InboundCard({ rec, onSaved }: { rec: Inbound; onSaved: () => void }) {
               ))}
             </select>
           </label>
-        </div>
-      </div>
-
-      <table className="w-full text-xs">
-        <thead className="text-slate-500">
-          <tr className="border-b border-slate-100">
-            <th className="text-left py-1 font-semibold">商品</th>
-            <th className="text-right py-1 font-semibold w-20">発注数</th>
-            <th className="text-right py-1 font-semibold w-28">入荷予定数</th>
-            <th className="text-right py-1 font-semibold w-24">入荷実数</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rec.lines.map((l) => (
-            <tr key={l.key} className="border-b border-slate-50">
-              <td className="py-1.5 font-semibold text-slate-800">{l.productName}</td>
-              <td className="py-1.5 text-right font-mono text-slate-500">{l.poQty}</td>
-              <td className="py-1.5 text-right">
-                {locked ? (
-                  <span className="font-mono font-bold">{l.qty}</span>
-                ) : (
-                  <input
-                    type="number"
-                    min={0}
-                    value={qty[l.key] ?? ''}
-                    onChange={(e) => setQty({ ...qty, [l.key]: e.target.value })}
-                    className={`w-20 rounded border px-1.5 py-0.5 text-right font-mono ${l.qtyEdited ? 'border-amber-400 bg-amber-50' : 'border-slate-300'}`}
-                  />
-                )}
-              </td>
-              <td className={`py-1.5 text-right font-mono font-bold ${l.receivedQty !== null && l.receivedQty < l.qty ? 'text-rose-600' : 'text-emerald-700'}`}>{l.receivedQty ?? '—'}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {qtyDirty && !locked && (
-        <button disabled={busy} onClick={() => save({ lines: rec.lines.map((l) => ({ key: l.key, qty: Number(qty[l.key]) })) })} className="rounded-md bg-slate-900 text-white px-3 py-1 text-xs font-bold">
-          数量を保存
-        </button>
-      )}
-
-      {rec.method !== 'kick' && rec.method !== 'handcarry' && (
-        <div className="space-y-1.5">
-          <div className="flex flex-wrap items-center gap-2">
-            <Truck className="w-4 h-4 text-slate-400" />
-            <input
-              disabled={locked || busy}
-              value={tracking}
-              onChange={(e) => setTracking(e.target.value)}
-              placeholder="ベンダー → 倉庫の追跡番号（複数は「、」区切り）"
-              className="flex-1 min-w-60 rounded-md border border-slate-300 px-2.5 py-1 text-xs font-mono"
-            />
-            {trackingDirty && !locked && (
-              <button disabled={busy} onClick={() => save({ trackingNos: tracking })} className="rounded-md bg-indigo-600 text-white px-3 py-1 text-xs font-bold">
-                追跡番号を保存
-              </button>
-            )}
-          </div>
-          {rec.tracking.map((t) => (
-            <div key={t.trackingNo} className="text-[11px] text-slate-600 pl-6">
-              <span className="font-mono font-bold">{t.trackingNo}</span>
-              {t.carrier && <span className="ml-1 uppercase">{t.carrier}</span>}：{t.statusText}
-              {t.lastLocation && `（${t.lastLocation}）`} {t.lastEventAt && fmt(t.lastEventAt)}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {rec.warehouse === 'domestic' && !rec.received && !rec.excluded && !rec.cancelled && (
-        <DomesticReceive rec={rec} onSaved={onSaved} />
-      )}
-      {rec.received && (
-        <div className="text-[11px] text-slate-600">
-          倉庫で承認 {fmt(rec.receivedAt)}
-          {rec.receivedMemo && `・メモ：${rec.receivedMemo}`}
-        </div>
-      )}
-      {error && <div className="text-xs text-rose-600">{error}</div>}
-
-      {(!rec.cancelled || rec.received) && (
-        <div className="flex justify-end pt-1 border-t border-slate-100">
-          <details className="relative">
-            <summary className="list-none cursor-pointer rounded-lg border border-slate-200 px-2 py-1 text-[11px] text-slate-500 hover:bg-slate-50">… そのほかの操作</summary>
+          {(!rec.cancelled || rec.received) && (
+            <details className="relative">
+            <summary title="そのほかの操作" className="list-none cursor-pointer rounded-md border border-slate-200 px-2 py-1 text-slate-500 hover:bg-slate-50">…</summary>
             <div className="absolute right-0 z-20 mt-1 w-64 rounded-lg border border-slate-200 bg-white p-2 shadow-lg space-y-1.5 text-[11px]">
               {!rec.received && !rec.cancelled && (
                 <button
@@ -350,8 +270,86 @@ function InboundCard({ rec, onSaved }: { rec: Inbound; onSaved: () => void }) {
               )}
             </div>
           </details>
+          )}
+        </div>
+      </div>
+
+      <table className="w-full table-fixed text-xs">
+        <thead className="text-slate-500">
+          <tr className="border-b border-slate-100">
+            <th className="text-left py-1 font-semibold">商品</th>
+            <th className="text-right py-1 font-semibold w-20">発注数</th>
+            <th className="text-right py-1 font-semibold w-28">入荷予定数</th>
+            <th className="text-right py-1 font-semibold w-24">入荷実数</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rec.lines.map((l) => (
+            <tr key={l.key} className="border-b border-slate-50">
+              <td className="py-1 font-semibold text-slate-800 truncate" title={l.productName}>{l.productName}</td>
+              <td className="py-1 text-right font-mono text-slate-500">{l.poQty}</td>
+              <td className="py-1.5 text-right">
+                {locked ? (
+                  <span className="font-mono font-bold">{l.qty}</span>
+                ) : (
+                  <input
+                    type="number"
+                    min={0}
+                    value={qty[l.key] ?? ''}
+                    onChange={(e) => setQty({ ...qty, [l.key]: e.target.value })}
+                    className={`w-20 rounded border px-1.5 py-0.5 text-right font-mono ${l.qtyEdited ? 'border-amber-400 bg-amber-50' : 'border-slate-300'}`}
+                  />
+                )}
+              </td>
+              <td className={`py-1.5 text-right font-mono font-bold ${l.receivedQty !== null && l.receivedQty < l.qty ? 'text-rose-600' : 'text-emerald-700'}`}>{l.receivedQty ?? '—'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {qtyDirty && !locked && (
+        <button disabled={busy} onClick={() => save({ lines: rec.lines.map((l) => ({ key: l.key, qty: Number(qty[l.key]) })) })} className="rounded-md bg-slate-900 text-white px-3 py-1 text-xs font-bold">
+          数量を保存
+        </button>
+      )}
+
+      {rec.method !== 'kick' && rec.method !== 'handcarry' && (
+        <div className="space-y-1.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <Truck className="w-4 h-4 text-slate-400" />
+            <input
+              disabled={locked || busy}
+              value={tracking}
+              onChange={(e) => setTracking(e.target.value)}
+              placeholder="ベンダー → 倉庫の追跡番号（複数は「、」区切り）"
+              className="flex-1 min-w-40 rounded-md border border-slate-300 px-2.5 py-1 text-xs font-mono"
+            />
+            {trackingDirty && !locked && (
+              <button disabled={busy} onClick={() => save({ trackingNos: tracking })} className="rounded-md bg-indigo-600 text-white px-3 py-1 text-xs font-bold">
+                追跡番号を保存
+              </button>
+            )}
+          </div>
+          {rec.tracking.map((t) => (
+            <div key={t.trackingNo} className="text-[11px] text-slate-600 pl-6">
+              <span className="font-mono font-bold">{t.trackingNo}</span>
+              {t.carrier && <span className="ml-1 uppercase">{t.carrier}</span>}：{t.statusText}
+              {t.lastLocation && `（${t.lastLocation}）`} {t.lastEventAt && fmt(t.lastEventAt)}
+            </div>
+          ))}
         </div>
       )}
+
+      {rec.warehouse === 'domestic' && !rec.received && !rec.excluded && !rec.cancelled && (
+        <DomesticReceive rec={rec} onSaved={onSaved} />
+      )}
+      {rec.received && (
+        <div className="text-[11px] text-slate-600">
+          倉庫で承認 {fmt(rec.receivedAt)}
+          {rec.receivedMemo && `・メモ：${rec.receivedMemo}`}
+        </div>
+      )}
+      {error && <div className="text-xs text-rose-600">{error}</div>}
+
     </div>
   );
 }
@@ -719,12 +717,12 @@ function InstructionBoard({ instructions, onSaved }: { instructions: Instruction
   const count = (st: string) => instructions.filter((i) => i.status === st).length;
   // ステップの表示（押すボタンは右の「次の一手」だけ）
   const chip = (tone: Tone, label: string, sub?: React.ReactNode) => (
-    <div className={`rounded-lg border px-2 py-1 min-w-24 ${TONE[tone]}`}>
-      <div className="text-[10px] font-bold">
+    <div className={`min-w-0 rounded-lg border px-2 py-1 ${TONE[tone]}`}>
+      <div className="text-[10px] font-bold truncate">
         {tone === 'done' ? '✓ ' : ''}
         {label}
       </div>
-      {sub && <div className="text-[11px] text-slate-700">{sub}</div>}
+      <div className="text-[11px] text-slate-700 truncate h-4 leading-4">{sub || '—'}</div>
     </div>
   );
   /** この出荷依頼で次にやること（ボタンは1つ） */
@@ -781,7 +779,7 @@ function InstructionBoard({ instructions, onSaved }: { instructions: Instruction
                       <button disabled={busy} onClick={nx.onClick} className="rounded-lg bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 font-bold disabled:opacity-50">
                         {nx.label}
                       </button>
-                      <div className="text-[10px] text-slate-500 mt-0.5 max-w-56">{nx.preview}</div>
+                      <div className="text-[10px] text-slate-500 mt-0.5 w-64 leading-snug">{nx.preview}</div>
                     </div>
                   )}
                   {nx && 'wait' in nx && <span className={`rounded-lg border px-2.5 py-1.5 font-bold ${TONE.waiting}`}>{nx.wait}</span>}
@@ -833,7 +831,7 @@ function InstructionBoard({ instructions, onSaved }: { instructions: Instruction
                   </details>
                 </div>
               </div>
-              <div className="flex flex-wrap items-stretch gap-1.5">
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5 max-w-5xl">
                 {chip('done', '出荷依頼', fmt(i.createdAt))}
                 {intl ? chip(i.invoiceNo ? 'done' : 'action', 'インボイス', i.invoiceNo ? <span className="font-mono">{i.invoiceNo}</span> : '未作成') : chip('na', 'インボイス', '国内のため不要')}
                 {intl
@@ -964,29 +962,29 @@ function OrderPlanCard({ op, onDone, onError }: { op: OrderPlan; onDone: () => v
         </div>
         <span className={`rounded-full border px-2.5 py-0.5 text-[11px] font-bold ${PLAN_STYLE[op.plan.type]}`}>{planLabel(op.plan)}</span>
       </div>
-      <table className="w-full text-xs">
+      <table className="w-full table-fixed text-xs">
         <thead className="text-slate-400">
           <tr>
             <th className="text-left px-3 py-1 font-semibold">商品</th>
-            <th className="text-right px-2 py-1 font-semibold w-14">必要</th>
+            <th className="text-right px-2 py-1 font-semibold w-12">必要</th>
             {WH_IDS.map((w) => (
-              <th key={w} className="text-center px-2 py-1 font-semibold w-24">
-                {WH_NAME[w].replace('倉庫', '')}の空き
+              <th key={w} className="text-center px-1 py-1 font-semibold w-20" title={`${WH_NAME[w]}の空き在庫`}>
+                {w === 'singapore' ? 'SG' : WH_NAME[w].replace('倉庫', '')}の空き
               </th>
             ))}
-            <th className="text-right px-3 py-1 font-semibold w-20">不足</th>
+            <th className="text-right px-3 py-1 font-semibold w-14">不足</th>
           </tr>
         </thead>
         <tbody>
           {op.lines.map((l) => (
             <tr key={l.productId} className="border-t border-slate-50">
-              <td className="px-3 py-1.5 font-semibold text-slate-800">{l.productName}</td>
+              <td className="px-3 py-1.5 font-semibold text-slate-800 truncate" title={l.productName}>{l.productName}</td>
               <td className="px-2 py-1.5 text-right font-mono font-bold">{l.need}</td>
               {WH_IDS.map((w) => {
                 const n = l.stock[w] || 0;
                 const use = planned(l.productId, w);
                 return (
-                  <td key={w} className="px-2 py-1.5 text-center">
+                  <td key={w} className="px-1 py-1.5 text-center">
                     {n > 0 ? (
                       <span className={`inline-block min-w-12 rounded px-1.5 py-0.5 font-mono ${use > 0 ? 'bg-indigo-600 text-white font-bold' : 'bg-slate-100 text-slate-500'}`} title={use > 0 ? `案ではここから${use}点` : ''}>
                         {use > 0 ? `${use}/${n}` : n}
@@ -1017,7 +1015,7 @@ function OrderPlanCard({ op, onDone, onError }: { op: OrderPlan; onDone: () => v
             <button disabled={busy || !single} onClick={() => go({ mode: 'single', warehouse: single }, `${op.orderId} の${total}点を${WH_NAME[single as WarehouseId]}で確保しました（次は下の「倉庫へ出荷依頼」）`)} className="rounded-lg bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 font-bold disabled:opacity-50">
               在庫を確保する（1回で出荷）
             </button>
-            <span className="basis-full text-[11px] text-slate-500">{single && `${WH_NAME[single as WarehouseId]}の在庫から${total}点を確保します。この伝票は未発注の一覧から消えます。`}</span>
+            <span className="flex-1 min-w-48 text-[11px] text-slate-500">{single && `${WH_NAME[single as WarehouseId]}の在庫から${total}点を確保します。この伝票は未発注の一覧から消えます。`}</span>
           </>
         )}
         {(op.plan.type === 'split' || op.plan.type === 'partial') && (
@@ -1025,9 +1023,8 @@ function OrderPlanCard({ op, onDone, onError }: { op: OrderPlan; onDone: () => v
             <button disabled={busy} onClick={() => go({ mode: 'plan' }, `${op.orderId} の先に届く分（${planText}）を確保しました`)} className="rounded-lg bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 font-bold disabled:opacity-50">
               先に届く分だけ送る
             </button>
-            <span className="text-slate-400">全部そろうまで待つなら、何もしなくて大丈夫です</span>
-            <span className="basis-full text-[11px] text-slate-500">
-              {planText}を確保します。{missingTotal > 0 && `残り${missingTotal}点は発注が必要です。`}出荷は{op.plan.warehouses.length + (missingTotal > 0 ? 1 : 0)}回に分かれます。
+            <span className="flex-1 min-w-48 text-[11px] text-slate-500">
+              {planText}を確保します。{missingTotal > 0 && `残り${missingTotal}点は発注が必要です。`}出荷は{op.plan.warehouses.length + (missingTotal > 0 ? 1 : 0)}回に分かれます。全部そろうまで待つなら何もしなくて大丈夫です。
             </span>
           </>
         )}
@@ -1134,12 +1131,12 @@ export function AllocationPanel({ data, onSaved }: { data: InventoryData; onSave
             </div>
           </div>
         </div>
-        <div className="p-3 space-y-4">
-          {plans === null && <div className="text-center text-xs text-slate-400 py-6">読み込み中…</div>}
-          {plans && clinics.length === 0 && <div className="text-center text-xs text-slate-400 py-6">該当する伝票はありません（在庫が入ると、引き当てられる伝票がここに出ます）</div>}
+        <div className="p-3 grid grid-cols-1 2xl:grid-cols-2 gap-x-4 gap-y-4 items-start">
+          {plans === null && <div className="2xl:col-span-2 text-center text-xs text-slate-400 py-6">読み込み中…</div>}
+          {plans && clinics.length === 0 && <div className="2xl:col-span-2 text-center text-xs text-slate-400 py-6">該当する伝票はありません（在庫が入ると、引き当てられる伝票がここに出ます）</div>}
           {clinics.map((c) => (
-            <div key={c.clinicName} className="space-y-2">
-              <div className="text-sm font-bold text-slate-900">
+            <div key={c.clinicName} className="min-w-0 space-y-2">
+              <div className="text-sm font-bold text-slate-900 truncate">
                 {c.clinicName}
                 <span className="ml-2 text-[11px] font-normal text-slate-500">{c.orders.length}伝票</span>
               </div>
@@ -1612,18 +1609,18 @@ export function InventoryView({ orders, onNavigate }: { orders: Order[]; onNavig
           )}
         </div>
         {error && <div className="text-xs text-rose-600">{error}</div>}
-        <div className="grid grid-cols-3 gap-3">
-          <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
-            <div className="text-[11px] text-amber-800 font-semibold">追跡番号待ち</div>
-            <div className="text-2xl font-black text-amber-700 font-mono">{counts.noTracking}</div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          <div className="flex items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5">
+            <div className="text-[11px] text-amber-800 font-semibold truncate">追跡番号待ち</div>
+            <div className="text-xl font-black text-amber-700 font-mono">{counts.noTracking}</div>
           </div>
-          <div className="rounded-xl border border-violet-200 bg-violet-50 p-3">
-            <div className="text-[11px] text-violet-800 font-semibold">倉庫の承認待ち（到着・キック・持込）</div>
-            <div className="text-2xl font-black text-violet-700 font-mono">{counts.waiting}</div>
+          <div className="flex items-center justify-between gap-2 rounded-lg border border-violet-200 bg-violet-50 px-3 py-1.5">
+            <div className="text-[11px] text-violet-800 font-semibold truncate">倉庫の承認待ち（到着・キック・持込）</div>
+            <div className="text-xl font-black text-violet-700 font-mono">{counts.waiting}</div>
           </div>
-          <div className="rounded-xl border border-rose-200 bg-rose-50 p-3">
-            <div className="text-[11px] text-rose-800 font-semibold">入荷数の不足</div>
-            <div className="text-2xl font-black text-rose-700 font-mono">{counts.shortage}</div>
+          <div className="flex items-center justify-between gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5">
+            <div className="text-[11px] text-rose-800 font-semibold truncate">入荷数の不足</div>
+            <div className="text-xl font-black text-rose-700 font-mono">{counts.shortage}</div>
           </div>
         </div>
       </div>
@@ -1673,14 +1670,16 @@ export function InventoryView({ orders, onNavigate }: { orders: Order[]; onNavig
             </div>
             <span className="text-slate-500">{inbound.length}件</span>
           </div>
+          <div className="grid grid-cols-1 2xl:grid-cols-2 gap-3 items-start">
           {inbound.length === 0 && (
-            <div className="rounded-xl border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-500">
+            <div className="2xl:col-span-2 rounded-xl border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-500">
               該当する入荷予定はありません。{data.inbound.length === 0 && '「楽楽から発注を取り込む」を押すか、次の全件同期（2時間ごと）をお待ちください。'}
             </div>
           )}
           {inbound.map((r) => (
             <InboundCard key={`${r.poId}-${r.updatedAt ?? ''}-${r.trackingNos.join()}-${r.lines.map((l) => l.qty).join()}`} rec={r} onSaved={load} />
           ))}
+          </div>
         </div>
       )}
 

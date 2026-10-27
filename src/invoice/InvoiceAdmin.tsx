@@ -340,28 +340,29 @@ function ShipmentsTab() {
                       {x.date}・{x.warehouseName}
                     </div>
                   </td>
-                  <td className="px-3 py-1.5 font-semibold">{x.clinicName}</td>
-                  <td className="px-3 py-1.5 max-w-80">
+                  <td className="px-3 py-1.5 font-semibold min-w-40">{x.clinicName}</td>
+                  <td className="px-3 py-1.5 min-w-48 max-w-96">
                     <span className="line-clamp-2">{x.items}</span>
                     {x.trackingNo && <div className="text-[10px] font-mono text-slate-500">{x.courier} {x.trackingNo}</div>}
                   </td>
                   <td className="px-3 py-1.5 text-right font-mono whitespace-nowrap">
                     {Number(x.totalInvoiceAmount).toLocaleString()} {x.currency}
                   </td>
-                  <td className="px-3 py-1.5">
+                  <td className="px-3 py-1.5 whitespace-nowrap">
                     <span className={`rounded border px-1.5 py-0.5 font-bold ${TONE[tone as keyof typeof TONE]}`}>{label}</span>
                   </td>
-                  <td className="px-3 py-1.5">
+                  <td className="px-3 py-1.5 whitespace-nowrap">
                     <InvoicePdfButtons source={`/api/invoice-admin/shipments/${x.id}`} label={false} />
                   </td>
-                  <td className="px-3 py-1.5 text-right whitespace-nowrap">
+                  <td className="px-3 py-1.5">
+                    <div className="flex items-center justify-end gap-1 whitespace-nowrap">
                     {x.status === 'CONFIRMED' && (
                       <button onClick={() => setStatus(x, 'SHIPPED')} className="rounded-lg bg-amber-500 hover:bg-amber-600 text-white px-2.5 py-1 font-bold">
                         発送済みにする
                       </button>
                     )}
                     {x.status !== 'CANCELLED' && (
-                      <details className="relative inline-block ml-1">
+                      <details className="relative">
                         <summary className="list-none cursor-pointer rounded border border-slate-200 px-2 py-1 text-slate-500">…</summary>
                         <div className="absolute right-0 z-20 mt-1 w-40 rounded-lg border border-slate-200 bg-white p-2 shadow-lg text-left">
                           <button onClick={() => setStatus(x, 'CANCELLED')} className="text-rose-600">
@@ -370,6 +371,7 @@ function ShipmentsTab() {
                         </div>
                       </details>
                     )}
+                    </div>
                   </td>
                 </tr>
               );
