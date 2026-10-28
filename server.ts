@@ -4500,6 +4500,8 @@ interface ShipInstruction {
   awbMode?: 'api' | 'manual';
   awbLabel?: boolean; // ラベルPDFを Cloud Storage に保存済み
   awbCreatedAt?: string;
+  /** 出荷完了のときに、楽楽販売の出荷管理「国際追跡番号」へ書いた結果（二重入力をなくす） */
+  rakurakuWrite?: { at: string; ok: boolean; shipmentIds: string[]; message: string };
 }
 interface WarehouseAccess {
   slug: string;
@@ -5306,6 +5308,8 @@ function allocationCandidates() {
 
 function instructionView(i: ShipInstruction, _forWarehouse = false) {
   const c = invClinic(i.clinicId) as any;
+  // 楽楽販売への書き込み結果は社内だけに出す
+  if (_forWarehouse) i = { ...i, rakurakuWrite: undefined };
   // 配送状況（AWB・追跡番号を配送会社のデータで確認）
   const nos = Array.from(new Set([i.awbNo, ...i.trackingNos].filter(Boolean).map((n) => String(n).replace(/\D/g, '')).filter((d) => d.length >= 10)));
   const tracking = nos.map((d) => invTrack(d)).filter(Boolean) as any[];
@@ -5856,6 +5860,45 @@ function shipInstruction(si: ShipInstruction, body: any, by: StockMove['by']): s
   return null;
 }
 
+// 出荷完了で入った追跡番号（AWB）を、楽楽販売の出荷管理「国際追跡番号」に書く（インポート 100758）。
+// 書くのは、その受注の出荷のうち、キャンセルでなく、出荷番号・国際追跡番号がどちらも空の出荷が1件だけのとき。
+// 候補が無い・複数あるときは書かずに理由を残す（画面に出して、人が楽楽販売で入れる）
+async function writeSiTrackingToRakuraku(si: ShipInstruction) {
+  const intl = si.trackingNos.map((x) => String(x).replace(/\s/g, '')).filter((x) => parseTrackingNumbers(x).some((d) => d.length === 10 || d.length === 12));
+  const done = (ok: boolean, shipmentIds: string[], message: string) => {
+    si.rakurakuWrite = { at: new Date().toISOString(), ok, shipmentIds, message };
+    console.log('[SI Tracking]', si.id, ok, message);
+  };
+  if (intl.length === 0) return done(false, [], '追跡番号が無いので、楽楽販売には書いていません');
+  if (isDemo()) return done(true, [], 'お試しの表示のため、楽楽販売には書いていません');
+  const orderIds = si.orderIds && si.orderIds.length ? si.orderIds : [si.orderId];
+  const targets: any[] = [];
+  const problems: string[] = [];
+  for (const oid of orderIds) {
+    const cands = (serverRakurakuStore.shipments || []).filter(
+      (x: any) => x.orderId === oid && !/キャンセル/.test(x.shipStatus || '') && !String(x.trackingNo || '').trim() && !String(x.internationalTrackingNo || '').trim()
+    );
+    const ids = Array.from(new Set(cands.map((x: any) => x.shipmentId)));
+    if (ids.length === 1) targets.push(cands.find((x: any) => x.shipmentId === ids[0]));
+    else problems.push(ids.length === 0 ? `${oid}：番号が空の出荷が楽楽販売にありません` : `${oid}：番号が空の出荷が${ids.length}件あり、どれか決められません`);
+  }
+  if (problems.length) return done(false, targets.map((t) => t.shipmentId), `楽楽販売には書いていません（${problems.join('／')}）。楽楽販売の出荷管理で「国際追跡番号」に ${intl.join(' ')} を入れてください`);
+  const value = intl.join(' ');
+  const rows = targets.map((t) => [t.shipmentId, value, String(t.domesticTrackingNo || '').trim()]);
+  try {
+    const r = await importCsvToRakuraku(toCsv(TRACKING_SPLIT_COLUMNS, rows), TRACKING_SPLIT_IMPORT_ID, 'si_tracking_import.csv');
+    trackingSplitLog.unshift({ at: new Date().toISOString(), source: `出荷完了 ${si.id}`, rows: rows.length, results: [{ rows: rows.length, ...r }] });
+    trackingSplitLog = trackingSplitLog.slice(0, 20);
+    if (r.failureCount > 0 || r.succeedCount === 0) return done(false, [], `楽楽販売に書き込めませんでした（成功 ${r.succeedCount}・失敗 ${r.failureCount}）。楽楽販売で「国際追跡番号」に ${value} を入れてください`);
+    for (const t of targets) {
+      for (const x of (serverRakurakuStore.shipments || []).filter((y: any) => y.shipmentId === t.shipmentId)) x.internationalTrackingNo = value;
+    }
+    done(true, targets.map((t) => t.shipmentId), `楽楽販売の出荷 ${targets.map((t) => t.shipmentId).join('・')} の「国際追跡番号」に ${value} を書きました`);
+  } catch (e: any) {
+    done(false, [], `楽楽販売への書き込みでエラー（${e?.message || 'unknown'}）。楽楽販売で「国際追跡番号」に ${value} を入れてください`);
+  }
+}
+
 // 社内：出荷完了（国内倉庫の分。ほかの倉庫の分も代わりに押せる）
 app.post('/api/inventory/instructions/:id/ship', async (req, res) => {
   await loadInventory();
@@ -5863,6 +5906,7 @@ app.post('/api/inventory/instructions/:id/ship', async (req, res) => {
   if (!si) return res.status(404).json({ error: '出荷指示が見つかりません' });
   const err = shipInstruction(si, req.body, 'staff');
   if (err) return res.status(400).json({ error: err });
+  await writeSiTrackingToRakuraku(si);
   applyAllocationsToOrders();
   await saveInventory();
   res.json({ instruction: instructionView(si) });
@@ -6922,6 +6966,7 @@ app.post('/api/warehouse/instructions/:id/ship', async (req, res) => {
   if (!si) return res.status(404).json({ error: '出荷指示が見つかりません / Not found' });
   const err = shipInstruction(si, req.body, 'warehouse');
   if (err) return res.status(400).json({ error: err });
+  await writeSiTrackingToRakuraku(si);
   applyAllocationsToOrders();
   await saveInventory();
   res.json({ instruction: instructionView(si, true), stock: stockList(w) });

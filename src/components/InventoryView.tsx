@@ -106,6 +106,7 @@ interface Instruction {
   awbCarrier?: string;
   awbMode?: 'api' | 'manual';
   awbLabel?: boolean;
+  rakurakuWrite?: { at: string; ok: boolean; shipmentIds: string[]; message: string };
   delivery?: { code: string; label: string } | null;
   destination: { name: string; director: string; postalCode: string; address: string; phone: string };
 }
@@ -856,6 +857,12 @@ function InstructionBoard({ instructions, onSaved }: { instructions: Instruction
                 {i.destination.postalCode && ` 〒${i.destination.postalCode}`} {i.destination.address} {i.destination.phone && `TEL ${i.destination.phone}`}
                 {i.trackingNos.length > 0 && <span className="ml-2 font-mono text-slate-700">追跡 {i.carrier} {i.trackingNos.join('、')}</span>}
               </div>
+              {i.status === 'shipped' && i.rakurakuWrite && (
+                <div className={`rounded border px-2 py-1 text-[11px] font-semibold ${i.rakurakuWrite.ok ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-amber-300 bg-amber-50 text-amber-900'}`}>
+                  {i.rakurakuWrite.ok ? '✓ ' : '要入力：'}
+                  {i.rakurakuWrite.message}
+                </div>
+              )}
               {ship?.id === i.id && (
                 <div className="flex flex-wrap items-center gap-2 rounded bg-amber-50 border border-amber-200 p-2">
                   <input value={ship.carrier} onChange={(e) => setShip({ ...ship, carrier: e.target.value })} placeholder="配送業者（佐川・ヤマト・DHL など）" className="rounded border border-slate-300 px-2 py-1 w-52" />
@@ -877,7 +884,7 @@ function InstructionBoard({ instructions, onSaved }: { instructions: Instruction
                     やめる
                   </button>
                   <span className="basis-full text-[11px] text-slate-600">
-                    {WH_NAME[i.warehouse]}の在庫から {i.lines.map((l) => `${l.productName} ${l.qty}`).join('、')} を引き、出荷済みにします。
+                    {WH_NAME[i.warehouse]}の在庫から {i.lines.map((l) => `${l.productName} ${l.qty}`).join('、')} を引き、出荷済みにします。追跡番号は楽楽販売の出荷管理「国際追跡番号」にも自動で書きます（楽楽販売で入れ直す必要はありません）。
                   </span>
                 </div>
               )}
