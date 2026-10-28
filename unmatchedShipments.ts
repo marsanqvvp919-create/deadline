@@ -214,7 +214,26 @@ function editDistance(a: string, b: string, max: number): number {
 type NameMatch = 'exact' | 'similar' | null;
 
 /** クリニック名の比較。一致（または片方がもう片方を含む）なら 'exact'、1〜2文字違いなら 'similar'（表記ゆれ） */
+/**
+ * 院の名前（例：「ダイヤモンドクリニック 池袋院」→「池袋院」）。同じ系列の別の院を同じクリニックと見なさないために使う。
+ * 「クリニック」などの後ろか、空白で区切った最後の語が「〜院」「〜店」のときだけ取り出す（「山田医院」「〇〇病院」は院名にしない）
+ */
+export function branchOf(name: string): string {
+  const n = (name || '').normalize('NFKC').trim();
+  const after = n.match(/(?:クリニック|美容外科|美容皮膚科|皮膚科|形成外科|clinic)\s*(\S+?(?:院|店))$/i)?.[1];
+  const last = n.split(/\s+/);
+  const tail = last.length > 1 ? last[last.length - 1] : '';
+  const b = after || (/(院|店)$/.test(tail) ? tail : '');
+  return b && !/(医院|病院)$/.test(b) ? b.toLowerCase() : '';
+}
+const differentBranch = (a: string, b: string) => {
+  const ba = branchOf(a);
+  const bb = branchOf(b);
+  return !!ba && !!bb && ba !== bb;
+};
+
 function compareNames(a: string, b: string): NameMatch {
+  if (differentBranch(a, b)) return null;
   const na = normalizeClinicName(a);
   const nb = normalizeClinicName(b);
   if (!na || !nb) return null;
@@ -412,6 +431,8 @@ export function findUnmatched(
     const clinicShipments: ShipmentLike[] = [];
     const similarGroups: [string, ShipmentLike[]][] = [];
     shipmentsByCustomer.forEach((list, customerName) => {
+      // シートの院と出荷の院が違えば、院名の無いマスタ名（例：ダイヤモンドクリニック）で一致しても別のクリニック
+      if (differentBranch(row.clinicName, customerName)) return;
       const results = nameSet.map((n) => compareNames(n, customerName));
       if (results.includes('exact')) clinicShipments.push(...list);
       else if (results.includes('similar')) similarGroups.push([customerName, list]);
