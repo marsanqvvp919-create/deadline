@@ -10,6 +10,7 @@ import { FlowSteps } from './flow/FlowSteps';
 import { ColorLegend } from './flow/ColorLegend';
 import { notifyDone, notifyError } from './flow/UndoToast';
 import { TONE, Tone } from './flow/tone';
+import { PUBLIC_ORIGIN } from '../utils/publicUrl';
 
 // 入荷・在庫（国内倉庫・韓国倉庫・シンガポール倉庫）。楽楽販売の発注（発注済み）から入荷予定を作り、
 // 入荷先倉庫・配送方法・追跡番号・数量をここで入れる。倉庫の担当者が実数を入れて承認すると在庫に加わる（国内倉庫は社内で承認）。
@@ -616,7 +617,7 @@ function WarehouseAccessPanel({ data, onSaved }: { data: InventoryData; onSaved:
   const [mode, setMode] = useState<'auto' | 'manual'>('auto');
   const [pw, setPw] = useState('');
   const [error, setError] = useState('');
-  const url = (slug: string) => `${window.location.origin}/warehouse/${slug}`;
+  const url = (slug: string) => `${PUBLIC_ORIGIN}/warehouse/${slug}`;
   const issue = async (w: WarehouseId) => {
     setError('');
     try {

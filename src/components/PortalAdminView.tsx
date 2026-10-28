@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Building2, Copy, Check, KeyRound, Plus, Search, Trash2, X, ExternalLink, Ban, RotateCcw } from 'lucide-react';
+import { PUBLIC_ORIGIN } from '../utils/publicUrl';
 
 export interface ClinicRef {
   clinicId: string;
@@ -18,7 +19,7 @@ export interface Group {
   lastLoginAt: string | null;
 }
 
-export const portalUrl = (slug: string) => `${window.location.origin}/portal/${slug}`;
+export const portalUrl = (slug: string) => `${PUBLIC_ORIGIN}/portal/${slug}`;
 const fmt = (iso: string | null) => (iso ? new Date(iso).toLocaleString('ja-JP', { dateStyle: 'short', timeStyle: 'short' }) : '—');
 
 export async function api(path: string, init?: RequestInit) {
