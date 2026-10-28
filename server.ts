@@ -1076,6 +1076,8 @@ function transformCsvToDeliveryData(csvText: string): any {
 
 // 伝票の状態（orderState）とアラートを計算する。差分取得で一部の伝票を差し替えたあとにも全件で計算し直す
 function finalizeDeliveryData(orders: any[]): any {
+  // 楽楽販売で「キャンセル」にした受注は、どの画面にも出さない（2026/10/28 にステータスへ追加）
+  orders = orders.filter((o: any) => !String(o.status || '').includes('キャンセル'));
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
@@ -1645,7 +1647,7 @@ async function loadStoreSnapshot(): Promise<boolean> {
         console.warn('[Rakuraku Cache] Recompute failed:', e?.message || e);
       }
     }
-    serverRakurakuStore.shipments = snap.shipments ?? null;
+    serverRakurakuStore.shipments = (snap.shipments ?? null)?.filter((sh: any) => !String(sh.shipStatus || '').includes('キャンセル')) ?? null;
     try {
       applyShipmentQuantities();
     } catch (e: any) {
@@ -1805,6 +1807,8 @@ async function syncAllRakurakuData(isManual = false): Promise<boolean> {
           serverRakurakuStore.shipments = parsedShipments;
           console.log(`[Rakuraku Sync] Shipments loaded: ${parsedShipments.length} shipments`);
         }
+        // 楽楽販売で「キャンセル」にした出荷は、どの画面にも出さない（差分の取り込みで上書きしてから外す）
+        if (serverRakurakuStore.shipments) serverRakurakuStore.shipments = serverRakurakuStore.shipments.filter((sh: any) => !String(sh.shipStatus || '').includes('キャンセル'));
       } catch (e: any) {
         console.warn('[Rakuraku Sync] Shipments fetch warning:', e?.message || e);
         throw e;
