@@ -155,7 +155,12 @@ main span.rounded-md {
 /* スマホ：表は列がつぶれないよう最小幅を持たせ、表を囲む箱の中で横にスクロールさせる */
 @media (max-width: 640px) {
   main table {
-    min-width: 640px;
+    min-width: 640px !important;
+  }
+  main th,
+  main td {
+    overflow-wrap: normal;
+    word-break: keep-all;
   }
   main div:has(> table) {
     overflow-x: auto;
