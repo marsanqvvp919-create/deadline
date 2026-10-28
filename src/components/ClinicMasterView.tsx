@@ -39,12 +39,12 @@ import { ErrorNote } from './flow/Messages';
 
 // 送り先として直せる項目（サーバーの CLINIC_OVERRIDE_FIELDS と同じ）
 const SHIP_TO_FIELDS: [string, string, string][] = [
-  ['clinicNameEn', 'クリニック名（英語）', 'Sample Beauty Clinic Ginza'],
+  ['clinicNameEn', 'クリニック名（英語）', '例：Palm Beauty Clinic'],
   ['directorName', '院長名', ''],
-  ['postalCode', '郵便番号', '104-0061'],
+  ['postalCode', '郵便番号', '例：104-0061'],
   ['address', '住所（日本語）', ''],
-  ['addressEn', '住所（英語）', '5F Sample Bldg, 1-1-1 Ginza, Chuo-ku, Tokyo 104-0061, Japan'],
-  ['phone', '電話番号', '03-0000-0000'],
+  ['addressEn', '住所（英語）', '例：5F XX Bldg, 1-1-1 Ginza, Chuo-ku, Tokyo 104-0061, Japan'],
+  ['phone', '電話番号', '例：03-0000-0000'],
 ];
 
 interface ClinicMasterViewProps {
