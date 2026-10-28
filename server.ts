@@ -1656,6 +1656,7 @@ async function loadStoreSnapshot(): Promise<boolean> {
     serverRakurakuStore.suppliers = snap.suppliers ?? null;
     serverRakurakuStore.products = snap.products ?? null;
     serverRakurakuStore.clinics = snap.clinics ?? null;
+    refreshClinicOverrides();
     serverRakurakuStore.lastSuccessTime = snap.lastSuccessTime ?? null;
     serverRakurakuStore.lastMastersTime = snap.lastMastersTime ?? null;
     if (snap.sourceHeaders) serverRakurakuStore.sourceHeaders = snap.sourceHeaders;
@@ -1766,6 +1767,7 @@ async function syncAllRakurakuData(isManual = false): Promise<boolean> {
         const parsedClinics = transformCsvToClinics(resClinics.csv);
         if (parsedClinics && parsedClinics.length > 0) {
           serverRakurakuStore.clinics = parsedClinics;
+          refreshClinicOverrides();
         }
         recordMasterStatus('101250', parsedClinics?.length || 0);
       } catch (e) {
@@ -5461,6 +5463,81 @@ app.get('/api/inventory/flow', async (_req, res) => {
     vendorWait: Object.values(inv().inbound).filter((r) => !r.received && !r.excluded && !r.cancelled && ['no_tracking', 'tracking', 'in_transit'].includes(inboundState(r).code)).length,
     leaks: leakChecks().byStep,
   });
+});
+
+// --- クリニックの送り先情報の修正（このシステムの中だけに保存。楽楽販売には書かない）。
+// クリニックマスタの画面で直した値を Cloud Storage の clinic-overrides.json に保存し、楽楽販売から読んだ顧客マスタに上書きする。
+// 楽楽販売の元の値は _rakuraku に残し、「楽楽販売の値に戻す」で消せる
+const CLINIC_OVERRIDE_FIELDS = ['clinicNameEn', 'directorName', 'postalCode', 'address', 'addressEn', 'phone'] as const;
+type ClinicOverride = Partial<Record<(typeof CLINIC_OVERRIDE_FIELDS)[number], string>> & { updatedAt?: string };
+const CLINIC_OVERRIDES_OBJECT = 'clinic-overrides.json';
+let clinicOverrides: Record<string, ClinicOverride> = {};
+let clinicOverridesLoad: Promise<void> | null = null;
+async function loadClinicOverrides() {
+  if (!clinicOverridesLoad) {
+    clinicOverridesLoad = (async () => {
+      if (!CACHE_BUCKET) return;
+      try {
+        const [buf] = await new Storage().bucket(CACHE_BUCKET).file(CLINIC_OVERRIDES_OBJECT).download();
+        clinicOverrides = JSON.parse(buf.toString('utf-8')) || {};
+      } catch (e: any) {
+        if (e?.code !== 404) {
+          clinicOverridesLoad = null;
+          throw e;
+        }
+      }
+    })();
+  }
+  await clinicOverridesLoad;
+}
+async function saveClinicOverrides() {
+  if (!CACHE_BUCKET) return;
+  await new Storage().bucket(CACHE_BUCKET).file(CLINIC_OVERRIDES_OBJECT).save(JSON.stringify(clinicOverrides), { contentType: 'application/json', resumable: false });
+}
+/** 顧客マスタに修正を重ねる（何度呼んでも同じ結果になる） */
+function applyClinicOverrides() {
+  for (const c of (serverRakurakuStore.clinics || []) as any[]) {
+    if (c._rakuraku) {
+      Object.assign(c, c._rakuraku);
+      delete c._rakuraku;
+      delete c.editedAt;
+    }
+    const o = clinicOverrides[c.clinicId];
+    if (!o) continue;
+    const orig: any = {};
+    for (const f of CLINIC_OVERRIDE_FIELDS) {
+      if (o[f] === undefined) continue;
+      orig[f] = c[f] ?? '';
+      c[f] = o[f];
+    }
+    c._rakuraku = orig;
+    c.editedAt = o.updatedAt || '';
+  }
+}
+function refreshClinicOverrides() {
+  loadClinicOverrides()
+    .then(applyClinicOverrides)
+    .catch((e) => console.warn('[ClinicOverrides] load failed:', e?.message || e));
+}
+
+app.post('/api/clinic-overrides/:clinicId', async (req, res) => {
+  await loadClinicOverrides();
+  const id = String(req.params.clinicId || '').trim();
+  if (!id || !(serverRakurakuStore.clinics || []).some((c: any) => c.clinicId === id)) return res.status(404).json({ error: 'このクリニックが顧客マスタにありません' });
+  applyClinicOverrides();
+  const c: any = (serverRakurakuStore.clinics || []).find((x: any) => x.clinicId === id);
+  const base = { ...c, ...(c._rakuraku || {}) };
+  const next: ClinicOverride = {};
+  for (const f of CLINIC_OVERRIDE_FIELDS) {
+    if (req.body?.[f] === undefined) continue;
+    const v = String(req.body[f] ?? '').trim().slice(0, 300);
+    if (v !== String(base[f] ?? '').trim()) next[f] = v; // 楽楽販売と同じ値は保存しない
+  }
+  if (Object.keys(next).length) clinicOverrides[id] = { ...next, updatedAt: new Date().toISOString() };
+  else delete clinicOverrides[id];
+  await saveClinicOverrides();
+  applyClinicOverrides();
+  res.json({ clinic: (serverRakurakuStore.clinics || []).find((x: any) => x.clinicId === id) });
 });
 
 // --- クール便の要・不要（商品ごと）。商品マスタの画面で切り替え、Cloud Storage の product-flags.json に保存する。

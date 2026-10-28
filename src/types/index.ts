@@ -273,6 +273,11 @@ export interface ProductItem {
   source: 'rakuraku_api' | 'rakuraku_csv' | 'synced_master';
   updatedAt: string;
   memo?: string;
+  clinicNameEn?: string;
+  addressEn?: string;
+  /** このシステムで送り先情報を直したとき、楽楽販売の元の値 */
+  _rakuraku?: Partial<Record<'clinicNameEn' | 'directorName' | 'postalCode' | 'address' | 'addressEn' | 'phone', string>>;
+  editedAt?: string;
 }
 
 export interface ClinicItem {
@@ -297,4 +302,9 @@ export interface ClinicItem {
   source: 'rakuraku_api' | 'rakuraku_csv' | 'synced_master';
   updatedAt: string;
   memo?: string;
+  clinicNameEn?: string;
+  addressEn?: string;
+  /** このシステムで送り先情報を直したとき、楽楽販売の元の値 */
+  _rakuraku?: Partial<Record<'clinicNameEn' | 'directorName' | 'postalCode' | 'address' | 'addressEn' | 'phone', string>>;
+  editedAt?: string;
 }

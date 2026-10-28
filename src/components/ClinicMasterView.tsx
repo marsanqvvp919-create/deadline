@@ -35,6 +35,17 @@ import { ClinicProductStatusDrawer } from './ClinicProductStatusDrawer';
 import { getSalesRepsList } from '../utils/salesRepMapping';
 import { api as portalApi, Group as PortalGroup } from './PortalAdminView';
 import { ClinicPortalCell, ClinicPortalModal } from './ClinicPortalAccess';
+import { ErrorNote } from './flow/Messages';
+
+// 送り先として直せる項目（サーバーの CLINIC_OVERRIDE_FIELDS と同じ）
+const SHIP_TO_FIELDS: [string, string, string][] = [
+  ['clinicNameEn', 'クリニック名（英語）', 'Sample Beauty Clinic Ginza'],
+  ['directorName', '院長名', ''],
+  ['postalCode', '郵便番号', '104-0061'],
+  ['address', '住所（日本語）', ''],
+  ['addressEn', '住所（英語）', '5F Sample Bldg, 1-1-1 Ginza, Chuo-ku, Tokyo 104-0061, Japan'],
+  ['phone', '電話番号', '03-0000-0000'],
+];
 
 interface ClinicMasterViewProps {
   orders: Order[];
@@ -287,16 +298,28 @@ export const ClinicMasterView: React.FC<ClinicMasterViewProps> = ({
     setIsEditModalOpen(true);
   };
 
-  const handleSaveEdit = () => {
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState('');
+  // 送り先情報の修正はサーバーに保存する（このシステムの中だけ。楽楽販売には書かない）
+  const handleSaveEdit = async (reset = false) => {
     if (!editForm.clinicId) return;
-    const updated = clinics.map((c) =>
-      c.clinicId === editForm.clinicId ? ({ ...c, ...editForm, updatedAt: new Date().toISOString().replace('T', ' ').slice(0, 16) } as ClinicItem) : c
-    );
-    setClinics(updated);
-    saveLocalClinics(updated, 'synced_master');
-    setIsEditModalOpen(false);
-    if (selectedClinic && selectedClinic.clinicId === editForm.clinicId) {
-      setSelectedClinic({ ...selectedClinic, ...editForm } as ClinicItem);
+    setEditSaving(true);
+    setEditError('');
+    try {
+      const body = reset ? Object.fromEntries(SHIP_TO_FIELDS.map(([k]) => [k, (editForm._rakuraku as any)?.[k] ?? (editForm as any)[k] ?? ''])) : Object.fromEntries(SHIP_TO_FIELDS.map(([k]) => [k, (editForm as any)[k] ?? '']));
+      const r = await fetch(`/api/clinic-overrides/${encodeURIComponent(editForm.clinicId)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || `エラー（${r.status}）`);
+      const saved = { ...j.clinic } as ClinicItem;
+      const updated = clinics.map((c) => (c.clinicId === saved.clinicId ? ({ ...c, ...saved, _rakuraku: saved._rakuraku, editedAt: saved.editedAt } as ClinicItem) : c));
+      setClinics(updated);
+      saveLocalClinics(updated, 'synced_master');
+      setIsEditModalOpen(false);
+      showToast(reset ? `${saved.clinicName} の送り先を楽楽販売の値に戻しました` : `${saved.clinicName} の送り先を保存しました（このシステムの中だけ）`);
+    } catch (e: any) {
+      setEditError(e.message);
+    } finally {
+      setEditSaving(false);
     }
   };
 
@@ -608,6 +631,18 @@ export const ClinicMasterView: React.FC<ClinicMasterViewProps> = ({
                           <Package className="w-3.5 h-3.5" />
                           <span>商品進捗</span>
                         </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleOpenEdit(c);
+                          }}
+                          className={`px-2.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1 border shadow-2xs ${c.editedAt ? 'bg-amber-50 border-amber-300 text-amber-900' : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'}`}
+                          title={c.editedAt ? 'このシステムで送り先を直しています（楽楽販売とは違う値）' : '英語名・住所・電話などを直す（このシステムの中だけ）'}
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                          <span>{c.editedAt ? '送り先（修正済み）' : '送り先を直す'}</span>
+                        </button>
                         <ClinicPortalCell group={portalGroupByClinic.get(c.clinicId) || null} onOpen={() => setPortalClinic(c)} />
                       </div>
                     </td>
@@ -644,75 +679,52 @@ export const ClinicMasterView: React.FC<ClinicMasterViewProps> = ({
         />
       )}
 
-      {/* Edit Clinic Modal */}
+      {/* 送り先情報の修正（このシステムの中だけに保存） */}
       {isEditModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 space-y-4 border border-slate-200">
-            <h3 className="text-base font-bold text-slate-900">
-              クリニック情報編集 ({editForm.clinicId})
-            </h3>
-
-            <div className="space-y-3 text-xs">
-              <div>
-                <label className="font-bold text-slate-700 block mb-1">クリニック名</label>
-                <input autoComplete="off"
-                  type="text"
-                  value={editForm.clinicName || ''}
-                  onChange={(e) => setEditForm({ ...editForm, clinicName: e.target.value })}
-                  className="w-full p-2 bg-slate-50 border border-slate-300 rounded-lg"
-                />
-              </div>
-
-              <div>
-                <label className="font-bold text-slate-700 block mb-1">担当営業</label>
-                <input autoComplete="off"
-                  type="text"
-                  value={editForm.salesRep || ''}
-                  onChange={(e) => setEditForm({ ...editForm, salesRep: e.target.value })}
-                  className="w-full p-2 bg-slate-50 border border-slate-300 rounded-lg"
-                />
-              </div>
-
-              <div>
-                <label className="font-bold text-slate-700 block mb-1">取引ステータス</label>
-                <select
-                  value={editForm.status || '取引中'}
-                  onChange={(e) => setEditForm({ ...editForm, status: e.target.value as any })}
-                  className="w-full p-2 bg-slate-50 border border-slate-300 rounded-lg"
-                >
-                  <option value="取引中">取引中</option>
-                  <option value="新規">新規</option>
-                  <option value="審査中">審査中</option>
-                  <option value="休眠">休眠</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="font-bold text-slate-700 block mb-1">備考</label>
-                <textarea
-                  value={editForm.memo || ''}
-                  onChange={(e) => setEditForm({ ...editForm, memo: e.target.value })}
-                  rows={3}
-                  className="w-full p-2 bg-slate-50 border border-slate-300 rounded-lg"
-                />
-              </div>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60" onClick={() => setIsEditModalOpen(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-5 space-y-3 border border-slate-200 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div>
+              <h3 className="text-base font-bold text-slate-900">送り先を直す：{editForm.clinicName}</h3>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                出荷指示・倉庫の担当者画面・送り状に使う情報です。ここで直した値は<b>このシステムの中だけ</b>に保存し、楽楽販売には書きません（楽楽販売の値は下に灰色で出します）。
+              </p>
             </div>
-
-            <div className="flex items-center justify-between pt-3 border-t border-slate-100">
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsEditModalOpen(false)}
-                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold cursor-pointer"
-                >
-                  キャンセル
+            <div className="space-y-2.5 text-xs">
+              {SHIP_TO_FIELDS.map(([k, label, ph]) => {
+                const orig = (editForm._rakuraku as any)?.[k];
+                const multi = k === 'address' || k === 'addressEn';
+                const Input: any = multi ? 'textarea' : 'input';
+                return (
+                  <label key={k} className="block">
+                    <span className="font-bold text-slate-700 block mb-1">{label}</span>
+                    <Input
+                      autoComplete="off"
+                      rows={multi ? 2 : undefined}
+                      value={(editForm as any)[k] || ''}
+                      placeholder={ph}
+                      onChange={(e: any) => setEditForm({ ...editForm, [k]: e.target.value })}
+                      className="w-full p-2 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                    />
+                    {orig !== undefined && orig !== (editForm as any)[k] && <span className="block mt-0.5 text-[11px] text-slate-400">楽楽販売の値：{orig || '（空）'}</span>}
+                  </label>
+                );
+              })}
+            </div>
+            {editError && <ErrorNote message={editError} compact />}
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-slate-100">
+              {editForm._rakuraku ? (
+                <button type="button" disabled={editSaving} onClick={() => handleSaveEdit(true)} className="text-xs font-semibold text-slate-500 hover:text-rose-600">
+                  楽楽販売の値に戻す
                 </button>
-                <button
-                  type="button"
-                  onClick={handleSaveEdit}
-                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold cursor-pointer"
-                >
-                  保存する
+              ) : (
+                <span />
+              )}
+              <div className="flex items-center gap-2">
+                <button type="button" onClick={() => setIsEditModalOpen(false)} className="px-4 py-2 border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-semibold">
+                  やめる
+                </button>
+                <button type="button" disabled={editSaving} onClick={() => handleSaveEdit(false)} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold disabled:opacity-50">
+                  {editSaving ? '保存中…' : '保存する'}
                 </button>
               </div>
             </div>
