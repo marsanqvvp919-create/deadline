@@ -1491,7 +1491,7 @@ export function ShippingInstructionsPage({ onNavigate }: { onNavigate?: (tab: st
 export function InventoryView({ orders, onNavigate }: { orders: Order[]; onNavigate?: (tab: string) => void }) {
   const [data, setData] = useState<InventoryData | null>(null);
   const [error, setError] = useState('');
-  const [tab, setTab] = useState<'inbound' | 'stock' | 'moves' | 'access'>('inbound');
+  const [tab, setTab] = useState<'inbound' | 'stock' | 'moves' | 'access'>('stock');
   const [wh, setWh] = useState<'all' | WarehouseId>('all');
   const [stateFilter, setStateFilter] = useState<'open' | 'waiting' | 'received' | 'shortage' | 'closed' | 'all'>('open');
   const [q, setQ] = useState('');
@@ -1648,8 +1648,8 @@ export function InventoryView({ orders, onNavigate }: { orders: Order[]; onNavig
       <div className="flex flex-wrap gap-1.5">
         {(
           [
-            ['inbound', '入荷予定', Truck],
             ['stock', '在庫', PackageCheck],
+            ['inbound', '入荷予定', Truck],
             ['moves', '入出庫の履歴', History],
             ['access', '倉庫の担当者画面', KeyRound],
           ] as const
