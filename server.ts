@@ -5438,6 +5438,8 @@ app.get('/api/inventory/flow', async (_req, res) => {
   let unordered = 0;
   for (const o of invOrders()) {
     if (/見積|出荷済|納品済|キャンセル/.test(String(o.status || '')) || o.orderState !== '進行中') continue;
+    // 入金待ちの分は「入金待ち」の段で数える。ここは発注が必要なもの（入金済み・売掛・締日決済）だけ（左メニューの未発注と同じ数）
+    if (o.paymentStatus !== '入金済' && o.paymentStatus !== '売掛・締日決済') continue;
     for (const l of o.lines) if (l.stage === '未発注' && !isNonProductLine(l.productName, l.productId) && l.quantity - (l.allocatedQty || 0) > 0) unordered++;
   }
   const open = inv().instructions.filter((i) => i.status === 'open');

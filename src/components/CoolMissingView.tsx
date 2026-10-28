@@ -22,6 +22,8 @@ interface CoolMissingViewProps {
   orders: Order[];
   clinics?: ClinicItem[];
   onSelectOrder?: (order: Order) => void;
+  /** 今日の作業（漏れ）の「クール伝票」と同じ出荷だけに絞る。数を全画面でそろえるため */
+  onlyIds?: Set<string> | null;
   isLoading?: boolean;
   error?: string | null;
   lastSuccessTime?: string | null;
@@ -33,6 +35,7 @@ export const CoolMissingView: React.FC<CoolMissingViewProps> = ({
   orders,
   clinics = [],
   onSelectOrder,
+  onlyIds = null,
   isLoading = false,
   error = null,
   lastSuccessTime = null,
@@ -41,10 +44,10 @@ export const CoolMissingView: React.FC<CoolMissingViewProps> = ({
   const [searchQuery, setSearchQuery] = useState<string>('');
   const rakurakuUrl = getRakurakuUrl();
 
-  // クール手配漏れの条件: クール申請・委任状・伝票のどれかが「未」
+  // クール手配漏れの条件：今日の作業（漏れ）の「クール伝票」と同じ出荷。読み込み前はクール申請・委任状・伝票のどれかが「未」
   const coolMissingShipments = useMemo(() => {
     return shipments.filter((s) => {
-      if (!isCoolMissingShipment(s)) return false;
+      if (onlyIds ? !onlyIds.has(s.shipmentId) : !isCoolMissingShipment(s)) return false;
 
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
@@ -68,7 +71,7 @@ export const CoolMissingView: React.FC<CoolMissingViewProps> = ({
       const vb = db && db !== '—' ? db : '9999';
       return va.localeCompare(vb);
     });
-  }, [shipments, orders, clinics, searchQuery]);
+  }, [shipments, orders, clinics, searchQuery, onlyIds]);
 
 
   // 列見出しのクリックで並べ替え

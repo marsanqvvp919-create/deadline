@@ -248,15 +248,15 @@ export const Navbar: React.FC<NavbarProps> = ({
         <div className="flex flex-wrap items-center justify-end gap-1.5 sm:gap-2.5 ml-auto">
           <ColorLegend />
           <Glossary />
-          {/* Alerts Badge Button */}
+          {/* 今日の作業の件数（左メニューと同じ数） */}
           <button
             type="button"
             onClick={onNavigateToAlerts}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-rose-300 bg-rose-50 hover:bg-rose-100 active:bg-rose-200 text-rose-800 shadow-xs hover:shadow active:translate-y-px transition cursor-pointer font-bold"
-            title={`納期超過の伝票と、配送で問題が起きている出荷（${highSeverityCount}件・朝の納期会議と同じ数）`}
+            title={`今日の作業（漏れ・納期超過・楽楽販売と未照合）の合計 ${highSeverityCount}件`}
           >
             <Bell className="w-3.5 h-3.5 text-rose-600" />
-            <span className="text-xs">要対応</span>
+            <span className="text-xs">今日の作業</span>
             <span className="text-xs font-mono">{highSeverityCount}件</span>
           </button>
 

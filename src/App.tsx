@@ -145,11 +145,17 @@ export default function App() {
   const [settingsTab, setSettingsTab] = useState<SettingsTab | undefined>(undefined);
   // 漏れチェックの件数（左メニューの赤い数字）。5分ごとと、作業のあとに取り直す
   const [leakTotal, setLeakTotal] = useState(0);
+  // 漏れの「クール伝票」に当たる出荷（配送状況の「クール手配漏れ」もこれと同じ数にする）
+  const [leakCoolIds, setLeakCoolIds] = useState<Set<string> | null>(null);
   useEffect(() => {
     const load = () =>
       fetch('/api/inventory/leaks')
         .then((r) => (r.ok ? r.json() : null))
-        .then((j) => j && setLeakTotal(j.total || 0))
+        .then((j) => {
+          if (!j) return;
+          setLeakTotal(j.total || 0);
+          setLeakCoolIds(new Set((j.rules || []).filter((r: any) => r.step === 'cool').flatMap((r: any) => r.items.map((it: any) => it.id))));
+        })
         .catch(() => {});
     load();
     const t = setInterval(load, 5 * 60 * 1000);
@@ -514,8 +520,8 @@ export default function App() {
 
   // 出荷管理（101270）データのバッジ集計
   const coolMissingCount = useMemo(
-    () => shipments.filter((s) => isCoolMissingShipment(s)).length,
-    [shipments]
+    () => (leakCoolIds ? leakCoolIds.size : shipments.filter((s) => isCoolMissingShipment(s)).length),
+    [shipments, leakCoolIds]
   );
   // 配送会社が通関で止めている出荷（通関NGのページにも出す）
   const [carrierHoldNos, setCarrierHoldNos] = useState<Set<string>>(new Set());
@@ -558,10 +564,10 @@ export default function App() {
     if (!deliveryData) return 0;
     let count = 0;
     filteredOrders.forEach((o) => {
-      // 入金ステータスが楽楽販売で「入金済」の伝票だけ（不明は数えない）
-      if (o.paymentStatus !== '入金済') return;
+      // 発注が必要な伝票（入金済み・売掛・締日決済）だけ。流れのバーの「未発注」と同じ数え方
+      if (o.paymentStatus !== '入金済' && o.paymentStatus !== '売掛・締日決済') return;
       // 出荷済み・納品済みの伝票に残った未発注の明細は、発注の対象ではない
-      if (o.orderState === '全明細出荷済' || o.orderState === '納品完了') return;
+      if (o.orderState !== '進行中' || /見積|出荷済|納品済|キャンセル/.test(String(o.status || ''))) return;
       o.lines.forEach((l) => {
         if (isShippingOrFee(l.productName, l.productId)) return;
         if (l.stage === '未発注' && (l.allocatedQty || 0) < l.quantity) count++;
@@ -703,6 +709,8 @@ export default function App() {
   // 配送状況：到着トラッキング・一括発注の配送・通関・輸入を1つの画面にまとめ、中をタブで切り替える
   const DELIVERY_TABS: ViewTab[] = ['arrival_tracking', 'bulk_deliveries', ...CUSTOMS_TABS];
   // 今日の作業：漏れ・納期超過・やること・未照合を1つの画面にまとめ、中をタブで切り替える（上から順に片付ける）
+  // 今日の作業の件数（左メニュー・右上・タブで同じ数を使う）
+  const todayTotal = leakTotal + overdueCounts.ordersCount + (sheetUnmatchedCount || 0);
   const TODAY_TABS: ViewTab[] = ['leak_check', 'overdue', 'alerts', 'unmatched_sheets'];
   // 画面上部の流れのバーで「今いる段」を光らせる
   const FLOW_CURRENT: Partial<Record<ViewTab, FlowStepId>> = {
@@ -725,7 +733,7 @@ export default function App() {
       group: 'today',
       label: '今日の作業',
       icon: ShieldAlert,
-      badge: leakTotal + overdueCounts.ordersCount + (sheetUnmatchedCount || 0) > 0 ? `${leakTotal + overdueCounts.ordersCount + (sheetUnmatchedCount || 0)}` : null,
+      badge: todayTotal > 0 ? `${todayTotal}` : null,
       badgeColor: 'bg-rose-600 text-white font-bold',
       match: TODAY_TABS,
     },
@@ -982,7 +990,7 @@ export default function App() {
           groupChip={currentGroup ? GROUP_THEME[currentGroup.id].chip : ''}
           groupBar={currentGroup ? GROUP_THEME[currentGroup.id].bar : 'from-slate-400 to-slate-500'}
           totalAlertsCount={totalAlertsCount}
-          highSeverityCount={highSeverityCount}
+          highSeverityCount={todayTotal}
           generatedAt={deliveryData.generatedAt || ''}
           isStale={isStale}
           isFallback={isFallback}
@@ -994,7 +1002,7 @@ export default function App() {
           onRefresh={() => loadData(true)}
           onOpenSettings={() => setIsSettingsOpen(true)}
           onOpenDailyDigest={() => setIsDailyDigestOpen(true)}
-          onNavigateToAlerts={() => setActiveTab('morning_meeting')}
+          onNavigateToAlerts={() => setActiveTab('leak_check')}
           onDismissError={handleDismissError}
           onSwitchToSample={handleSwitchToSample}
         />
@@ -1228,6 +1236,7 @@ export default function App() {
 
           {activeTab === 'cool_missing' && (
             <CoolMissingView
+              onlyIds={leakCoolIds}
               shipments={shipments}
               orders={filteredOrders}
               clinics={clinics}

@@ -21,7 +21,7 @@ interface Counts {
 }
 const STEPS: { id: FlowStepId; label: string; count: (c: Counts) => number | null; tab: string; tone: Tone; hint: string }[] = [
   { id: 'unpaid', label: '入金待ち', count: (c) => c.unpaid, tab: 'procurement', tone: 'waiting', hint: '未発注の明細があり、まだ入金がない伝票' },
-  { id: 'unordered', label: '未発注', count: (c) => c.unordered, tab: 'procurement', tone: 'action', hint: '発注するか、在庫から確保する明細' },
+  { id: 'unordered', label: '未発注', count: (c) => c.unordered, tab: 'procurement', tone: 'action', hint: '入金済み（売掛・締日決済を含む）で、発注するか在庫から確保する明細。左メニューの「未発注」と同じ数' },
   { id: 'vendor', label: '仕入先の出荷', count: (c) => c.vendorWait, tab: 'inventory_management', tone: 'waiting', hint: '仕入先から倉庫へ向かっている・追跡番号待ちの発注' },
   { id: 'inbound', label: '入荷', count: (c) => c.inboundTodo, tab: 'inventory_management', tone: 'action', hint: '追跡番号を入れる・国内倉庫で受け取るなど、入荷で作業が必要なもの' },
   { id: 'allocate', label: '引当', count: (c) => c.allocatable, tab: 'shipping_instructions', tone: 'action', hint: '在庫で出せる伝票' },
