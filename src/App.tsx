@@ -93,7 +93,7 @@ import {
 } from 'lucide-react';
 
 // ソフト名（左上・上部の帯・ブラウザのタブに出す）
-const APP_NAME = '納期管理システム';
+const APP_NAME = 'No1 Ship';
 const APP_TAGLINE = '受注から到着まで ― 楽楽販売 連携';
 
 const KNOWN_TABS: ViewTab[] = [
@@ -641,7 +641,7 @@ export default function App() {
       <div className="min-h-screen flex items-center justify-center bg-slate-100">
         <div className="text-center space-y-3">
           <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto" />
-          <p className="text-sm font-semibold text-slate-700">納期管理システムを起動中...</p>
+          <p className="text-sm font-semibold text-slate-700">No1 Ship を起動中...</p>
         </div>
       </div>
     );

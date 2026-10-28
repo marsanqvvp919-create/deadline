@@ -67,7 +67,7 @@ function StaffLogin({ onDone }: { onDone: () => void }) {
             <Lock className="w-4 h-4" />
           </div>
           <div>
-            <h1 className="text-base font-bold text-slate-900">納期管理システム</h1>
+            <h1 className="text-base font-bold text-slate-900">No1 Ship</h1>
             <p className="text-xs text-slate-500">社内用です。社員共通のパスワードを入力してください</p>
           </div>
         </div>

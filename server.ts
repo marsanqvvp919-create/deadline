@@ -6043,7 +6043,7 @@ function buildInvoiceShipment(si: ShipInstruction, m: NonNullable<typeof invoice
     shippingCost: 0,
     insurance: 0,
     otherCharges: 0,
-    notes: `納期管理システムの出荷指示 ${si.id}（受注 ${si.orderId}）から作成`,
+    notes: `No1 Shipの出荷指示 ${si.id}（受注 ${si.orderId}）から作成`,
     items: okItems,
     totalQty: okItems.reduce((n, x) => n + x.qty, 0),
     totalWeight: Math.round(okItems.reduce((n, x) => n + x.totalWeight, 0) * 1000) / 1000,
@@ -6051,12 +6051,12 @@ function buildInvoiceShipment(si: ShipInstruction, m: NonNullable<typeof invoice
     totalInvoiceAmount: total,
     status: 'CONFIRMED',
     createdBy: 'deadline',
-    createdByName: '納期管理システム',
+    createdByName: 'No1 Ship',
     updatedBy: 'deadline',
-    updatedByName: '納期管理システム',
+    updatedByName: 'No1 Ship',
     createdAt: nowIso,
     updatedAt: nowIso,
-    history: [{ date: nowIso.substring(0, 16).replace('T', ' '), user: '納期管理システム', action: 'CREATED_FROM_DEADLINE', detail: `出荷指示 ${si.id} からインボイス作成（${okItems.length}品目, 合計${okItems.reduce((n, x) => n + x.qty, 0)}点）` }],
+    history: [{ date: nowIso.substring(0, 16).replace('T', ' '), user: 'No1 Ship', action: 'CREATED_FROM_DEADLINE', detail: `出荷指示 ${si.id} からインボイス作成（${okItems.length}品目, 合計${okItems.reduce((n, x) => n + x.qty, 0)}点）` }],
   };
   return { shipment, problems, unmatched, clinic, warehouse };
 }
@@ -6231,7 +6231,7 @@ app.post('/api/invoice-admin/masters/:type', async (req, res) => {
   if (!String(data[nameKey] || '').trim()) return res.status(400).json({ error: '名前を入れてください' });
   try {
     const now = new Date().toISOString();
-    const ref = await invoiceDb().collection(type).add({ active: true, ...data, createdAt: now, updatedAt: now, updatedBy: '納期管理システム' });
+    const ref = await invoiceDb().collection(type).add({ active: true, ...data, createdAt: now, updatedAt: now, updatedBy: 'No1 Ship' });
     invoiceMasters = null;
     res.json({ id: ref.id });
   } catch (e: any) {
@@ -6251,7 +6251,7 @@ app.post('/api/invoice-admin/masters/:type/:id', async (req, res) => {
       all.docs.forEach((d) => d.id !== req.params.id && d.get('isDefault') && batch.update(d.ref, { isDefault: false }));
       await batch.commit();
     }
-    await db.collection(type).doc(req.params.id).update({ ...data, updatedAt: new Date().toISOString(), updatedBy: '納期管理システム' });
+    await db.collection(type).doc(req.params.id).update({ ...data, updatedAt: new Date().toISOString(), updatedBy: 'No1 Ship' });
     invoiceMasters = null;
     res.json({ ok: true });
   } catch (e: any) {
@@ -6324,7 +6324,7 @@ app.post('/api/invoice-admin/shipments/:id/status', async (req, res) => {
     const d = await ref.get();
     if (!d.exists) return res.status(404).json({ error: '見つかりません' });
     const now = new Date().toISOString();
-    const upd: any = { status, updatedAt: now, updatedByName: '納期管理システム', history: [...((d.get('history') as any[]) || []), { date: now.substring(0, 16).replace('T', ' '), user: '納期管理システム', action: 'STATUS_CHANGE', detail: `状況変更: ${d.get('status')} → ${status}` }] };
+    const upd: any = { status, updatedAt: now, updatedByName: 'No1 Ship', history: [...((d.get('history') as any[]) || []), { date: now.substring(0, 16).replace('T', ' '), user: 'No1 Ship', action: 'STATUS_CHANGE', detail: `状況変更: ${d.get('status')} → ${status}` }] };
     if (typeof req.body?.trackingNo === 'string' && req.body.trackingNo.trim()) upd.trackingNo = req.body.trackingNo.trim().slice(0, 100);
     await ref.update(upd);
     res.json({ ok: true });
@@ -6373,12 +6373,12 @@ app.post('/api/invoice-admin/shipments', async (req, res) => {
       totalInvoiceAmount: total + (Number(b.shippingCost) || 0),
       status: 'CONFIRMED',
       createdBy: 'deadline',
-      createdByName: '納期管理システム',
+      createdByName: 'No1 Ship',
       updatedBy: 'deadline',
-      updatedByName: '納期管理システム',
+      updatedByName: 'No1 Ship',
       createdAt: now,
       updatedAt: now,
-      history: [{ date: now.substring(0, 16).replace('T', ' '), user: '納期管理システム', action: 'CREATED_MANUAL', detail: `手入力でインボイス作成（${items.length}品目）` }],
+      history: [{ date: now.substring(0, 16).replace('T', ' '), user: 'No1 Ship', action: 'CREATED_MANUAL', detail: `手入力でインボイス作成（${items.length}品目）` }],
     };
     const r = await saveShipmentWithNumber(shipment, date, m.settings?.prefix);
     res.json({ invoiceNo: r.invoiceNo, shipment: { id: r.docId, ...shipment, invoiceNo: r.invoiceNo, date }, settings: m.settings });
