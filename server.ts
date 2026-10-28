@@ -5555,8 +5555,8 @@ function leakChecks() {
     }));
 
   const inbound = Object.values(inv().inbound).filter((r) => !r.received && !r.excluded && !r.cancelled);
-  // 2. 発注したのにベンダーが出していない（追跡番号が入らない）
-  add('vendor_not_shipped', 'vendor', 'ベンダーが出していない（追跡番号なし）', `発注から${D.vendorNotShipped}日以上、追跡番号が入っていない（キック・持込は除く）`, 'inventory_management',
+  // 2. 発注したのに仕入先が出していない（追跡番号が入らない）
+  add('vendor_not_shipped', 'vendor', '仕入先が出していない（追跡番号なし）', `発注から${D.vendorNotShipped}日以上、追跡番号が入っていない（キック・持込は除く）`, 'inventory_management',
     inbound.flatMap((r) => {
       const d = daysSince(r.poDate);
       if (inboundState(r).code !== 'no_tracking' || d === null || d < D.vendorNotShipped) return [];

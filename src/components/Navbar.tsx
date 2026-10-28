@@ -232,7 +232,7 @@ export const Navbar: React.FC<NavbarProps> = ({
       )}
 
       {/* Main Filter Bar */}
-      <div className="px-4 sm:px-6 py-2 flex flex-wrap items-center justify-end gap-3">
+      <div className="px-3 sm:px-6 py-2 flex flex-wrap items-center justify-end gap-2 sm:gap-3">
         {/* Left: ソフト名 › グループ › 今の画面 */}
         <div className="flex items-center gap-2 min-w-0 mr-auto">
           <span className="hidden md:inline text-xs font-black tracking-tight text-slate-400 whitespace-nowrap">{appName}</span>
@@ -245,7 +245,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           {pageTitle && <span className="text-base font-black text-slate-900 truncate">{pageTitle}</span>}
         </div>
         {/* Right: Status, Alerts Badge, Refresh, Settings */}
-        <div className="flex flex-wrap items-center justify-end gap-2.5 ml-auto">
+        <div className="flex flex-wrap items-center justify-end gap-1.5 sm:gap-2.5 ml-auto">
           <ColorLegend />
           <Glossary />
           {/* Alerts Badge Button */}
@@ -261,7 +261,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           </button>
 
           {/* Generated At timestamp / 最終取得成功時刻（要件3） */}
-          <div className="flex items-center gap-1.5 text-[11px] font-mono font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200/80 px-2.5 py-1.5 rounded-lg border border-slate-300 shadow-2xs">
+          <div className="hidden sm:flex items-center gap-1.5 text-[11px] font-mono font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200/80 px-2.5 py-1.5 rounded-lg border border-slate-300 shadow-2xs">
             <Clock className="w-3.5 h-3.5 text-blue-600 shrink-0" />
             <span className="whitespace-nowrap">
               {lastSuccessTime

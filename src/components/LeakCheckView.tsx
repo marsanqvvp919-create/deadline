@@ -131,13 +131,13 @@ export function LeakCheckView({ onNavigate }: { onNavigate: (tab: string) => voi
                         <span className="text-[11px] text-slate-500">{r.hint}</span>
                       </div>
                       {r.items.length > 0 && (
-                        <div className="mt-1.5 ml-6 space-y-1">
+                        <div className="mt-1.5 sm:ml-6 space-y-1">
                           {shown.map((it) =>
                             r.step === 'cool' ? (
-                              <div key={it.id} className="grid grid-cols-[6rem_minmax(0,14rem)_minmax(0,1fr)_4.5rem] items-center gap-2 rounded-lg px-2 py-1">
+                              <div key={it.id} className="grid grid-cols-[6rem_minmax(0,1fr)_3.5rem] sm:grid-cols-[6rem_minmax(0,14rem)_minmax(0,1fr)_4.5rem] items-center gap-x-2 gap-y-1 rounded-lg px-2 py-1.5 sm:py-1 border-b border-slate-100 sm:border-0 last:border-0">
                                 <span className="font-mono font-bold text-indigo-700 truncate">{it.orderId || '—'}</span>
                                 <span className="font-semibold text-slate-800 truncate">{it.clinic}</span>
-                                <span className="flex flex-wrap items-center gap-x-3 gap-y-1 min-w-0">
+                                <span className="col-span-3 sm:col-span-1 order-last sm:order-none flex flex-wrap items-center gap-x-3 gap-y-1 min-w-0">
                                   <span className="text-slate-600 truncate" title={it.text}>
                                     {it.text}
                                   </span>
@@ -146,14 +146,14 @@ export function LeakCheckView({ onNavigate }: { onNavigate: (tab: string) => voi
                                 <span className={`text-right font-mono font-bold ${it.days !== null && it.days >= 7 ? 'text-rose-600' : 'text-amber-700'}`}>{it.days === null ? '—' : `${it.days}日`}</span>
                               </div>
                             ) : (
-                            <button key={it.id} onClick={() => onNavigate(r.tab)} className="w-full grid grid-cols-[6rem_minmax(0,14rem)_minmax(0,1fr)_4.5rem_1rem] items-center gap-2 rounded-lg px-2 py-1 text-left hover:bg-slate-50">
+                            <button key={it.id} onClick={() => onNavigate(r.tab)} className="w-full grid grid-cols-[6rem_minmax(0,1fr)_3.5rem] sm:grid-cols-[6rem_minmax(0,14rem)_minmax(0,1fr)_4.5rem_1rem] items-center gap-x-2 gap-y-0.5 rounded-lg px-2 py-1.5 sm:py-1 text-left hover:bg-slate-50 border-b border-slate-100 sm:border-0 last:border-0">
                               <span className="font-mono font-bold text-indigo-700 truncate">{it.orderId || '—'}</span>
                               <span className="font-semibold text-slate-800 truncate">{it.clinic}</span>
-                              <span className="text-slate-600 truncate" title={it.text}>
+                              <span className="col-span-3 sm:col-span-1 order-last sm:order-none text-slate-600 line-clamp-2 sm:truncate" title={it.text}>
                                 {it.text}
                               </span>
                               <span className={`text-right font-mono font-bold ${it.days !== null && it.days >= 7 ? 'text-rose-600' : 'text-amber-700'}`}>{it.days === null ? '—' : `${it.days}日`}</span>
-                              <ChevronRight className="w-4 h-4 text-slate-300" />
+                              <ChevronRight className="hidden sm:block w-4 h-4 text-slate-300" />
                             </button>
                             )
                           )}
