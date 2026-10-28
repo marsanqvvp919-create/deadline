@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Ban, ExternalLink, Eye, EyeOff, Globe, KeyRound, RotateCcw, Share2, Trash2, X } from 'lucide-react';
 import { api, ClinicPicker, ClinicRef, CopyButton, Group, portalUrl } from './PortalAdminView';
+import { askConfirm } from './flow/Confirm';
 
 /** パスワードの決め方：自動で作るか、社内で決めた文字を入れるか */
 export function PasswordChooser({
@@ -108,8 +109,8 @@ export function ClinicPortalModal({
       await api(`/api/portal-admin/groups/${current!.id}`, { method: 'POST', body: JSON.stringify({ disabled: !current!.disabled }) });
       onClose();
     });
-  const remove = () => {
-    if (!confirm(`「${current!.name}」のお客様画面を削除します。URLとパスワードは使えなくなります。よろしいですか？`)) return;
+  const remove = async () => {
+    if (!(await askConfirm({ title: `「${current!.name}」のお客様画面を削除します`, body: 'URLとパスワードは使えなくなります。元には戻せません。', okLabel: '削除する', danger: true }))) return;
     run(async () => {
       await api(`/api/portal-admin/groups/${current!.id}`, { method: 'DELETE' });
       onClose();

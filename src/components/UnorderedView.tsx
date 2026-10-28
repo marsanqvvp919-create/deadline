@@ -4,7 +4,6 @@ import { Order, OrderLine } from '../types';
 import { isShippingOrFee, openRakurakuWithCopiedId } from '../utils';
 import { isQuoteOrder } from '../utils/salesCalculations';
 import { getConfiguredUrls } from '../api';
-import { FlowSteps } from './flow/FlowSteps';
 import { useCoolFlags } from '../utils/coolFlags';
 import { ColorLegend } from './flow/ColorLegend';
 import { notifyDone, notifyError } from './flow/UndoToast';
@@ -209,7 +208,6 @@ export function UnorderedView({
 
   return (
     <div className="space-y-3">
-      <FlowSteps current="unordered" onNavigate={onNavigate} />
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold text-slate-900 flex items-center gap-2">

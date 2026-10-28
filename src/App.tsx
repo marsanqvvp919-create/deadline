@@ -16,6 +16,7 @@ import { isCoolMissingShipment, isCustomsNgShipment, isOpenShipment } from './ut
 import { Navbar } from './components/Navbar';
 import { SettingsModal, SettingsTab } from './components/SettingsModal';
 import { LeakCheckView } from './components/LeakCheckView';
+import { FlowSteps, FlowStepId } from './components/flow/FlowSteps';
 import { DetailDrawer } from './components/DetailDrawer';
 import { DashboardView } from './components/DashboardView';
 import { SalesDashboardView } from './components/SalesDashboardView';
@@ -31,6 +32,7 @@ import { ClinicMasterView } from './components/ClinicMasterView';
 import { InventoryView, ShippingInstructionsPage } from './components/InventoryView';
 import { UnorderedView } from './components/UnorderedView';
 import { UndoToastHost } from './components/flow/UndoToast';
+import { ConfirmHost } from './components/flow/Confirm';
 import { UpdateNotice } from './components/flow/UpdateNotice';
 import { InvoiceAdmin } from './invoice/InvoiceAdmin';
 import { ArrivalTrackingView } from './components/ArrivalTrackingView';
@@ -700,6 +702,15 @@ export default function App() {
   const CUSTOMS_TABS: ViewTab[] = ['customs_management', 'cool_missing', 'kanto_customs_ng'];
   // 配送状況：到着トラッキング・一括発注の配送・通関・輸入を1つの画面にまとめ、中をタブで切り替える
   const DELIVERY_TABS: ViewTab[] = ['arrival_tracking', 'bulk_deliveries', ...CUSTOMS_TABS];
+  // 今日の作業：漏れ・納期超過・やること・未照合を1つの画面にまとめ、中をタブで切り替える（上から順に片付ける）
+  const TODAY_TABS: ViewTab[] = ['leak_check', 'overdue', 'alerts', 'unmatched_sheets'];
+  // 画面上部の流れのバーで「今いる段」を光らせる
+  const FLOW_CURRENT: Partial<Record<ViewTab, FlowStepId>> = {
+    procurement: 'unordered',
+    inventory_management: 'inbound',
+    shipping_instructions: 'instruct',
+    ...Object.fromEntries(DELIVERY_TABS.map((t) => [t, 'deliver'])),
+  };
   const deliveryNavItems: {
     id: ViewTab;
     group: string;
@@ -712,10 +723,11 @@ export default function App() {
     {
       id: 'leak_check',
       group: 'today',
-      label: '漏れチェック',
+      label: '今日の作業',
       icon: ShieldAlert,
-      badge: leakTotal ? `${leakTotal}` : null,
+      badge: leakTotal + overdueCounts.ordersCount + (sheetUnmatchedCount || 0) > 0 ? `${leakTotal + overdueCounts.ordersCount + (sheetUnmatchedCount || 0)}` : null,
       badgeColor: 'bg-rose-600 text-white font-bold',
+      match: TODAY_TABS,
     },
     {
       id: 'morning_meeting',
@@ -724,13 +736,6 @@ export default function App() {
       icon: CalendarCheck,
       badge: highSeverityCount > 0 ? `${highSeverityCount}` : null,
       badgeColor: 'bg-rose-600 text-white font-bold',
-    },
-    {
-      id: 'alerts',
-      group: 'today',
-      label: 'やることリスト',
-      icon: ListChecks,
-      badge: null,
     },
     {
       id: 'procurement',
@@ -746,22 +751,6 @@ export default function App() {
       label: '引当・出荷指示',
       icon: ClipboardList,
       badge: null,
-    },
-    {
-      id: 'overdue',
-      group: 'today',
-      label: '納期超過一覧',
-      icon: AlertTriangle,
-      badge: overdueCounts.ordersCount > 0 ? `${overdueCounts.ordersCount}` : null,
-      badgeColor: 'bg-rose-600 text-white font-bold',
-    },
-    {
-      id: 'unmatched_sheets',
-      group: 'today',
-      label: '楽楽販売と未照合',
-      icon: FileWarning,
-      badge: sheetUnmatchedCount ? `${sheetUnmatchedCount}` : null,
-      badgeColor: 'bg-amber-600 text-white font-bold',
     },
     {
       id: 'arrival_tracking',
@@ -1012,6 +1001,36 @@ export default function App() {
 
         {/* Main View Container */}
         <main className="flex-1 p-4 sm:p-5 max-w-[1920px] w-full mx-auto min-w-0">
+          {(currentGroup?.id === 'today' || currentGroup?.id === 'shipping') && activeTab !== 'shipping_calc' && (
+            <div className="mb-4">
+              <FlowSteps current={FLOW_CURRENT[activeTab]} onNavigate={(t) => setActiveTab(t as ViewTab)} />
+            </div>
+          )}
+          {TODAY_TABS.includes(activeTab) && (
+            <div className="mb-4 space-y-1.5">
+              <div className="inline-flex flex-wrap gap-1 rounded-xl border border-slate-200 bg-white p-1 shadow-2xs">
+                {([
+                  ['leak_check', '① 漏れ', leakTotal],
+                  ['overdue', '② 納期超過', overdueCounts.ordersCount],
+                  ['alerts', '③ 楽楽販売の入力漏れ', null],
+                  ['unmatched_sheets', '④ シートと楽楽販売の不一致', sheetUnmatchedCount ?? null],
+                ] as [ViewTab, string, number | null][]).map(([id, label, n]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => setActiveTab(id)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 ${activeTab === id ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'}`}
+                  >
+                    {label}
+                    {n !== null && (
+                      <span className={`px-1.5 rounded-full text-[10px] font-mono ${n === 0 ? 'bg-emerald-100 text-emerald-700' : activeTab === id ? 'bg-white text-slate-900' : 'bg-rose-100 text-rose-700'}`}>{n === 0 ? '✓' : n}</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[11px] text-slate-500">①から順に片付けてください。件数が ✓ になれば、その種類の作業は終わりです。</p>
+            </div>
+          )}
           {staleInfo && (
             <div className="mb-4 px-4 py-2.5 rounded-xl border border-amber-300 bg-amber-50 text-amber-900 text-xs font-bold flex items-center gap-2">
               <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
@@ -1255,6 +1274,7 @@ export default function App() {
           )}
 
           <UndoToastHost />
+          <ConfirmHost />
           <UpdateNotice />
           {activeTab === 'shipping_instructions' && <ShippingInstructionsPage onNavigate={(t) => setActiveTab(t as ViewTab)} />}
           {activeTab === 'invoices' && <InvoiceAdmin />}

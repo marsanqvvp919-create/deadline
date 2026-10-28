@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { AlertTriangle, CheckCircle2, ChevronRight, RefreshCw, ShieldAlert } from 'lucide-react';
 import { demoHeaders } from '../utils/demo';
 import { TONE } from './flow/tone';
-import { FlowSteps } from './flow/FlowSteps';
 
 // 漏れチェック：流れの段ごとに、目安の日数を過ぎても次に進んでいないものを並べる。
 // 押すとその作業をする画面へ移る。データは楽楽販売・在庫・配送会社から毎回計算（ここでは何も書き換えない）
@@ -85,7 +84,6 @@ export function LeakCheckView({ onNavigate }: { onNavigate: (tab: string) => voi
 
   return (
     <div className="space-y-3">
-      <FlowSteps onNavigate={onNavigate} />
       <div className="rounded-xl border border-slate-200 bg-white p-4 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">

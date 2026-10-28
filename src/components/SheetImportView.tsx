@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { AlertCircle, Download, Play, RefreshCw } from 'lucide-react';
 import { useUrlState } from '../utils/listState';
+import { askConfirm } from './flow/Confirm';
 
 // 毎朝6時の「シート → 楽楽販売」取り込みの試運転結果。楽楽販売にはまだ書き込まない。
 
@@ -78,9 +79,11 @@ export const SheetImportView: React.FC = () => {
   const runNow = async (write = false) => {
     if (
       write &&
-      !window.confirm(
-        `楽楽販売の出荷管理に書き込みます（インポート設定 100757）。\n差分のある出荷 ${latest?.shipmentsUpdated ?? 0} 件が対象です。実行しますか？`
-      )
+      !(await askConfirm({
+        title: '楽楽販売の出荷管理に書き込みます',
+        body: `シートと違いのある出荷 ${latest?.shipmentsUpdated ?? 0} 件が対象です（インポート設定 100757）。`,
+        okLabel: '書き込む',
+      }))
     )
       return;
     setRunning(true);

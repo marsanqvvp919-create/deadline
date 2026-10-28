@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Building2, Copy, Check, KeyRound, Plus, Search, Trash2, X, ExternalLink, Ban, RotateCcw } from 'lucide-react';
 import { PUBLIC_ORIGIN } from '../utils/publicUrl';
+import { askConfirm } from './flow/Confirm';
 
 export interface ClinicRef {
   clinicId: string;
@@ -139,7 +140,7 @@ export function PortalAdminView() {
     }
   };
   const resetPassword = async (g: Group) => {
-    if (!confirm(`「${g.name}」のパスワードを再発行します。今のパスワードは使えなくなり、ログイン中の方もログアウトされます。よろしいですか？`)) return;
+    if (!(await askConfirm({ title: `「${g.name}」のパスワードを再発行します`, body: '今のパスワードは使えなくなり、ログイン中の方もログアウトされます。', okLabel: '再発行する', danger: true }))) return;
     try {
       const j = await api(`/api/portal-admin/groups/${g.id}/reset-password`, { method: 'POST' });
       setIssued({ group: j.group, password: j.password, reset: true });
@@ -157,7 +158,7 @@ export function PortalAdminView() {
     }
   };
   const remove = async (g: Group) => {
-    if (!confirm(`「${g.name}」を削除します。URLは使えなくなります。よろしいですか？`)) return;
+    if (!(await askConfirm({ title: `「${g.name}」を削除します`, body: 'URLは使えなくなります。元には戻せません。', okLabel: '削除する', danger: true }))) return;
     try {
       await api(`/api/portal-admin/groups/${g.id}`, { method: 'DELETE' });
       load();

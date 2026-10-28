@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { getConfiguredUrls, saveConnectionConfig, fetchServerIp, ConnectionMode } from '../api';
 import { getSalesRepsList, addSalesRep, removeSalesRep } from '../utils/salesRepMapping';
 import { CarrierSettingsView } from './CarrierSettingsView';
+import { askConfirm, tellUser } from './flow/Confirm';
 import {
   X,
   CheckCircle,
@@ -278,7 +279,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                           setNewRepName('');
                           onSaved();
                         } else {
-                          alert('すでに登録されているか、名前が無効です');
+                          tellUser('追加できませんでした', 'すでに登録されている名前か、名前が空です。');
                         }
                       }
                     }}
@@ -306,8 +307,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                       </div>
                       <button
                         type="button"
-                        onClick={() => {
-                          if (confirm(`営業担当「${rep}」を削除しますか？\n（割り当てられていたクリニックは「未割当」になります）`)) {
+                        onClick={async () => {
+                          if (await askConfirm({ title: `営業担当「${rep}」を削除します`, body: '割り当てられていたクリニックは「未割当」になります。', okLabel: '削除する', danger: true })) {
                             removeSalesRep(rep);
                             setSalesRepsList(getSalesRepsList());
                             onSaved();
@@ -364,7 +365,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                     localStorage.removeItem('nouki_cache_ver_v2');
                     localStorage.removeItem('nouki_stored_orders_v2');
                     onSaved();
-                    alert('ローカルキャッシュを完全にクリアし、最新データを再同期しました。');
+                    tellUser('この端末に保存していたデータを消して、最新のデータを取り直しました');
                     onClose();
                   }}
                   className="px-3.5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold transition shadow-xs cursor-pointer"

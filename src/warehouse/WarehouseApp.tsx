@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { InvoicePdfButtons } from '../invoice/InvoiceDialog';
 import { CheckCircle2, ClipboardList, History, Loader2, Lock, LogOut, PackageCheck, PackageMinus, RefreshCw, Search, Send, Truck, Warehouse } from 'lucide-react';
+import { askConfirm, ConfirmHost } from '../components/flow/Confirm';
 
 // 倉庫の担当者の画面（/warehouse/:slug）。自分の倉庫の入荷予定だけを見て、届いた実数を入れて承認・出庫する。
 // 日本語と英語を並べて表示する（韓国・シンガポールの倉庫の担当者向け）
@@ -165,7 +166,7 @@ function InboundCard({ rec, slug, onDone }: { rec: Inbound; slug: string; onDone
   const [error, setError] = useState('');
   const short = rec.lines.some((l) => Number(qty[l.key]) < l.qty);
   const receive = async () => {
-    if (!confirm(`${rec.poId} を承認して在庫に加えます。よろしいですか？\nConfirm receipt and add to stock?`)) return;
+    if (!(await askConfirm({ title: `${rec.poId} を承認して在庫に加えます`, body: 'Confirm receipt and add to stock?', okLabel: '承認する / Confirm', cancelLabel: 'やめる / Cancel' }))) return;
     setBusy(true);
     setError('');
     try {
@@ -258,7 +259,7 @@ function InstructionCard({ si, slug, onDone }: { si: Instruction; slug: string; 
   const [error, setError] = useState('');
   const d = si.destination;
   const ship = async () => {
-    if (!tracking.trim() && !confirm('追跡番号なしで出荷完了にします。よろしいですか？\nMark as shipped without a tracking number?')) return;
+    if (!tracking.trim() && !(await askConfirm({ title: '追跡番号なしで出荷完了にします', body: 'Mark as shipped without a tracking number?', okLabel: '出荷完了にする / Ship', cancelLabel: 'やめる / Cancel', danger: true }))) return;
     setBusy(true);
     setError('');
     try {
@@ -591,5 +592,10 @@ export function WarehouseApp({ slug }: { slug: string }) {
   const logout = useCallback(() => setState('out'), []);
   if (state === 'checking') return <div className="min-h-screen flex items-center justify-center text-slate-400"><Loader2 className="w-6 h-6 animate-spin" /></div>;
   if (state === 'out') return <Login slug={slug} onDone={() => setState('in')} />;
-  return <Dashboard slug={slug} onLogout={logout} />;
+  return (
+    <>
+      <Dashboard slug={slug} onLogout={logout} />
+      <ConfirmHost />
+    </>
+  );
 }

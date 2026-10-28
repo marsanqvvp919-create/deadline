@@ -4,6 +4,7 @@ import { InvoicePdfButtons, downloadInvoicePdf } from './InvoiceDialog';
 import { notifyDone, notifyError } from '../components/flow/UndoToast';
 import { TONE } from '../components/flow/tone';
 import { ColorLegend } from '../components/flow/ColorLegend';
+import { askConfirm } from '../components/flow/Confirm';
 
 // インボイス（INVOICEアプリの機能をこのシステムで）：発送データの一覧・作成・状態変更、マスタ（製剤・クリニック・倉庫）と設定の編集。
 // INVOICEアプリと同じデータ（Firestore）を使う
@@ -415,7 +416,7 @@ function CreateTab({ onCreated }: { onCreated: () => void }) {
   const clinicMiss = clinic ? missingOf('clinics', clinic) : [];
   const ready = clinic && warehouseId && priced.some((x) => x.p && Number(x.r.qty) > 0);
   const issue = async () => {
-    if (!confirm('インボイス番号を付けて発行します（発行後は番号を取り消せません）。よろしいですか？')) return;
+    if (!(await askConfirm({ title: 'インボイス番号を付けて発行します', body: '発行したあとは、番号を取り消せません。', okLabel: '発行する', danger: true }))) return;
     setBusy(true);
     try {
       const j = await api('/api/invoice-admin/shipments', {

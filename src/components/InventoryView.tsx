@@ -6,11 +6,11 @@ import { Order } from '../types';
 import { InvoicePdfButtons } from '../invoice/InvoiceDialog';
 import { useCoolFlags } from '../utils/coolFlags';
 import { DhlSettings, FedexSettings, ShipDocsDialog } from '../invoice/AwbDialog';
-import { FlowSteps } from './flow/FlowSteps';
 import { ColorLegend } from './flow/ColorLegend';
 import { notifyDone, notifyError } from './flow/UndoToast';
 import { TONE, Tone } from './flow/tone';
 import { PUBLIC_ORIGIN } from '../utils/publicUrl';
+import { askConfirm } from './flow/Confirm';
 
 // 入荷・在庫（国内倉庫・韓国倉庫・シンガポール倉庫）。楽楽販売の発注（発注済み）から入荷予定を作り、
 // 入荷先倉庫・配送方法・追跡番号・数量をここで入れる。倉庫の担当者が実数を入れて承認すると在庫に加わる（国内倉庫は社内で承認）。
@@ -1402,7 +1402,7 @@ function SampleStockBar({ data, onChange }: { data: InventoryData; onChange: () 
       <button
         disabled={busy}
         onClick={async () => {
-          if (!confirm('仮の在庫を消します。仮の在庫を入れてから作った引当・出荷指示（出荷待ち）も取り消します。よろしいですか？')) return;
+          if (!(await askConfirm({ title: '仮の在庫を消します', body: '仮の在庫を入れてから作った引当・出荷指示（出荷待ち）も取り消します。', okLabel: '消す', danger: true }))) return;
           setBusy(true);
           try {
             await api('/api/inventory/sample-stock/clear', { method: 'POST' });
@@ -1455,7 +1455,6 @@ export function ShippingInstructionsPage({ onNavigate }: { onNavigate?: (tab: st
   }, [load]);
   return (
     <div className="space-y-3">
-      <FlowSteps current="allocate" onNavigate={onNavigate} />
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold text-slate-900 flex items-center gap-2">
@@ -1570,7 +1569,6 @@ export function InventoryView({ orders, onNavigate }: { orders: Order[]; onNavig
 
   return (
     <div className="space-y-4">
-      <FlowSteps current="inbound" onNavigate={onNavigate} />
       <DemoBar onChange={load} />
       <SampleStockBar data={data} onChange={load} />
       <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-3">
