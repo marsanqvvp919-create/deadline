@@ -146,8 +146,6 @@ export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTab | undefined>(undefined);
   // 漏れチェックの件数（左メニューの赤い数字）。5分ごとと、作業のあとに取り直す
-  // 左メニューの「その他」「管理」を開いているか
-  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
   const [leakTotal, setLeakTotal] = useState(0);
   // 漏れの「クール伝票」に当たる出荷（配送状況の「クール手配漏れ」もこれと同じ数にする）
   const [leakCoolIds, setLeakCoolIds] = useState<Set<string> | null>(null);
@@ -696,12 +694,11 @@ export default function App() {
   ];
 
   // メニュー：仕事の順番で「今日やること → 出荷・配送 → 分析 → 管理」
-  // ふだん見えるのは「今日やること」「出荷・配送」だけ。「その他」「管理」はたたんでおき、押すと開く
   const NAV_GROUPS = [
-    { id: 'today', label: '今日やること', folded: false },
-    { id: 'shipping', label: '出荷・配送', folded: false },
-    { id: 'analysis', label: 'その他', folded: true },
-    { id: 'admin', label: '管理', folded: true },
+    { id: 'today', label: '今日やること' },
+    { id: 'shipping', label: '出荷・配送' },
+    { id: 'analysis', label: 'その他' },
+    { id: 'admin', label: '管理' },
   ];
   // グループごとの色（左メニューの見出し・選択中・アイコン、上部の帯と見出しで同じ色を使う）
   const GROUP_THEME: Record<string, { dot: string; label: string; icon: string; active: string; chip: string; bar: string }> = {
@@ -914,28 +911,11 @@ export default function App() {
           <div className="space-y-1">
             {NAV_GROUPS.map((group) => (
               <div key={group.id} className="space-y-1 pt-2 first:pt-0">
-                {(() => {
-                  const items = deliveryNavItems.filter((item) => item.group === group.id);
-                  const hasActive = items.some((item) => (item.match || [item.id]).includes(activeTab));
-                  const shut = group.folded && !openGroups[group.id] && !hasActive;
-                  return group.folded ? (
-                    <button
-                      type="button"
-                      onClick={() => setOpenGroups((g) => ({ ...g, [group.id]: !g[group.id] }))}
-                      className={`w-full px-3 flex items-center gap-1.5 text-[10px] font-bold tracking-wider ${GROUP_THEME[group.id].label} hover:text-white`}
-                    >
-                      <span className={`w-1.5 h-1.5 rounded-full ${GROUP_THEME[group.id].dot}`} />
-                      {group.label}
-                      <span className="ml-auto text-slate-500 font-normal">{shut ? `${items.length}つ ▸` : '▾'}</span>
-                    </button>
-                  ) : (
-                    <div className={`px-3 flex items-center gap-1.5 text-[10px] font-bold tracking-wider ${GROUP_THEME[group.id].label}`}>
-                      <span className={`w-1.5 h-1.5 rounded-full ${GROUP_THEME[group.id].dot}`} />
-                      {group.label}
-                    </div>
-                  );
-                })()}
-            {deliveryNavItems.filter((item) => item.group === group.id && (!group.folded || openGroups[group.id] || deliveryNavItems.some((x) => x.group === group.id && (x.match || [x.id]).includes(activeTab)))).map((item) => {
+                <div className={`px-3 flex items-center gap-1.5 text-[10px] font-bold tracking-wider ${GROUP_THEME[group.id].label}`}>
+                  <span className={`w-1.5 h-1.5 rounded-full ${GROUP_THEME[group.id].dot}`} />
+                  {group.label}
+                </div>
+            {deliveryNavItems.filter((item) => item.group === group.id).map((item) => {
               const isActive = (item.match || [item.id]).includes(activeTab);
               const Icon = item.icon;
 
