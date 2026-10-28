@@ -3,6 +3,7 @@ import { Order, OrderLine, AlertItem } from '../types';
 import { formatDate, buildRakurakuUrl, getRemainingDaysInfo, isShippingOrFee, orderStateLabel } from '../utils';
 import { getConfiguredUrls } from '../api';
 import { CarrierTrackingWidget } from './CarrierTrackingWidget';
+import { OrderProgress } from './flow/OrderProgress';
 import {
   X,
   ExternalLink,
@@ -122,6 +123,7 @@ export const DetailDrawer: React.FC<DetailDrawerProps> = ({
 
           {/* Drawer Body (Scrollable) */}
           <div className="flex-1 overflow-y-auto p-6 space-y-6">
+            <OrderProgress order={order} />
 
             {/* Related Alerts */}
             {relatedAlerts.length > 0 && (

@@ -33,6 +33,7 @@ import { InventoryView, ShippingInstructionsPage } from './components/InventoryV
 import { UnorderedView } from './components/UnorderedView';
 import { UndoToastHost } from './components/flow/UndoToast';
 import { ConfirmHost } from './components/flow/Confirm';
+import { GlobalSearch } from './components/flow/GlobalSearch';
 import { UpdateNotice } from './components/flow/UpdateNotice';
 import { InvoiceAdmin } from './invoice/InvoiceAdmin';
 import { ArrivalTrackingView } from './components/ArrivalTrackingView';
@@ -144,6 +145,8 @@ export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTab | undefined>(undefined);
   // 漏れチェックの件数（左メニューの赤い数字）。5分ごとと、作業のあとに取り直す
+  // 左メニューの「その他」「管理」を開いているか
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
   const [leakTotal, setLeakTotal] = useState(0);
   // 漏れの「クール伝票」に当たる出荷（配送状況の「クール手配漏れ」もこれと同じ数にする）
   const [leakCoolIds, setLeakCoolIds] = useState<Set<string> | null>(null);
@@ -691,11 +694,12 @@ export default function App() {
   ];
 
   // メニュー：仕事の順番で「今日やること → 出荷・配送 → 分析 → 管理」
+  // ふだん見えるのは「今日やること」「出荷・配送」だけ。「その他」「管理」はたたんでおき、押すと開く
   const NAV_GROUPS = [
-    { id: 'today', label: '今日やること' },
-    { id: 'shipping', label: '出荷・配送' },
-    { id: 'analysis', label: '分析' },
-    { id: 'admin', label: '管理' },
+    { id: 'today', label: '今日やること', folded: false },
+    { id: 'shipping', label: '出荷・配送', folded: false },
+    { id: 'analysis', label: 'その他', folded: true },
+    { id: 'admin', label: '管理', folded: true },
   ];
   // グループごとの色（左メニューの見出し・選択中・アイコン、上部の帯と見出しで同じ色を使う）
   const GROUP_THEME: Record<string, { dot: string; label: string; icon: string; active: string; chip: string; bar: string }> = {
@@ -709,6 +713,29 @@ export default function App() {
   // 配送状況：到着トラッキング・一括発注の配送・通関・輸入を1つの画面にまとめ、中をタブで切り替える
   const DELIVERY_TABS: ViewTab[] = ['arrival_tracking', 'bulk_deliveries', ...CUSTOMS_TABS];
   // 今日の作業：漏れ・納期超過・やること・未照合を1つの画面にまとめ、中をタブで切り替える（上から順に片付ける）
+  // 各画面の一番上に出す「この画面でやること」（1行）
+  const PAGE_GUIDE: Partial<Record<ViewTab, string>> = {
+    leak_check: '目安の日数を過ぎても次に進んでいないものを片付けます。行を押すと、その作業をする画面へ移ります',
+    overdue: '最長納期を過ぎた受注を確認し、仕入先への督促やクリニックへの連絡をします',
+    alerts: '楽楽販売の入力が抜けている受注・出荷を直します（直す場所は各行に書いてあります）',
+    unmatched_sheets: '出荷シートにあるのに楽楽販売の出荷と結びつかない荷物を確認し、楽楽販売に登録します',
+    morning_meeting: '朝の会議で、遅れている受注と配送の問題を順に確認します',
+    procurement: '入金済みの未発注を、在庫から確保するか、楽楽販売で発注します',
+    shipping_instructions: '在庫を受注に引き当て、倉庫への出荷指示・インボイス・送り状を作ります',
+    arrival_tracking: '出荷した荷物の今の場所を確認し、止まっているものに対応します',
+    bulk_deliveries: '一括発注で各院へ送る荷物の配送を確認します',
+    customs_management: '通関・輸入の状況を確認します',
+    cool_missing: 'クール便の手配（佐川の伝票・申請・委任状）が済んでいない出荷を片付けます',
+    kanto_customs_ng: '関東で通関できない商品を含む出荷や、通関で止まっている荷物に対応します',
+    inventory_management: '韓国・シンガポール倉庫の在庫と入荷予定を確認し、届いた荷物を受け取ります',
+    unshipped_clinics: 'まだ出荷できていない商品があるクリニックを確認します',
+    invoices: 'インボイスを作成・発行し、過去のインボイスを探します',
+    dashboard: '受注・納期・遅れの全体の傾向を見ます',
+    sheet_import: '出荷シートの内容を楽楽販売に取り込みます',
+    products: '商品ごとの仕入先・原価・クール便の要否を確認・設定します',
+    clinics: 'クリニックの情報と、送り先（英語名・住所・電話）を確認・修正します',
+    portal_admin: 'お客様が見る管理画面のURLとパスワードを発行・管理します',
+  };
   // 今日の作業の件数（左メニュー・右上・タブで同じ数を使う）
   const todayTotal = leakTotal + overdueCounts.ordersCount + (sheetUnmatchedCount || 0);
   const TODAY_TABS: ViewTab[] = ['leak_check', 'overdue', 'alerts', 'unmatched_sheets'];
@@ -772,7 +799,7 @@ export default function App() {
     },
     {
       id: 'unshipped_clinics',
-      group: 'shipping',
+      group: 'analysis',
       label: '未出荷クリニック',
       icon: Truck,
       badge: unshippedClinicsCount > 0 ? `${unshippedClinicsCount}` : null,
@@ -787,14 +814,14 @@ export default function App() {
     },
     {
       id: 'invoices',
-      group: 'shipping',
+      group: 'analysis',
       label: 'インボイス',
       icon: FileText,
       badge: null,
     },
     {
       id: 'shipping_calc',
-      group: 'shipping',
+      group: 'analysis',
       label: '国際送料電卓',
       icon: Calculator,
       badge: null,
@@ -885,11 +912,28 @@ export default function App() {
           <div className="space-y-1">
             {NAV_GROUPS.map((group) => (
               <div key={group.id} className="space-y-1 pt-2 first:pt-0">
-                <div className={`px-3 flex items-center gap-1.5 text-[10px] font-bold tracking-wider ${GROUP_THEME[group.id].label}`}>
-                  <span className={`w-1.5 h-1.5 rounded-full ${GROUP_THEME[group.id].dot}`} />
-                  {group.label}
-                </div>
-            {deliveryNavItems.filter((item) => item.group === group.id).map((item) => {
+                {(() => {
+                  const items = deliveryNavItems.filter((item) => item.group === group.id);
+                  const hasActive = items.some((item) => (item.match || [item.id]).includes(activeTab));
+                  const shut = group.folded && !openGroups[group.id] && !hasActive;
+                  return group.folded ? (
+                    <button
+                      type="button"
+                      onClick={() => setOpenGroups((g) => ({ ...g, [group.id]: !g[group.id] }))}
+                      className={`w-full px-3 flex items-center gap-1.5 text-[10px] font-bold tracking-wider ${GROUP_THEME[group.id].label} hover:text-white`}
+                    >
+                      <span className={`w-1.5 h-1.5 rounded-full ${GROUP_THEME[group.id].dot}`} />
+                      {group.label}
+                      <span className="ml-auto text-slate-500 font-normal">{shut ? `${items.length}つ ▸` : '▾'}</span>
+                    </button>
+                  ) : (
+                    <div className={`px-3 flex items-center gap-1.5 text-[10px] font-bold tracking-wider ${GROUP_THEME[group.id].label}`}>
+                      <span className={`w-1.5 h-1.5 rounded-full ${GROUP_THEME[group.id].dot}`} />
+                      {group.label}
+                    </div>
+                  );
+                })()}
+            {deliveryNavItems.filter((item) => item.group === group.id && (!group.folded || openGroups[group.id] || deliveryNavItems.some((x) => x.group === group.id && (x.match || [x.id]).includes(activeTab)))).map((item) => {
               const isActive = (item.match || [item.id]).includes(activeTab);
               const Icon = item.icon;
 
@@ -986,6 +1030,7 @@ export default function App() {
         <Navbar
           appName={APP_NAME}
           pageTitle={currentNav?.label || ''}
+          search={<GlobalSearch orders={deliveryData.orders} shipments={shipments} onPick={(o) => handleOpenDetail(o)} />}
           groupLabel={currentGroup?.label || ''}
           groupChip={currentGroup ? GROUP_THEME[currentGroup.id].chip : ''}
           groupBar={currentGroup ? GROUP_THEME[currentGroup.id].bar : 'from-slate-400 to-slate-500'}
@@ -1038,6 +1083,12 @@ export default function App() {
               </div>
               <p className="text-[11px] text-slate-500">①から順に片付けてください。件数が ✓ になれば、その種類の作業は終わりです。</p>
             </div>
+          )}
+          {PAGE_GUIDE[activeTab] && (
+            <p className="mb-3 flex items-start gap-1.5 text-xs text-slate-600">
+              <span className="shrink-0 rounded bg-slate-900 px-1.5 py-0.5 text-[10px] font-bold text-white">この画面でやること</span>
+              <span className="pt-px">{PAGE_GUIDE[activeTab]}</span>
+            </p>
           )}
           {staleInfo && (
             <div className="mb-4 px-4 py-2.5 rounded-xl border border-amber-300 bg-amber-50 text-amber-900 text-xs font-bold flex items-center gap-2">

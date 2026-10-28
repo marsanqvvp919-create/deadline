@@ -18,6 +18,8 @@ import {
 interface NavbarProps {
   appName?: string;
   pageTitle?: string;
+  /** 画面上部の検索窓 */
+  search?: React.ReactNode;
   groupLabel?: string;
   groupChip?: string;
   groupBar?: string;
@@ -45,6 +47,7 @@ interface NavbarProps {
 export const Navbar: React.FC<NavbarProps> = ({
   appName = '',
   pageTitle = '',
+  search,
   groupLabel = '',
   groupChip = '',
   groupBar = 'from-slate-400 to-slate-500',
@@ -245,6 +248,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           {pageTitle && <span className="text-base font-black text-slate-900 truncate">{pageTitle}</span>}
         </div>
         {/* Right: Status, Alerts Badge, Refresh, Settings */}
+        {search && <div className="order-last basis-full sm:order-none sm:basis-auto">{search}</div>}
         <div className="flex flex-wrap items-center justify-end gap-1.5 sm:gap-2.5 ml-auto">
           <ColorLegend />
           <Glossary />
