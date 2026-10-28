@@ -31,7 +31,7 @@ const STEPS: { id: FlowStepId; label: string; count: (c: Counts) => number | nul
   { id: 'deliver', label: '追跡・到着', count: (c) => c.inTransit, tab: 'arrival_tracking', tone: 'waiting', hint: '配送中' },
 ];
 
-export function FlowSteps({ current, onNavigate }: { current?: FlowStepId; onNavigate?: (tab: string) => void }) {
+export function FlowSteps({ current, onNavigate, unordered }: { current?: FlowStepId; onNavigate?: (tab: string) => void; unordered?: number }) {
   const [counts, setCounts] = useState<Counts | null>(null);
   const load = useCallback(() => {
     fetch('/api/inventory/flow', { headers: demoHeaders() })
@@ -51,7 +51,8 @@ export function FlowSteps({ current, onNavigate }: { current?: FlowStepId; onNav
     <div className="rounded-xl border border-slate-200 bg-white px-2 py-2 overflow-x-auto">
       <div className="flex items-stretch gap-1 min-w-max">
         {STEPS.map((s, i) => {
-          const n = counts ? s.count(counts) : null;
+          // 未発注は画面側で数えた数（左メニュー・未発注の画面と同じ）を優先する
+          const n = s.id === 'unordered' && unordered !== undefined ? unordered : counts ? s.count(counts) : null;
           const leak = counts?.leaks?.[s.id] || 0;
           const here = s.id === current;
           const tone: Tone = n === 0 ? 'done' : s.tone;

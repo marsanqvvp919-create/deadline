@@ -34,6 +34,7 @@ import { UnorderedView } from './components/UnorderedView';
 import { UndoToastHost } from './components/flow/UndoToast';
 import { ConfirmHost } from './components/flow/Confirm';
 import { GlobalSearch } from './components/flow/GlobalSearch';
+import { isQuoteOrder } from './utils/salesCalculations';
 import { UpdateNotice } from './components/flow/UpdateNotice';
 import { InvoiceAdmin } from './invoice/InvoiceAdmin';
 import { ArrivalTrackingView } from './components/ArrivalTrackingView';
@@ -570,7 +571,8 @@ export default function App() {
       // 発注が必要な伝票（入金済み・売掛・締日決済）だけ。流れのバーの「未発注」と同じ数え方
       if (o.paymentStatus !== '入金済' && o.paymentStatus !== '売掛・締日決済') return;
       // 出荷済み・納品済みの伝票に残った未発注の明細は、発注の対象ではない
-      if (o.orderState !== '進行中' || /見積|出荷済|納品済|キャンセル/.test(String(o.status || ''))) return;
+      // 未発注の画面のタブ（入金済み＋売掛・締日）と同じ条件
+      if (isQuoteOrder(o) || o.orderState === '全明細出荷済' || o.orderState === '納品完了') return;
       o.lines.forEach((l) => {
         if (isShippingOrFee(l.productName, l.productId)) return;
         if (l.stage === '未発注' && (l.allocatedQty || 0) < l.quantity) count++;
@@ -1056,7 +1058,7 @@ export default function App() {
         <main className="flex-1 p-4 sm:p-5 max-w-[1920px] w-full mx-auto min-w-0">
           {(currentGroup?.id === 'today' || currentGroup?.id === 'shipping') && activeTab !== 'shipping_calc' && (
             <div className="mb-4">
-              <FlowSteps current={FLOW_CURRENT[activeTab]} onNavigate={(t) => setActiveTab(t as ViewTab)} />
+              <FlowSteps current={FLOW_CURRENT[activeTab]} unordered={paidUnorderedCount} onNavigate={(t) => setActiveTab(t as ViewTab)} />
             </div>
           )}
           {TODAY_TABS.includes(activeTab) && (

@@ -14,11 +14,11 @@ export function orderProgress(order: Order): { steps: Step[]; next: string; dela
   const unordered = lines.filter((l) => l.stage === '未発注').length;
   const waiting = lines.filter((l) => l.stage === '発注済・入荷待ち').length;
   const shippedAll = lines.length > 0 && lines.every((l) => l.stage === '出荷完了');
-  const someShipped = lines.some((l) => l.stage === '出荷完了' || l.stage === '一部出荷');
   const delivered = order.orderState === '納品完了';
   const delayed = lines.filter((l) => isLineDelayed(l, order)).length;
 
-  const reached = delivered ? 5 : shippedAll ? 4 : someShipped || (unordered === 0 && waiting === 0) ? 3 : unordered === 0 ? 2 : paid ? 1 : 0;
+  // 一部でも手前の段に残っていれば、その段を「今」にする（例：1明細でも入荷待ちなら「入荷」）
+  const reached = delivered ? 5 : shippedAll ? 4 : unordered > 0 ? (paid ? 1 : 0) : waiting > 0 ? 2 : 3;
   const labels = ['入金', '発注', '入荷', '出荷', '到着'];
   const steps: Step[] = labels.map((label, i) => ({ label, state: i < reached ? 'done' : i === reached ? 'now' : 'todo' }));
 
