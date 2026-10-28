@@ -3466,7 +3466,8 @@ function isDomesticDesignated(d: string): boolean {
 }
 
 function chainFor(d: string): CarrierId[] {
-  if (domesticEnabled && isDomesticDesignated(d)) return [...DOMESTIC_CARRIERS];
+  // 国内の伝票は12桁（日本郵便は11桁も）。10桁は「国内追跡番号」の欄に入っていても DHL の番号として照会する
+  if (domesticEnabled && d.length >= 11 && isDomesticDesignated(d)) return [...DOMESTIC_CARRIERS];
   const cls = classifyNumber(d);
   if (cls.invalid || !cls.primary) return [];
   const chain: CarrierId[] = [cls.primary as CarrierId];
