@@ -151,3 +151,14 @@ main span.rounded-full,
 main span.rounded-md {
   white-space: nowrap;
 }
+
+/* スマホ：表は列がつぶれないよう最小幅を持たせ、表を囲む箱の中で横にスクロールさせる */
+@media (max-width: 640px) {
+  main table {
+    min-width: 640px;
+  }
+  main div:has(> table) {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}
