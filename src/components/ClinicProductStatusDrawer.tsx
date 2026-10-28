@@ -78,7 +78,7 @@ export const ClinicProductStatusDrawer: React.FC<ClinicProductStatusDrawerProps>
   onSelectOrder,
   onSwitchClinic,
 }) => {
-  // Current tab inside drawer: 'products' (商品ステータス) | 'master_info' (取引先基本情報)
+  // Current tab inside drawer: 'products' (商品ステータス) | 'master_info' (クリニック基本情報)
   const [activeTab, setActiveTab] = useState<'products' | 'master_info'>('products');
 
   // Display mode: 'by_order' (伝票別) | 'flat_list' (商品一覧) | 'aggregated' (商品品目別集計)
@@ -373,7 +373,7 @@ export const ClinicProductStatusDrawer: React.FC<ClinicProductStatusDrawerProps>
   // CSV Export for this clinic's products
   const handleExportCsv = () => {
     const headers = [
-      '取引先名',
+      'クリニック名',
       '受注伝票ID',
       '受注日',
       '商品ID',
@@ -411,7 +411,7 @@ export const ClinicProductStatusDrawer: React.FC<ClinicProductStatusDrawerProps>
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `商品ステータス_${clinicName || '取引先'}_${new Date().toISOString().slice(0, 10)}.csv`;
+    link.download = `商品ステータス_${clinicName || 'クリニック'}_${new Date().toISOString().slice(0, 10)}.csv`;
     link.click();
     URL.revokeObjectURL(url);
   };
@@ -430,8 +430,8 @@ export const ClinicProductStatusDrawer: React.FC<ClinicProductStatusDrawerProps>
     switch (stage) {
       case '未発注':
         return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200">
-            <AlertCircle className="w-3.5 h-3.5 text-rose-600" />
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-50 text-amber-900 border border-amber-300">
+            <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
             <span>未発注 (手配前)</span>
           </span>
         );
@@ -444,15 +444,15 @@ export const ClinicProductStatusDrawer: React.FC<ClinicProductStatusDrawerProps>
         );
       case '一部出荷':
         return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-purple-50 text-purple-700 border border-purple-200">
-            <Truck className="w-3.5 h-3.5 text-purple-600" />
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200">
+            <Truck className="w-3.5 h-3.5 text-blue-600" />
             <span>一部出荷済</span>
           </span>
         );
       case '出荷完了':
         return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
-            <Truck className="w-3.5 h-3.5 text-indigo-600" />
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200">
+            <Truck className="w-3.5 h-3.5 text-blue-600" />
             <span>出荷完了 (配送中)</span>
           </span>
         );
@@ -495,7 +495,7 @@ export const ClinicProductStatusDrawer: React.FC<ClinicProductStatusDrawerProps>
                   isPassed
                     ? isDelivered
                       ? 'bg-emerald-100 text-emerald-800 font-bold'
-                      : 'bg-indigo-100 text-indigo-800 font-bold'
+                      : 'bg-blue-100 text-blue-800 font-bold'
                     : 'bg-slate-100 text-slate-400'
                 }`}
                 title={st.label}
@@ -539,7 +539,7 @@ export const ClinicProductStatusDrawer: React.FC<ClinicProductStatusDrawerProps>
               <div className="space-y-1.5 flex-1">
                 <div className="flex items-center gap-2.5 flex-wrap">
                   <span className="px-2 py-0.5 text-xs font-mono font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-400/30 rounded">
-                    {clinicInfo?.clinicId || '取引先'}
+                    {clinicInfo?.clinicId || 'クリニック'}
                   </span>
                   <span className="text-[11px] text-slate-400">
                     楽楽販売 顧客マスタ
@@ -569,9 +569,9 @@ export const ClinicProductStatusDrawer: React.FC<ClinicProductStatusDrawerProps>
                       <button
                         onClick={() => setIsClinicSelectorOpen(!isClinicSelectorOpen)}
                         className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg text-xs font-medium border border-slate-700 transition flex items-center gap-1 cursor-pointer"
-                        title="他の取引先に切り替え"
+                        title="他のクリニックに切り替え"
                       >
-                        <span>取引先を変更</span>
+                        <span>クリニックを変更</span>
                         <ChevronDown className="w-3.5 h-3.5" />
                       </button>
 
@@ -646,7 +646,7 @@ export const ClinicProductStatusDrawer: React.FC<ClinicProductStatusDrawerProps>
                 <button
                   onClick={handleExportCsv}
                   className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer"
-                  title="この取引先の商品進捗CSVをダウンロード"
+                  title="このクリニックの商品進捗CSVをダウンロード"
                 >
                   <Download className="w-3.5 h-3.5 text-slate-400" />
                   <span>CSV出力</span>
@@ -686,7 +686,7 @@ export const ClinicProductStatusDrawer: React.FC<ClinicProductStatusDrawerProps>
                 }`}
               >
                 <Building2 className="w-4 h-4" />
-                <span>取引先マスタ基本情報・整理表</span>
+                <span>クリニックマスタ基本情報・整理表</span>
               </button>
             </div>
           </div>
@@ -982,7 +982,7 @@ export const ClinicProductStatusDrawer: React.FC<ClinicProductStatusDrawerProps>
                                   className={`text-[11px] font-bold px-2 py-0.5 rounded-md ${
                                     order.orderState === '納品完了'
                                       ? 'bg-emerald-100 text-emerald-800'
-                                      : 'bg-indigo-100 text-indigo-800'
+                                      : 'bg-blue-100 text-blue-800'
                                   }`}
                                 >
                                   伝票状態: {orderStateLabel(order)}
@@ -1248,7 +1248,7 @@ export const ClinicProductStatusDrawer: React.FC<ClinicProductStatusDrawerProps>
                 {displayMode === 'aggregated' && (
                   <div className="space-y-3">
                     <div className="text-xs text-slate-500 font-medium">
-                      この取引先が過去〜現在発注した商品品目別の合算集計（全 {aggregatedProducts.length} 品目）
+                      このクリニックが過去〜現在発注した商品品目別の合算集計（全 {aggregatedProducts.length} 品目）
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
@@ -1447,7 +1447,7 @@ export const ClinicProductStatusDrawer: React.FC<ClinicProductStatusDrawerProps>
           {/* DRAWER FOOTER */}
           <div className="p-4 bg-white border-t border-slate-200 flex items-center justify-between text-xs">
             <span className="text-slate-500">
-              取引先: <b>{clinicName}</b> | 表示品目: <b>{filteredLines.length}</b> 件
+              クリニック: <b>{clinicName}</b> | 表示品目: <b>{filteredLines.length}</b> 件
             </span>
             <button
               onClick={onClose}

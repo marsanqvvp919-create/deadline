@@ -3,7 +3,6 @@ import { FileText, Plus, Search, Settings, Package, Building2, Warehouse as Ware
 import { InvoicePdfButtons, downloadInvoicePdf } from './InvoiceDialog';
 import { notifyDone, notifyError } from '../components/flow/UndoToast';
 import { TONE } from '../components/flow/tone';
-import { ColorLegend } from '../components/flow/ColorLegend';
 import { askConfirm } from '../components/flow/Confirm';
 
 // インボイス（INVOICEアプリの機能をこのシステムで）：発送データの一覧・作成・状態変更、マスタ（製剤・クリニック・倉庫）と設定の編集。
@@ -658,7 +657,6 @@ export function InvoiceAdmin() {
           </h1>
           <p className="text-xs text-slate-500 mt-1">インボイスの一覧・作成と、インボイスに使うマスタ（製剤・クリニック・倉庫）と設定の編集です。インボイスアプリと同じデータを使っています。</p>
         </div>
-        <ColorLegend />
       </div>
       <div className="flex flex-wrap gap-0 border-b-2 border-slate-200">
         {TABS.map(([id, label, Icon]) => (

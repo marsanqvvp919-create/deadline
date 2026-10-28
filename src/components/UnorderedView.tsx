@@ -5,7 +5,6 @@ import { isShippingOrFee, openRakurakuWithCopiedId } from '../utils';
 import { isQuoteOrder } from '../utils/salesCalculations';
 import { getConfiguredUrls } from '../api';
 import { useCoolFlags } from '../utils/coolFlags';
-import { ColorLegend } from './flow/ColorLegend';
 import { notifyDone, notifyError } from './flow/UndoToast';
 
 // 未発注（作り直し版）。1明細1行の軽い一覧で、国内・韓国・シンガポールの空き在庫を並べ、
@@ -217,7 +216,6 @@ export function UnorderedView({
           <p className="text-xs text-slate-500 mt-1">まだ手配していない明細です（送料・手数料、在庫から引き当て済みの分は除く）。在庫があれば引き当て、無ければ楽楽販売で発注します。</p>
         </div>
         <div className="flex flex-wrap gap-2 text-xs">
-          <ColorLegend />
           <button onClick={exportCsv} className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-semibold text-slate-700 hover:bg-slate-50">
             <Download className="w-3.5 h-3.5" />
             CSV

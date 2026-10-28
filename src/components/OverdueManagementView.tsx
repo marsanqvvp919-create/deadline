@@ -87,7 +87,7 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
   // 納期間近は10日先まで拾い、「5日以内」「10日以内」で絞り込む
   const [nearWindow, setNearWindow] = useUrlState<'10' | '5'>('near', '10');
 
-  // View mode: 'orders' (伝票・明細別) | 'clinics' (取引先別)
+  // View mode: 'orders' (伝票・明細別) | 'clinics' (クリニック別)
   const [viewMode, setViewMode] = useUrlState<'orders' | 'clinics'>('view', 'orders');
 
   // Filters
@@ -500,7 +500,7 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
       )
       .join('\n\n');
 
-    return `件名: 【至急・納期確認のお願い】受注番号 ${order.orderId} の納品状況について\n\n仕入先 ご担当者様\n\n平素より大変お世話になっております。\n株式会社AIメディカル 担当の${order.salesRep}でございます。\n\n下記ご注文の商品につきまして、当初の最長納品予定日（${order.earliestDueDate}）を【${order.maxDaysOver}日】超過しております。\nクリニック様より強い納期確認の要請が寄せられており、現在の入荷見込みおよび出荷状況について至急ご教示いただけますでしょうか。\n\n【対象伝票・商品明細】\n受注ID: ${order.orderId}\n納品先取引先: ${order.customerName}\n\n${linesText}\n\n大変恐縮ではございますが、本日中または明日午前中までに最新の進捗状況をご返信いただけますようお願い申し上げます。\n何卒よろしくお願い申し上げます。`;
+    return `件名: 【至急・納期確認のお願い】受注番号 ${order.orderId} の納品状況について\n\n仕入先 ご担当者様\n\n平素より大変お世話になっております。\n株式会社AIメディカル 担当の${order.salesRep}でございます。\n\n下記ご注文の商品につきまして、当初の最長納品予定日（${order.earliestDueDate}）を【${order.maxDaysOver}日】超過しております。\nクリニック様より強い納期確認の要請が寄せられており、現在の入荷見込みおよび出荷状況について至急ご教示いただけますでしょうか。\n\n【対象伝票・商品明細】\n受注ID: ${order.orderId}\n納品先クリニック: ${order.customerName}\n\n${linesText}\n\n大変恐縮ではございますが、本日中または明日午前中までに最新の進捗状況をご返信いただけますようお願い申し上げます。\n何卒よろしくお願い申し上げます。`;
   };
 
   // Generate Clinic Delay Notification Email text
@@ -560,7 +560,7 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `最長納期超過_取引先一覧_${new Date().toISOString().slice(0, 10)}.csv`;
+      a.download = `最長納期超過_クリニック一覧_${new Date().toISOString().slice(0, 10)}.csv`;
       a.click();
       URL.revokeObjectURL(url);
     }
@@ -596,7 +596,7 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
       );
     } else if (days === 0) {
       return (
-        <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-purple-50 text-purple-700 border border-purple-200 flex items-center gap-1 font-mono">
+        <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-amber-50 text-amber-900 border border-amber-300 flex items-center gap-1 font-mono">
           本日期限
         </span>
       );
@@ -614,15 +614,15 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
       case '未対応':
         return 'bg-rose-50 text-rose-700 border-rose-200';
       case '仕入先督促中':
-        return 'bg-indigo-50 text-indigo-700 border-indigo-200';
+        return 'bg-blue-50 text-blue-700 border-blue-200';
       case '顧客連絡済':
         return 'bg-blue-50 text-blue-700 border-blue-200';
       case '代替品提案中':
-        return 'bg-purple-50 text-purple-700 border-purple-200';
+        return 'bg-blue-50 text-blue-700 border-blue-200';
       case '今週入荷予定':
-        return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+        return 'bg-blue-50 text-blue-700 border-blue-200';
       case '対応完了':
-        return 'bg-slate-100 text-slate-700 border-slate-300';
+        return 'bg-emerald-50 text-emerald-700 border-emerald-200';
       default:
         return 'bg-slate-50 text-slate-600 border-slate-200';
     }
@@ -649,7 +649,7 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
                     : formatDelayString(nearWindow === '5' ? approaching5Counts : approachingCounts)}
                 </span>
                 <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200">
-                  影響取引先: {kpis.totalClinics} 院
+                  影響クリニック: {kpis.totalClinics} 院
                 </span>
                 <span className="text-xs font-mono font-semibold bg-blue-50 text-blue-700 border border-blue-200 px-2.5 py-0.5 rounded-md">
                   楽楽販売 ご注文管理(101248) リアルタイム照合
@@ -718,7 +718,7 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
               className="px-3 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 rounded-xl text-xs font-semibold shadow-2xs transition flex items-center gap-1.5 cursor-pointer"
             >
               <Download className="w-3.5 h-3.5 text-slate-500" />
-              <span>{viewMode === 'orders' ? '遅延伝票CSV出力' : '遅延取引先CSV出力'}</span>
+              <span>{viewMode === 'orders' ? '遅延伝票CSV出力' : '遅延クリニックCSV出力'}</span>
             </button>
             <a
               href={RAKURAKU_OVERDUE_LIST_URL}
@@ -820,7 +820,7 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
               }`}
             >
               <Building2 className="w-3.5 h-3.5 text-indigo-600" />
-              <span>取引先（クリニック）別 管理 ({filteredOverdueClinics.length}院)</span>
+              <span>クリニック別 管理 ({filteredOverdueClinics.length}院)</span>
             </button>
           </div>
 
@@ -955,7 +955,7 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
                 <thead>
                   <tr className="bg-slate-50/80 text-slate-600 font-semibold border-b border-slate-200">
                     <th className="py-3 px-4">受注ID</th>
-                    <th className="py-3 px-4">取引先（クリニック）</th>
+                    <th className="py-3 px-4">クリニック</th>
                     <th className="py-3 px-4">担当営業</th>
                     <th className="py-3 px-4">最長予定日 / 超過日数</th>
                     <th className="py-3 px-4">原因 / ボトルネック</th>
@@ -1004,12 +1004,12 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
                             </span>
                           </td>
 
-                          {/* 取引先クリニック */}
+                          {/* クリニック */}
                           <td className="py-3.5 px-4">
                             <button
                               onClick={() => onOpenClinicStatus?.(item.customerName)}
                               className="font-bold text-slate-900 hover:text-indigo-600 hover:underline text-left cursor-pointer flex items-center gap-1 group"
-                              title="この取引先の商品ステータス一覧を開く"
+                              title="このクリニックの商品ステータス一覧を開く"
                             >
                               <span>{item.customerName}</span>
                               <span className="text-[10px] text-indigo-600 opacity-0 group-hover:opacity-100 transition flex items-center gap-0.5">
@@ -1164,7 +1164,7 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
         <div className="space-y-3">
           <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs flex items-center justify-between">
             <span className="text-xs font-bold text-slate-800">
-              納期遅延が発生している取引先一覧 ({filteredOverdueClinics.length} 院)
+              納期遅延が発生しているクリニック一覧 ({filteredOverdueClinics.length} 院)
             </span>
             <span className="text-[11px] text-slate-500 font-medium">
               クリニック名をクリックすると該当伝票と未納品明細が展開されます
@@ -1193,7 +1193,7 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
                 <div className="inline-flex items-center gap-2 px-5 py-3 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 font-bold text-xs shadow-xs">
                   <CheckCircle2 className="w-4 h-4 text-emerald-600" />
                   <span>
-                    該当する取引先はありません（最終取得 {lastSuccessTime ? new Date(lastSuccessTime).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }) : new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}）
+                    該当するクリニックはありません（最終取得 {lastSuccessTime ? new Date(lastSuccessTime).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }) : new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}）
                   </span>
                 </div>
               )}
@@ -1308,7 +1308,7 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
                           onOpenClinicStatus?.(clinic.clinicName);
                         }}
                         className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-600 text-indigo-700 hover:text-white border border-indigo-200 hover:border-indigo-600 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-2xs"
-                        title="この取引先の商品ステータス・全品目を一覧表示"
+                        title="このクリニックの商品ステータス・全品目を一覧表示"
                       >
                         <Package className="w-3.5 h-3.5" />
                         <span>商品ステータス</span>
@@ -1410,7 +1410,7 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
                       {/* Clinic Followup Note Input */}
                       <div className="pt-2">
                         <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                          取引先に対する特記事項・交渉メモ:
+                          クリニックに対する特記事項・交渉メモ:
                         </label>
                         <div className="flex gap-2">
                           <input autoComplete="off"
@@ -1527,7 +1527,7 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
                 <h3 className="font-bold text-sm text-slate-900">
                   {activeTemplateModal.type === 'vendor'
                     ? '仕入先向け 納期督促・状況確認テンプレート文'
-                    : '取引先（クリニック）向け 納期遅延お詫びテンプレート文'}
+                    : 'クリニック向け 納期遅延お詫びテンプレート文'}
                 </h3>
               </div>
               <button

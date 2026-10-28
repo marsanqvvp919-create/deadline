@@ -1,6 +1,8 @@
 import React from 'react';
 import { PeriodFilter } from '../types';
 import { formatDateTime } from '../utils';
+import { ColorLegend } from './flow/ColorLegend';
+import { Glossary } from './flow/Glossary';
 import {
   RefreshCw,
   SlidersHorizontal,
@@ -243,7 +245,9 @@ export const Navbar: React.FC<NavbarProps> = ({
           {pageTitle && <span className="text-base font-black text-slate-900 truncate">{pageTitle}</span>}
         </div>
         {/* Right: Status, Alerts Badge, Refresh, Settings */}
-        <div className="flex items-center gap-2.5 shrink-0 ml-auto">
+        <div className="flex flex-wrap items-center justify-end gap-2.5 ml-auto">
+          <ColorLegend />
+          <Glossary />
           {/* Alerts Badge Button */}
           <button
             type="button"

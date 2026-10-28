@@ -389,7 +389,7 @@ export const ProductMasterView: React.FC<ProductMasterViewProps> = ({
             <span className="text-2xl font-bold text-amber-600 font-mono">
               {uniqueCount(products.filter((p) => !products.some((x) => x.productId === p.productId && x.supplierName)))}
             </span>
-            <span className="text-xs text-slate-500">品目（楽楽販売で入力すると発注先がわかります）</span>
+            <span className="text-xs text-slate-500">品目（楽楽販売で入力すると仕入先がわかります）</span>
           </div>
         </div>
       </div>

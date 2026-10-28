@@ -89,7 +89,7 @@ export const DetailDrawer: React.FC<DetailDrawerProps> = ({
                 <button
                   onClick={() => onOpenClinicStatus?.(order.customerName)}
                   className="hover:text-white hover:underline cursor-pointer flex items-center gap-1.5 transition font-medium"
-                  title="この取引先の商品ステータス一覧を開く"
+                  title="このクリニックの商品ステータス一覧を開く"
                 >
                   <span>{order.customerName}</span>
                   <span className="text-[10px] bg-slate-800 text-indigo-300 px-1.5 py-0.5 rounded border border-slate-700 flex items-center gap-1">

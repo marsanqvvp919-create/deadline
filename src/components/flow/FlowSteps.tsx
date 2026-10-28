@@ -3,7 +3,7 @@ import { ChevronRight } from 'lucide-react';
 import { demoHeaders } from '../../utils/demo';
 import { TONE, Tone } from './tone';
 
-// 画面上部のステップ表示：入金 → 未発注 → ベンダー出荷 → 入荷 → 引当 → 出荷指示 → 出荷 → クール伝票 → 追跡・到着（紙の流れと同じ順）。
+// 画面上部のステップ表示：入金 → 未発注 → 仕入先の出荷 → 入荷 → 引当 → 出荷指示 → 出荷 → クール伝票 → 追跡・到着（紙の流れと同じ順）。
 // 今いる場所を色で示し、各段に残りの件数と、目安の日数を過ぎた「漏れ」の件数を赤で出す。押すとその画面へ移る
 export type FlowStepId = 'unpaid' | 'unordered' | 'vendor' | 'inbound' | 'allocate' | 'instruct' | 'ship' | 'cool' | 'deliver';
 interface Counts {
@@ -22,7 +22,7 @@ interface Counts {
 const STEPS: { id: FlowStepId; label: string; count: (c: Counts) => number | null; tab: string; tone: Tone; hint: string }[] = [
   { id: 'unpaid', label: '入金待ち', count: (c) => c.unpaid, tab: 'procurement', tone: 'waiting', hint: '未発注の明細があり、まだ入金がない伝票' },
   { id: 'unordered', label: '未発注', count: (c) => c.unordered, tab: 'procurement', tone: 'action', hint: '発注するか、在庫から確保する明細' },
-  { id: 'vendor', label: 'ベンダー出荷', count: (c) => c.vendorWait, tab: 'inventory_management', tone: 'waiting', hint: 'ベンダーから倉庫へ向かっている・追跡番号待ちの発注' },
+  { id: 'vendor', label: '仕入先の出荷', count: (c) => c.vendorWait, tab: 'inventory_management', tone: 'waiting', hint: '仕入先から倉庫へ向かっている・追跡番号待ちの発注' },
   { id: 'inbound', label: '入荷', count: (c) => c.inboundTodo, tab: 'inventory_management', tone: 'action', hint: '追跡番号を入れる・国内倉庫で受け取るなど、入荷で作業が必要なもの' },
   { id: 'allocate', label: '引当', count: (c) => c.allocatable, tab: 'shipping_instructions', tone: 'action', hint: '在庫で出せる伝票' },
   { id: 'instruct', label: '出荷指示', count: (c) => c.reserved + c.needInvoice + c.needAwb, tab: 'shipping_instructions', tone: 'action', hint: '出荷依頼・インボイス・送り状（AWB）を作るもの' },
@@ -65,7 +65,7 @@ export function FlowSteps({ current, onNavigate }: { current?: FlowStepId; onNav
                   <span className="text-base font-black font-mono leading-tight">{n === null ? '…' : n === 0 ? '✓' : n}</span>
                 </button>
                 {leak > 0 && (
-                  <button onClick={() => go('leak_check')} title="目安の日数を過ぎて止まっているもの（漏れチェックを開く）" className="absolute -top-2 -right-1.5 rounded-full bg-rose-600 px-1.5 text-[10px] font-black text-white shadow">
+                  <button onClick={() => go('leak_check')} title="目安の日数を過ぎて止まっているもの（今日の作業を開く）" className="absolute -top-2 -right-1.5 rounded-full bg-rose-600 px-1.5 text-[10px] font-black text-white shadow">
                     漏れ{leak}
                   </button>
                 )}

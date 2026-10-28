@@ -29,7 +29,7 @@ interface Leaks {
 
 export const LEAK_STEPS: { id: string; label: string }[] = [
   { id: 'unordered', label: '入金・未発注' },
-  { id: 'vendor', label: 'ベンダー出荷' },
+  { id: 'vendor', label: '仕入先の出荷' },
   { id: 'inbound', label: '入荷' },
   { id: 'allocate', label: '引当' },
   { id: 'instruct', label: '出荷指示（インボイス・AWB）' },
@@ -88,7 +88,7 @@ export function LeakCheckView({ onNavigate }: { onNavigate: (tab: string) => voi
         <div>
           <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
             <ShieldAlert className="w-5 h-5 text-rose-600" />
-            漏れチェック
+            漏れ（目安の日数を過ぎて止まっているもの）
             {data && <span className={`rounded-full px-2.5 py-0.5 text-sm font-black ${data.total ? 'bg-rose-600 text-white' : 'bg-emerald-100 text-emerald-700'}`}>{data.total ? `${data.total}件` : 'なし'}</span>}
           </h2>
           <p className="text-[11px] text-slate-500">流れの段ごとに、目安の日数を過ぎても次に進んでいないものです。行を押すと、その作業をする画面へ移ります。片付くと自動で消えます。</p>

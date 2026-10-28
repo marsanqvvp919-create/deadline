@@ -625,7 +625,7 @@ export default function App() {
     setIsDrawerOpen(true);
   };
 
-  // 取引先別 商品ステータスドロワーの起動
+  // クリニック別 商品ステータスドロワーの起動
   const handleOpenClinicStatus = (clinicName: string, clinicItem?: ClinicItem) => {
     setSelectedClinicForStatus({ clinicName, clinicItem });
   };
@@ -1013,7 +1013,7 @@ export default function App() {
                   ['leak_check', '① 漏れ', leakTotal],
                   ['overdue', '② 納期超過', overdueCounts.ordersCount],
                   ['alerts', '③ 楽楽販売の入力漏れ', null],
-                  ['unmatched_sheets', '④ シートと楽楽販売の不一致', sheetUnmatchedCount ?? null],
+                  ['unmatched_sheets', '④ 楽楽販売と未照合', sheetUnmatchedCount ?? null],
                 ] as [ViewTab, string, number | null][]).map(([id, label, n]) => (
                   <button
                     key={id}

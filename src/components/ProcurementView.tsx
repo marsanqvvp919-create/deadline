@@ -201,7 +201,7 @@ export const ProcurementView: React.FC<ProcurementViewProps> = ({
     const paidUnorderedQty = paidUnordered.reduce((sum, it) => sum + it.line.quantity, 0);
 
     // 仕入先セット
-    // 仕入先が未設定の明細は発注先がないので数えない
+    // 仕入先が未設定の明細は仕入先がないので数えない
     const supplierSet = new Set(paidUnordered.map((it) => it.line.supplierName).filter(Boolean));
 
     return {
@@ -748,7 +748,7 @@ ${linesText}
                           </th>
                           <th className="py-2.5 px-3">入金状況</th>
                           <th className="py-2.5 px-3">受注ID</th>
-                          <th className="py-2.5 px-3">取引先クリニック</th>
+                          <th className="py-2.5 px-3">クリニック</th>
                           <th className="py-2.5 px-3">商品コード・商品名</th>
                           <th className="py-2.5 px-3 text-right">発注数量</th>
                           <th className="py-2.5 px-3 text-right">販売単価 / 金額</th>
@@ -841,7 +841,7 @@ ${linesText}
                                 </span>
                               </td>
 
-                              {/* 取引先クリニック */}
+                              {/* クリニック */}
                               <td className="py-3 px-3">
                                 <button
                                   onClick={() => onOpenClinicStatus && onOpenClinicStatus(it.customerName)}
@@ -1104,7 +1104,7 @@ ${linesText}
                   </th>
                   <th className="py-3 px-3">入金状況</th>
                   <th className="py-3 px-3">受注ID</th>
-                  <th className="py-3 px-3">取引先クリニック</th>
+                  <th className="py-3 px-3">クリニック</th>
                   <th className="py-3 px-3">仕入先</th>
                   <th className="py-3 px-3">商品コード・商品名</th>
                   <th className="py-3 px-3 text-right">数量</th>

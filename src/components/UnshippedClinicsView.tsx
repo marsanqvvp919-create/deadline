@@ -4,6 +4,7 @@ import { Order, OrderLine, ViewTab, ClinicItem } from '../types';
 import { formatDate, getRemainingDaysInfo, getOrderBorderColor, buildRakurakuUrl, isShippingOrFee } from '../utils';
 import { getConfiguredUrls, getLocalClinics } from '../api';
 import { isLineDelayed } from '../utils/delayCalculation';
+import { TONE, stageTone } from './flow/tone';
 import {
   Building2,
   Package,
@@ -966,15 +967,7 @@ ${linesDetail}
                                   {/* ステージ */}
                                   <td className="py-2.5 px-3 whitespace-nowrap">
                                     <span
-                                      className={`inline-block px-2 py-0.5 rounded text-[11px] font-bold ${
-                                        it.line.stage === '未発注'
-                                          ? 'bg-amber-100 text-amber-800'
-                                          : it.line.stage === '発注済・入荷待ち'
-                                          ? 'bg-blue-100 text-blue-800'
-                                          : it.line.stage === '一部出荷'
-                                          ? 'bg-purple-100 text-purple-800'
-                                          : 'bg-slate-100 text-slate-600'
-                                      }`}
+                                      className={`inline-block px-2 py-0.5 rounded border text-[11px] font-bold ${TONE[stageTone(it.line.stage)]}`}
                                     >
                                       {it.line.stage}
                                     </span>

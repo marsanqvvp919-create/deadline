@@ -603,7 +603,7 @@ export const ClinicMasterView: React.FC<ClinicMasterViewProps> = ({
                             }
                           }}
                           className="px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-600 text-indigo-700 hover:text-white font-bold rounded-xl text-xs flex items-center gap-1 transition cursor-pointer border border-indigo-200 hover:border-indigo-600 shadow-2xs"
-                          title="この取引先の商品ステータス一覧・納期進捗を開く"
+                          title="このクリニックの商品ステータス一覧・納期進捗を開く"
                         >
                           <Package className="w-3.5 h-3.5" />
                           <span>商品進捗</span>

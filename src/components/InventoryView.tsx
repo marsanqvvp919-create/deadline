@@ -6,7 +6,6 @@ import { Order } from '../types';
 import { InvoicePdfButtons } from '../invoice/InvoiceDialog';
 import { useCoolFlags } from '../utils/coolFlags';
 import { DhlSettings, FedexSettings, ShipDocsDialog } from '../invoice/AwbDialog';
-import { ColorLegend } from './flow/ColorLegend';
 import { notifyDone, notifyError } from './flow/UndoToast';
 import { TONE, Tone } from './flow/tone';
 import { PUBLIC_ORIGIN } from '../utils/publicUrl';
@@ -323,7 +322,7 @@ function InboundCard({ rec, onSaved }: { rec: Inbound; onSaved: () => void }) {
               disabled={locked || busy}
               value={tracking}
               onChange={(e) => setTracking(e.target.value)}
-              placeholder="ベンダー → 倉庫の追跡番号（複数は「、」区切り）"
+              placeholder="仕入先 → 倉庫の追跡番号（複数は「、」区切り）"
               className="flex-1 min-w-40 rounded-md border border-slate-300 px-2.5 py-1 text-xs font-mono"
             />
             {trackingDirty && !locked && (
@@ -1464,7 +1463,6 @@ export function ShippingInstructionsPage({ onNavigate }: { onNavigate?: (tab: st
           <p className="text-xs text-slate-500 mt-1">在庫から引き当てた明細を倉庫ごとの出荷指示にし、インボイス・AWBの作成から出荷・配達まで追います。</p>
         </div>
         <div className="flex gap-2 text-xs">
-          <ColorLegend />
           <button onClick={load} className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-semibold text-slate-700 hover:bg-slate-50">
             <RefreshCw className="w-3.5 h-3.5" />
             読み込み直す
@@ -1582,7 +1580,6 @@ export function InventoryView({ orders, onNavigate }: { orders: Order[]; onNavig
               楽楽販売の発注（発注済み）から入荷予定を作ります。入荷先・配送方法・追跡番号・数量はここで入れ、倉庫の担当者が実数を入れて承認すると在庫に加わります。楽楽販売には書き込みません。
             </p>
           </div>
-          <ColorLegend />
           <div className={`flex flex-wrap items-center gap-2 text-xs ${isInventoryDemo() ? 'hidden' : ''}`}>
             <span className="text-slate-500">発注の取り込み {fmt(data.poSyncedAt)}</span>
             <button
