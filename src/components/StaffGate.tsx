@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Lock, Loader2 } from 'lucide-react';
+import { ErrorNote } from './flow/Messages';
 
 // 社内画面の入口。ログインしていなければパスワード画面を出す。
 // 使っている途中でログインが切れた（APIが401を返した）ときもパスワード画面に戻す
@@ -80,7 +81,7 @@ function StaffLogin({ onDone }: { onDone: () => void }) {
           placeholder="パスワード"
           className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900"
         />
-        {error && <p className="text-sm text-rose-600">{error}</p>}
+        {error && <ErrorNote message={error} />}
         <button
           type="submit"
           disabled={busy || !password}

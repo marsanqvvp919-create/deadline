@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { InvoicePdfButtons } from '../invoice/InvoiceDialog';
 import { CheckCircle2, ClipboardList, History, Loader2, Lock, LogOut, PackageCheck, PackageMinus, RefreshCw, Search, Send, Truck, Warehouse } from 'lucide-react';
 import { askConfirm, ConfirmHost } from '../components/flow/Confirm';
+import { ErrorNote } from '../components/flow/Messages';
 
 // 倉庫の担当者の画面（/warehouse/:slug）。自分の倉庫の入荷予定だけを見て、届いた実数を入れて承認・出庫する。
 // 日本語と英語を並べて表示する（韓国・シンガポールの倉庫の担当者向け）
@@ -148,7 +149,7 @@ function Login({ slug, onDone }: { slug: string; onDone: () => void }) {
                 className="w-full rounded-lg border border-slate-300 pl-9 pr-3 py-2.5 text-sm"
               />
             </div>
-            {error && <p className="text-xs text-rose-600 font-semibold">{error}</p>}
+            {error && <ErrorNote message={error} compact />}
             <button type="submit" disabled={busy || !password} className="w-full rounded-lg bg-indigo-600 text-white py-2.5 text-sm font-bold disabled:opacity-50">
               {busy ? '…' : 'ログイン / Log in'}
             </button>
@@ -241,7 +242,7 @@ function InboundCard({ rec, slug, onDone }: { rec: Inbound; slug: string; onDone
         <div className="space-y-2">
           <input value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="メモ（不足・破損など） / Note (shortage, damage…)" className="w-full rounded border border-slate-300 px-2.5 py-1.5 text-xs" />
           {short && <div className="text-[11px] text-rose-600 font-semibold">予定より少ない商品があります（不足として社内に知らせます） / Some items are short – our team will be notified.</div>}
-          {error && <div className="text-xs text-rose-600">{error}</div>}
+          {error && <ErrorNote message={error} compact />}
           <button disabled={busy} onClick={receive} className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 text-white px-4 py-2 text-sm font-bold disabled:opacity-50">
             <CheckCircle2 className="w-4 h-4" />
             承認して在庫に入れる / Confirm receipt
@@ -346,7 +347,7 @@ function InstructionCard({ si, slug, onDone }: { si: Instruction; slug: string; 
             <input value={carrier} onChange={(e) => setCarrier(e.target.value)} placeholder="配送業者 / Carrier (DHL, FedEx…)" className="rounded border border-slate-300 px-2.5 py-1.5 text-xs w-56" />
             <input value={tracking} onChange={(e) => setTracking(e.target.value)} placeholder="追跡番号 / Tracking no." className="flex-1 min-w-48 rounded border border-slate-300 px-2.5 py-1.5 text-xs font-mono" />
           </div>
-          {error && <div className="text-xs text-rose-600">{error}</div>}
+          {error && <ErrorNote message={error} compact />}
           <button disabled={busy} onClick={ship} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 text-white px-4 py-2 text-sm font-bold disabled:opacity-50">
             <Send className="w-4 h-4" />
             出荷完了（在庫から引く） / Mark as shipped
@@ -452,7 +453,7 @@ function Dashboard({ slug, onLogout }: { slug: string; onLogout: () => void }) {
       </header>
       <main className="max-w-5xl mx-auto px-4 py-4 space-y-3">
         {demoMode && <div className="rounded-lg bg-fuchsia-50 border border-fuchsia-300 text-fuchsia-900 text-xs font-bold px-3 py-2">サンプル表示です（実データには影響しません） / Sample data – nothing here is real.</div>}
-        {error && <div className="rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-sm px-3 py-2">{error}</div>}
+        {error && <ErrorNote message={error} />}
 
         {tab === 'inbound' && (
           <>

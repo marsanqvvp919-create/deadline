@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Ban, ExternalLink, Eye, EyeOff, Globe, KeyRound, RotateCcw, Share2, Trash2, X } from 'lucide-react';
 import { api, ClinicPicker, ClinicRef, CopyButton, Group, portalUrl } from './PortalAdminView';
 import { askConfirm } from './flow/Confirm';
+import { ErrorNote } from './flow/Messages';
 
 /** パスワードの決め方：自動で作るか、社内で決めた文字を入れるか */
 export function PasswordChooser({
@@ -137,7 +138,7 @@ export function ClinicPortalModal({
           </button>
         </div>
 
-        {error && <div className="rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-sm px-3 py-2">{error}</div>}
+        {error && <ErrorNote message={error} />}
 
         {issued && (
           <div className="rounded-xl border-2 border-emerald-500 bg-emerald-50 p-3 space-y-2">

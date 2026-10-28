@@ -852,8 +852,8 @@ export default function App() {
         {/* Brand Header */}
         <div className="p-4.5 border-b border-slate-800 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-rose-500 via-violet-500 to-sky-500 flex items-center justify-center font-black text-lg text-white shadow-lg ring-1 ring-white/20">
-              納
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-rose-500 via-violet-500 to-sky-500 flex items-center justify-center font-black text-sm tracking-tighter text-white shadow-lg ring-1 ring-white/20">
+              N1
             </div>
             <div>
               <span className="font-black text-[15px] tracking-tight text-white block">{APP_NAME}</span>

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { demoHeaders } from '../utils/demo';
 import { CheckCircle2, Loader2, Plane, Settings, X } from 'lucide-react';
 import { DialogFrame, InvoiceDialog } from './InvoiceDialog';
+import { ErrorNote } from '../components/flow/Messages';
 
 // AWB（航空貨物の送り状）。DHL Express は MyDHL API、FedEx は Ship API で発行してラベルPDFを保存する。
 // API の登録がない間・ほかの配送会社は、AWB番号を手入力する
@@ -230,7 +231,7 @@ export function AwbDialog({ instructionId, onClose, onDone, embedded }: { instru
             )}
           </div>
         )}
-        {error && <div className="rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs px-3 py-2 whitespace-pre-wrap">{error}</div>}
+        {error && <ErrorNote message={error} compact />}
 
         {draft && !done && (
           <>

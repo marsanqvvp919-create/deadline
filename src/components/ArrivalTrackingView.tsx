@@ -561,7 +561,7 @@ export const ArrivalTrackingView: React.FC<{
 
       {visible.length === 0 ? (
         <div className="bg-white border border-slate-200 rounded-2xl p-8 text-center text-sm text-slate-500">
-          {shipments.length === 0 ? '出荷管理のデータを読み込めていません' : '該当する出荷はありません'}
+          {shipments.length === 0 ? '楽楽販売の出荷管理をまだ読み込めていません。少し待つか、右上の「再読み込み」を押してください' : '該当する出荷はありません'}
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">

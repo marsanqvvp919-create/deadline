@@ -10,6 +10,7 @@ import { notifyDone, notifyError } from './flow/UndoToast';
 import { TONE, Tone } from './flow/tone';
 import { PUBLIC_ORIGIN } from '../utils/publicUrl';
 import { askConfirm } from './flow/Confirm';
+import { ErrorNote } from './flow/Messages';
 
 // 入荷・在庫（国内倉庫・韓国倉庫・シンガポール倉庫）。楽楽販売の発注（発注済み）から入荷予定を作り、
 // 入荷先倉庫・配送方法・追跡番号・数量をここで入れる。倉庫の担当者が実数を入れて承認すると在庫に加わる（国内倉庫は社内で承認）。
@@ -350,7 +351,7 @@ function InboundCard({ rec, onSaved }: { rec: Inbound; onSaved: () => void }) {
           {rec.receivedMemo && `・メモ：${rec.receivedMemo}`}
         </div>
       )}
-      {error && <div className="text-xs text-rose-600">{error}</div>}
+      {error && <ErrorNote message={error} compact />}
 
     </div>
   );
@@ -378,7 +379,7 @@ function DomesticReceive({ rec, onSaved }: { rec: Inbound; onSaved: () => void }
           <input type="number" min={0} value={qty[l.key]} onChange={(e) => setQty({ ...qty, [l.key]: e.target.value })} className="w-20 rounded border border-slate-300 px-1.5 py-0.5 text-right font-mono" />
         </div>
       ))}
-      {error && <div className="text-rose-600">{error}</div>}
+      {error && <ErrorNote message={error} compact />}
       <div className="flex gap-2">
         <button
           onClick={async () => {
@@ -632,7 +633,7 @@ function WarehouseAccessPanel({ data, onSaved }: { data: InventoryData; onSaved:
   return (
     <div className="space-y-3">
       <p className="text-xs text-slate-500">倉庫ごとにURLとパスワードを発行します。倉庫の担当者は自分の倉庫の入荷予定だけを見て、届いた実数を入れて承認・出庫できます（仕入値や販売金額は表示されません）。</p>
-      {error && <div className="text-xs text-rose-600">{error}</div>}
+      {error && <ErrorNote message={error} compact />}
       {issued && (
         <div className="rounded-xl border-2 border-emerald-500 bg-emerald-50 p-3 space-y-2 text-xs">
           <div className="font-bold text-emerald-800">{WH_NAME[issued.w]}のURLとパスワード（パスワードはこの画面でしか表示されません）</div>
@@ -1118,7 +1119,7 @@ export function AllocationPanel({ data, onSaved }: { data: InventoryData; onSave
 
   return (
     <div className="space-y-4">
-      {error && <div className="rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs px-3 py-2">{error}</div>}
+      {error && <ErrorNote message={error} compact />}
 
       <section className="rounded-xl border border-slate-200 bg-white">
         <div className="p-3 border-b border-slate-100 space-y-2">
@@ -1479,7 +1480,7 @@ export function ShippingInstructionsPage({ onNavigate }: { onNavigate?: (tab: st
           <FedexSettings onClose={() => setSettingsOpen(false)} />
         </div>
       )}
-      {error && <div className="rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs px-3 py-2">{error}</div>}
+      {error && <ErrorNote message={error} compact />}
       {data && <SampleStockBar data={data} onChange={load} />}
       {data ? <AllocationPanel data={data} onSaved={load} /> : !error && <div className="p-6 text-sm text-slate-500">読み込み中…</div>}
     </div>
@@ -1616,7 +1617,7 @@ export function InventoryView({ orders, onNavigate }: { orders: Order[]; onNavig
             </button>
           )}
         </div>
-        {error && <div className="text-xs text-rose-600">{error}</div>}
+        {error && <ErrorNote message={error} compact />}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
           <div className="flex items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5">
             <div className="text-[11px] text-amber-800 font-semibold truncate">追跡番号待ち</div>

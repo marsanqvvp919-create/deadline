@@ -8,6 +8,7 @@ import { DeliverySlipModal } from './mock/DeliverySlipModal';
 import { ClinicPortalView } from './mock/ClinicPortalView';
 import { OverallHistoryView } from './mock/OverallHistoryView';
 import { BatchDetailsModal } from './mock/BatchDetailsModal';
+import { ErrorNote } from '../components/flow/Messages';
 
 // お客様の管理画面（/portal/:slug）。社内の画面とは別の入口で、グループに入っている院のデータだけを表示する。
 // 画面の部品はTAクリニック向けモック（src/portal/mock）をそのまま使い、データは portalData で本番の内容に変換する。
@@ -90,7 +91,7 @@ function PortalLogin({ slug, onDone }: { slug: string; onDone: () => void }) {
                 placeholder="パスワード"
                 className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
-              {error && <p className="text-xs text-rose-600 font-semibold">{error}</p>}
+              {error && <ErrorNote message={error} compact />}
               <button
                 type="submit"
                 disabled={busy || !password}
@@ -201,7 +202,7 @@ function PortalDashboard({ slug, onLogout }: { slug: string; onLogout: () => voi
       />
 
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8">
-        {error && <div className="mb-4 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-sm px-3 py-2">{error}</div>}
+        {error && <ErrorNote message={error} />}
         {viewMode === 'hq' && (
           <SimpleStatusBarView
             orders={currentBatchOrders}

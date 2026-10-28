@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { AlertTriangle, CheckCircle2, ChevronRight, RefreshCw, ShieldAlert } from 'lucide-react';
 import { demoHeaders } from '../utils/demo';
 import { TONE } from './flow/tone';
+import { ErrorNote } from './flow/Messages';
 
 // 漏れチェック：流れの段ごとに、目安の日数を過ぎても次に進んでいないものを並べる。
 // 押すとその作業をする画面へ移る。データは楽楽販売・在庫・配送会社から毎回計算（ここでは何も書き換えない）
@@ -98,7 +99,7 @@ export function LeakCheckView({ onNavigate }: { onNavigate: (tab: string) => voi
           読み込み直す
         </button>
       </div>
-      {error && <div className="rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs px-3 py-2">{error}</div>}
+      {error && <ErrorNote message={error} compact />}
       {!data && !error && <div className="py-10 text-center text-xs text-slate-400">確認中…</div>}
 
       {data &&

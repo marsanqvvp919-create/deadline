@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { CheckCircle2, RotateCcw, X } from 'lucide-react';
+import { friendlyError } from './Messages';
 
 // 操作のあとに出す通知。「元に戻す」を10秒だけ出す（確認ダイアログの代わり）
 type Toast = { id: number; text: string; undo?: () => Promise<any> | void; error?: boolean };
@@ -11,7 +12,8 @@ export function notifyDone(text: string, undo?: () => Promise<any> | void) {
   window.dispatchEvent(new Event('flow-refresh'));
 }
 export function notifyError(text: string) {
-  push?.({ id: ++seq, text, error: true });
+  const f = friendlyError(text);
+  push?.({ id: ++seq, text: f.next ? `${f.what}。${f.next}` : f.what, error: true });
 }
 
 export function UndoToastHost() {

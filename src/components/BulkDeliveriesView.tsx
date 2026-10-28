@@ -4,6 +4,7 @@ import readXlsxFile from 'read-excel-file/browser';
 import { ClinicItem, Order } from '../types';
 import { domesticTrackingUrl, hintedCarrier, parseTrackingNumbers } from '../utils/trackingNumbers';
 import { splitOrderIds } from '../utils/bulk';
+import { ErrorNote } from './flow/Messages';
 
 // 一括発注の配送（湘南美容・東京ベレッザなど）：院ごとの納品先・数量・追跡番号を、配送リスト（Excel・CSV）から取り込んで追跡する。
 // 楽楽販売とは切り離して、このシステムだけで持つ（楽楽販売には書き込まない）。
@@ -395,7 +396,7 @@ export const BulkDeliveriesView: React.FC<{ orders: Order[]; clinics?: ClinicIte
           </div>
         </div>
         {notice && <p className="text-xs font-bold text-blue-800 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">{notice}</p>}
-        {error && <p className="text-xs font-bold text-rose-700">{error}</p>}
+        {error && <ErrorNote message={error} compact />}
       </div>
 
       {/* 取り込みの確認 */}

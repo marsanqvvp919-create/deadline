@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Building2, Copy, Check, KeyRound, Plus, Search, Trash2, X, ExternalLink, Ban, RotateCcw } from 'lucide-react';
 import { PUBLIC_ORIGIN } from '../utils/publicUrl';
 import { askConfirm } from './flow/Confirm';
+import { ErrorNote } from './flow/Messages';
 
 export interface ClinicRef {
   clinicId: string;
@@ -197,7 +198,7 @@ export function PortalAdminView() {
         )}
       </div>
 
-      {error && <div className="rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-sm px-3 py-2">{error}</div>}
+      {error && <ErrorNote message={error} />}
 
       {issued && (
         <div className="rounded-xl border-2 border-emerald-500 bg-emerald-50 p-4 space-y-3">

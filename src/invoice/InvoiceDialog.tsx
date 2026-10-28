@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { demoHeaders } from '../utils/demo';
 import { AlertTriangle, FileText, Loader2, Package, X } from 'lucide-react';
 import { generateInvoicePDF, generatePackingListPDF, loadJapaneseFont } from './pdf';
+import { ErrorNote } from '../components/flow/Messages';
 
 // 出荷指示からインボイスを作る。製剤・クリニック・倉庫・設定は INVOICEアプリのマスタ（同じ Firestore）を使い、
 // 発行するとINVOICEアプリの発送データにも INV-日付-連番 で入る。PDFは INVOICEアプリと同じ形
@@ -127,7 +128,7 @@ export function InvoiceDialog({ instructionId, onClose, onIssued, embedded, onRe
           </button>
         </div>
       )}
-        {error && <div className="rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs px-3 py-2">{error}</div>}
+        {error && <ErrorNote message={error} compact />}
         {!data && !error && (
           <div className="py-10 text-center text-slate-400">
             <Loader2 className="w-6 h-6 animate-spin inline" />

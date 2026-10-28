@@ -1,5 +1,6 @@
 import React from 'react';
 import { CheckCircle2, AlertCircle, RefreshCw } from 'lucide-react';
+import { friendlyError } from './flow/Messages';
 
 interface TableEmptyStateProps {
   isLoading?: boolean;
@@ -52,7 +53,7 @@ export const TableEmptyState: React.FC<TableEmptyStateProps> = ({
             </div>
             <div>
               <p className="text-sm font-bold text-rose-900">データを取得できませんでした</p>
-              <p className="text-xs text-rose-600 mt-1">{error}</p>
+              <p className="text-xs text-rose-600 mt-1">{[friendlyError(error).what, friendlyError(error).next].filter(Boolean).join('。')}</p>
             </div>
             {onRetry && (
               <button
@@ -61,7 +62,7 @@ export const TableEmptyState: React.FC<TableEmptyStateProps> = ({
                 className="mt-2 inline-flex items-center gap-1.5 px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition shadow-xs cursor-pointer"
               >
                 <RefreshCw className="w-3.5 h-3.5" />
-                <span>再試行する</span>
+                <span>もう一度読み込む</span>
               </button>
             )}
           </div>
