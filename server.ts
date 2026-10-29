@@ -976,10 +976,12 @@ function parseOrdersFromCsv(csvText: string): any[] | null {
     // 精算の行（割引・不足分・前回分差額）は納期超過の判定に含めない
     const rowProductName = getVal(row, 'productName');
     if (!SETTLEMENT_LINE_KEYWORDS.some((kw) => rowProductName.includes(kw))) {
+      const forced = isForcedUnshipped(orderId, getVal(row, 'productId'), rowProductName);
       order.overdueBasis.push({
         productId: getVal(row, 'productId') || '',
         latestDate: getVal(row, 'latestDate') || null,
-        shippedDate: getVal(row, 'shippedDate') || null,
+        shippedDate: forced ? null : getVal(row, 'shippedDate') || null,
+        forcedUnshipped: forced || undefined,
       });
     }
     const productId = getVal(row, 'productId') || `PRD-${order.lines.length + 1}`;
@@ -1013,7 +1015,8 @@ function parseOrdersFromCsv(csvText: string): any[] | null {
       finalTrackingNo = '';
     }
 
-    if (isForcedUnshipped(orderId, productId, productName)) {
+    const forcedUnshipped = isForcedUnshipped(orderId, productId, productName);
+    if (forcedUnshipped) {
       shippedQty = 0;
       finalShippedDate = null;
       finalTrackingNo = '';
@@ -1051,7 +1054,8 @@ function parseOrdersFromCsv(csvText: string): any[] | null {
       latestDate: getVal(row, 'latestDate') || null,
       poDate,
       shippedDate: finalShippedDate,
-      rawShippedDate: shippedDate,
+      rawShippedDate: forcedUnshipped ? null : shippedDate,
+      forcedUnshipped: forcedUnshipped || undefined,
       promisedDate: getVal(row, 'promisedDate') || null,
       deliveryRisk: getVal(row, 'deliveryRisk') || '',
       deliveryCompliance: getVal(row, 'deliveryCompliance') || '',
@@ -1065,6 +1069,13 @@ function parseOrdersFromCsv(csvText: string): any[] | null {
     });
   }
 
+  // 未出荷に戻した明細がある伝票は、楽楽販売で「出荷済み」「納品済み」でも、こちらでは一部出荷として扱う（納期超過に出す）
+  ordersMap.forEach((o: any) => {
+    if (o.lines.some((l: any) => l.forcedUnshipped) && ['出荷済み', '納品済み'].includes(String(o.status || '').trim())) {
+      o.rakurakuStatus = o.status;
+      o.status = '一部出荷';
+    }
+  });
   return Array.from(ordersMap.values());
 }
 
@@ -1503,10 +1514,10 @@ function applyWarehouseShipDates() {
   });
   orders.forEach((o: any) => {
     o.lines.forEach((l: any) => {
-      l.warehouseShippedDate = byLine.get(`${o.orderId}|${l.productId}`) || null;
+      l.warehouseShippedDate = l.forcedUnshipped ? null : byLine.get(`${o.orderId}|${l.productId}`) || null;
     });
     (o.overdueBasis || []).forEach((b: any) => {
-      b.warehouseShippedDate = b.productId ? byLine.get(`${o.orderId}|${b.productId}`) || null : null;
+      b.warehouseShippedDate = b.productId && !b.forcedUnshipped ? byLine.get(`${o.orderId}|${b.productId}`) || null : null;
     });
   });
 }
