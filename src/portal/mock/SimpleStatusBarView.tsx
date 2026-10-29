@@ -3,13 +3,11 @@ import {
   OrderRecord,
   OrderStatus,
   CLINICS_MASTER,
-  getFedexTrackingUrl,
 } from '../portalData';
 import {
   Search,
   CheckCircle2,
   Clock,
-  ExternalLink,
   Download,
   ArrowUpDown,
   ArrowUp,
@@ -520,19 +518,6 @@ export const SimpleStatusBarView: React.FC<SimpleStatusBarViewProps> = ({
                       </span>
                     </div>
 
-                    {/* Quick Tracking Links */}
-                    <div className="flex items-center gap-3 mt-1.5 text-[11px]">
-                      <a
-                        href={getFedexTrackingUrl(order.fedexTracking)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-purple-700 hover:underline font-mono flex items-center gap-0.5"
-                      >
-                        {order.intlCarrier}: {order.fedexTracking}
-                        <ExternalLink className="w-2.5 h-2.5" />
-                      </a>
-                      {order.sagawaTracking && <span className="text-cyan-700 font-mono flex items-center gap-0.5">{order.domesticCarrier}: {order.sagawaTracking}</span>}
-                    </div>
                   </div>
 
                   {/* Center: The Bar-Shaped Status (棒状ステータスバー) */}

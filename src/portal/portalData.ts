@@ -353,6 +353,9 @@ export function buildPortalModel(data: PortalApiData): PortalModel {
   groupName = data.group.name.endsWith('様') ? data.group.name : `${data.group.name}様`;
   const shipsByOrder = new Map<string, ApiShipment[]>();
   data.shipments.forEach((s) => shipsByOrder.set(s.orderId, [...(shipsByOrder.get(s.orderId) || []), s]));
+  // 同じ伝票番号を別の出荷で照会済みなら、その運送会社を使う（分からないときに佐川と決めつけない）
+  const carrierByNo = new Map<string, string>();
+  data.shipments.forEach((s) => s.tracking.forEach((t) => t.trackingNo && carrierByNo.set(t.trackingNo, t.carrier)));
 
   const clinics: Clinic[] = data.clinics.map((c) => {
     // 住所の先頭に「〒104-0061」が入っていることがあるので、郵便番号の欄に分ける
@@ -444,7 +447,7 @@ export function buildPortalModel(data: PortalApiData): PortalModel {
         : intl[0]?.trackingNo ||
           (intlCarrier !== '国内発送' ? s.trackingNos.find((n) => [10, 12, 15].includes(n.length) && !dom.some((t) => t.trackingNo === n)) || '' : '');
       const domNo = dom[0]?.trackingNo || (intlCarrier === '国内発送' && !waitingShip ? s.trackingNos[0] || '' : '');
-      const domCarrier = dom[0] ? CARRIER_LABEL[dom[0].carrier] || '国内配送' : '佐川急便';
+      const domCarrier = CARRIER_LABEL[dom[0]?.carrier || carrierByNo.get(domNo) || ''] || '国内配送';
       const domNote =
         dom[0]?.carrier === 'sagawa' && dom[0].status === 'unknown'
           ? '佐川急便のお問い合わせサービス停止中'
