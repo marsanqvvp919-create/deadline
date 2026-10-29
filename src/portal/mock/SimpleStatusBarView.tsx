@@ -3,6 +3,7 @@ import {
   OrderRecord,
   OrderStatus,
   CLINICS_MASTER,
+  itemsLabel,
 } from '../portalData';
 import {
   Search,
@@ -17,13 +18,6 @@ import {
   Building,
   RotateCcw
 } from 'lucide-react';
-
-// カードの見出し：届く商品（多いときは「ほかN品」）
-const itemsLabel = (o: OrderRecord) => {
-  const names = Array.from(new Set(o.items.map((it) => it.name).filter(Boolean)));
-  if (names.length === 0) return '商品未確定';
-  return names.length > 2 ? `${names.slice(0, 2).join('、')} ほか${names.length - 2}品` : names.join('、');
-};
 
 interface SimpleStatusBarViewProps {
   orders: OrderRecord[];

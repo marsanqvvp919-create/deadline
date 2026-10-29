@@ -610,3 +610,10 @@ export function buildPortalModel(data: PortalApiData): PortalModel {
   BATCHES_LIST = batches;
   return { clinics, batches, orders };
 }
+
+// カードの見出し：届く商品（多いときは「ほかN品」）
+export const itemsLabel = (o: OrderRecord) => {
+  const names = Array.from(new Set(o.items.map((it) => it.name).filter(Boolean)));
+  if (names.length === 0) return '商品未確定';
+  return names.length > 2 ? `${names.slice(0, 2).join('、')} ほか${names.length - 2}品` : names.join('、');
+};

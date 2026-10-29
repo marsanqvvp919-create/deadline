@@ -4,6 +4,7 @@ import {
   OrderRecord,
   STATUS_STEPS,
   getFedexTrackingUrl,
+  itemsLabel,
 } from '../portalData';
 import {
   Hospital,
@@ -297,9 +298,9 @@ export const ClinicPortalView: React.FC<ClinicPortalViewProps> = ({
                 className="p-3.5 sm:p-4 hover:bg-slate-50 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
               >
                 <div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-slate-900 text-sm">
-                      {ord.batchName}
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <span className="font-bold text-slate-900 text-sm" title={ord.items.map((it) => `${it.name} ×${it.qty}`).join('\n')}>
+                      {itemsLabel(ord)}
                     </span>
                     <span className="font-mono text-slate-500">({ord.invoiceNo})</span>
                     <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
