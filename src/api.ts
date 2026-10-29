@@ -460,7 +460,11 @@ export function normalizeDeliveryData(data: DeliveryData): DeliveryData {
         line.trackingNo = '';
       }
 
-      if (order.orderId === '000003645' && (line.productId.includes('000000145') || line.productName.includes('PRX-T33'))) {
+      // 楽楽販売では出荷済みでも、実際は出していない明細（server.ts の FORCED_UNSHIPPED_LINES と同じ）
+      if (
+        (order.orderId === '000003645' && (line.productId.includes('000000145') || line.productName.includes('PRX-T33'))) ||
+        (order.orderId === '000002963' && /Detoxion/i.test(line.productName || ''))
+      ) {
         sq = 0;
         line.shippedDate = null;
         line.trackingNo = '';

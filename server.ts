@@ -1013,7 +1013,7 @@ function parseOrdersFromCsv(csvText: string): any[] | null {
       finalTrackingNo = '';
     }
 
-    if (orderId === '000003645' && (productId.includes('000000145') || productName.includes('PRX-T33'))) {
+    if (isForcedUnshipped(orderId, productId, productName)) {
       shippedQty = 0;
       finalShippedDate = null;
       finalTrackingNo = '';
@@ -1418,6 +1418,16 @@ function countOverdueOrders(orders: any[]): number {
       .filter((d: string) => /^\d{4}-\d{2}-\d{2}$/.test(d) && d < jstToday);
     return overdue.some((d: string) => d > staleCutoff);
   }).length;
+}
+
+// 楽楽販売では出荷済みでも、実際は出していない明細（未出荷に戻し、納期超過の対象にする）。楽楽販売は変えない
+const FORCED_UNSHIPPED_LINES: { orderId: string; match: RegExp }[] = [
+  { orderId: '000003645', match: /000000145|PRX-T33/ },
+  // 2026/10/29 Detoxion Inj. 600mg は未出荷
+  { orderId: '000002963', match: /Detoxion/i },
+];
+function isForcedUnshipped(orderId: string, productId: string, productName: string) {
+  return FORCED_UNSHIPPED_LINES.some((f) => f.orderId === orderId && (f.match.test(productId || '') || f.match.test(productName || '')));
 }
 
 // 分割出荷：楽楽販売は出荷レコードを出荷済みにすると、その出荷で「出荷数」0や一部だった明細にも
@@ -4312,6 +4322,7 @@ function buildPortalData(g: PortalGroup) {
   const orderIds = new Set(orders.map((o) => o.orderId));
   const productNameOf = new Map<string, string>();
   orders.forEach((o) => o.lines.forEach((l: any) => l.productId && productNameOf.set(`${o.orderId}:${l.productId}`, l.productName)));
+  const shownRef = (r: any) => !isForcedUnshipped(r.orderId, r.productId, productNameOf.get(`${r.orderId}:${r.productId}`) || '');
   const shipments = ((serverRakurakuStore.shipments || []) as any[])
     .filter((s) => orderIds.has(s.orderId))
     .map((s) => {
@@ -4351,10 +4362,10 @@ function buildPortalData(g: PortalGroup) {
         courier: s.courier || '',
         trackingNos: boxes,
         tracking,
-        items: (s.lineRefs || []).map((r: any) => productNameOf.get(`${r.orderId}:${r.productId}`)).filter(Boolean),
+        items: (s.lineRefs || []).filter(shownRef).map((r: any) => productNameOf.get(`${r.orderId}:${r.productId}`)).filter(Boolean),
         // この出荷の商品と数量（楽楽販売の出荷数。入っていなければ注文数）
         itemLines: (s.lineRefs || [])
-          .filter((r: any) => productNameOf.has(`${r.orderId}:${r.productId}`))
+          .filter((r: any) => productNameOf.has(`${r.orderId}:${r.productId}`) && shownRef(r))
           .map((r: any) => {
             const n = parseInt(r.shipQty, 10);
             const line = orders.find((o) => o.orderId === r.orderId)?.lines.find((l: any) => l.productId === r.productId);
