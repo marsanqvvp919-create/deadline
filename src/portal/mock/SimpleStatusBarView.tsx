@@ -20,6 +20,13 @@ import {
   RotateCcw
 } from 'lucide-react';
 
+// カードの見出し：届く商品（多いときは「ほかN品」）
+const itemsLabel = (o: OrderRecord) => {
+  const names = Array.from(new Set(o.items.map((it) => it.name).filter(Boolean)));
+  if (names.length === 0) return '商品未確定';
+  return names.length > 2 ? `${names.slice(0, 2).join('、')} ほか${names.length - 2}品` : names.join('、');
+};
+
 interface SimpleStatusBarViewProps {
   orders: OrderRecord[];
   batchName: string;
@@ -153,6 +160,7 @@ export const SimpleStatusBarView: React.FC<SimpleStatusBarViewProps> = ({
       const matchSearch =
         search === '' ||
         o.clinicName.toLowerCase().includes(search.toLowerCase()) ||
+        o.items.some((it) => it.name.toLowerCase().includes(search.toLowerCase())) ||
         o.doctor.toLowerCase().includes(search.toLowerCase()) ||
         o.fedexTracking.includes(search) ||
         o.sagawaTracking.includes(search) ||
@@ -181,7 +189,7 @@ export const SimpleStatusBarView: React.FC<SimpleStatusBarViewProps> = ({
           break;
         }
         case 'clinic':
-          cmp = a.clinicName.localeCompare(b.clinicName, 'ja');
+          cmp = itemsLabel(a).localeCompare(itemsLabel(b), 'ja');
           break;
         case 'region':
           cmp = a.region.localeCompare(b.region, 'ja');
@@ -318,7 +326,7 @@ export const SimpleStatusBarView: React.FC<SimpleStatusBarViewProps> = ({
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="クリニック名、院長名、追跡番号、都道府県で検索..."
+              placeholder="商品名、追跡番号、クリニック名で検索..."
               className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-800"
             />
           </div>
@@ -415,7 +423,7 @@ export const SimpleStatusBarView: React.FC<SimpleStatusBarViewProps> = ({
             {/* Sort Buttons */}
             {[
               { key: 'status' as SortKey, label: '進捗ステータス' },
-              { key: 'clinic' as SortKey, label: 'クリニック名' },
+              { key: 'clinic' as SortKey, label: '商品名' },
               { key: 'region' as SortKey, label: '都道府県・エリア' },
               { key: 'date' as SortKey, label: '到着・受領日' },
               { key: 'qty' as SortKey, label: '箱数・数量' },
@@ -489,21 +497,23 @@ export const SimpleStatusBarView: React.FC<SimpleStatusBarViewProps> = ({
                       </span>
                     </div>
 
-                    <h3
-                      onClick={() => {
-                        const match = CLINICS_MASTER.find(
-                          (c) => c.id === order.clinicId || c.name === order.clinicName
-                        );
-                        onSelectClinic(match ? match.id : CLINICS_MASTER[0].id);
-                      }}
-                      className="font-bold text-slate-900 text-sm mt-0.5 hover:text-blue-600 hover:underline cursor-pointer transition-colors inline-block"
-                      title="クリックしてこのクリニックの個別ビューへ移動"
-                    >
-                      {order.clinicName}
+                    <h3 className="font-bold text-slate-900 text-sm mt-0.5 leading-snug" title={order.items.map((it) => `${it.name} ×${it.qty}`).join('\n')}>
+                      {itemsLabel(order)}
                     </h3>
 
                     <div className="text-[11px] text-slate-500 mt-0.5 flex flex-wrap items-center gap-2">
-                      <span>院長: {order.doctor || '—'}</span>
+                      <span
+                        onClick={() => {
+                          const match = CLINICS_MASTER.find(
+                            (c) => c.id === order.clinicId || c.name === order.clinicName
+                          );
+                          onSelectClinic(match ? match.id : CLINICS_MASTER[0].id);
+                        }}
+                        className="hover:text-blue-600 hover:underline cursor-pointer"
+                        title="クリックしてこのクリニックの個別ビューへ移動"
+                      >
+                        {order.clinicName}
+                      </span>
                       <span className="text-slate-300">•</span>
                       <span className="text-blue-700 font-bold bg-blue-50 px-1.5 py-0.2 rounded border border-blue-200/50">
                         数量: {order.totalQty}箱
