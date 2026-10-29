@@ -540,7 +540,8 @@ export function buildPortalModel(data: PortalApiData): PortalModel {
         sagawaTracking: domNo,
         domesticCarrier: domCarrier,
         domesticNote: domNote,
-        estimatedDelivery: status === 'DELIVERED' ? ymd(deliveredAt) || ymd(s.shippedDate) : ymd(eta) || '未定',
+        // 出荷待ちのあいだは到着予定日を出さない（未定）
+        estimatedDelivery: status === 'DELIVERED' ? ymd(deliveredAt) || ymd(s.shippedDate) : status === 'PREPARING' ? '未定' : ymd(eta) || '未定',
         actualDelivery: status === 'DELIVERED' ? ymd(deliveredAt) || null : null,
         recipientName: null,
         items,
@@ -573,7 +574,7 @@ export function buildPortalModel(data: PortalApiData): PortalModel {
         sagawaTracking: '',
         domesticCarrier: '佐川急便',
         domesticNote: '発送後に表示されます',
-        estimatedDelivery: ymd(latestOf(rest.map(({ l }) => l.productId))) || '未定',
+        estimatedDelivery: ordered ? ymd(latestOf(rest.map(({ l }) => l.productId))) || '未定' : '未定',
         actualDelivery: null,
         recipientName: null,
         items: priced(rest.map(({ l, qty }) => ({ name: l.productName, qty, unit: '本', lotNo: '', expDate: '', unitPrice: l.unitPrice ?? null }))),
