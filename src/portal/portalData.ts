@@ -233,6 +233,8 @@ export interface ApiOrder {
   orderState: string;
   paymentStatus: string;
   totalAmount: number;
+  /** 社内が納期超過の画面で入れた、お客様に案内する到着予定日（YYYY-MM-DD） */
+  customerEta?: string | null;
   lines: ApiLine[];
 }
 export interface ApiShipment {
@@ -541,7 +543,7 @@ export function buildPortalModel(data: PortalApiData): PortalModel {
         domesticCarrier: domCarrier,
         domesticNote: domNote,
         // 出荷待ちのあいだは到着予定日を出さない（未定）
-        estimatedDelivery: status === 'DELIVERED' ? ymd(deliveredAt) || ymd(s.shippedDate) : status === 'PREPARING' ? '未定' : ymd(eta) || '未定',
+        estimatedDelivery: status === 'DELIVERED' ? ymd(deliveredAt) || ymd(s.shippedDate) : ymd(o.customerEta?.replace(/-/g, '/')) || (status === 'PREPARING' ? '未定' : ymd(eta) || '未定'),
         actualDelivery: status === 'DELIVERED' ? ymd(deliveredAt) || null : null,
         recipientName: null,
         items,
@@ -574,7 +576,7 @@ export function buildPortalModel(data: PortalApiData): PortalModel {
         sagawaTracking: '',
         domesticCarrier: '佐川急便',
         domesticNote: '発送後に表示されます',
-        estimatedDelivery: ordered ? ymd(latestOf(rest.map(({ l }) => l.productId))) || '未定' : '未定',
+        estimatedDelivery: ymd(o.customerEta?.replace(/-/g, '/')) || (ordered ? ymd(latestOf(rest.map(({ l }) => l.productId))) || '未定' : '未定'),
         actualDelivery: null,
         recipientName: null,
         items: priced(rest.map(({ l, qty }) => ({ name: l.productName, qty, unit: '本', lotNo: '', expDate: '', unitPrice: l.unitPrice ?? null }))),

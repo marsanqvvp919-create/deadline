@@ -26,6 +26,7 @@ import {
   formatDelayString,
 } from '../utils/delayCalculation';
 import { TableEmptyState } from './TableEmptyState';
+import { CustomerEtaInput } from './CustomerEtaInput';
 import { useSharedNotes } from '../utils/sharedNotes';
 import {
   AlertTriangle,
@@ -1106,6 +1107,8 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
                                 <option value="対応完了">対応完了</option>
                               </select>
 
+                              <CustomerEtaInput orderId={item.orderId} />
+
                               {item.followup.note && (
                                 <div
                                   onClick={() => handleOpenNoteModal(item)}
@@ -1395,6 +1398,8 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
                                 <option value="今週入荷予定">今週入荷予定</option>
                                 <option value="対応完了">対応完了</option>
                               </select>
+
+                              <CustomerEtaInput orderId={ordItem.orderId} />
 
                               <button
                                 onClick={() => onSelectOrder(ordItem.order)}

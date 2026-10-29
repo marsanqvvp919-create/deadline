@@ -4292,6 +4292,7 @@ function buildPortalData(g: PortalGroup) {
       status: o.status,
       orderState: o.orderState,
       paymentStatus: o.paymentStatus,
+      customerEta: portalEta[o.orderId]?.date || null,
       lines: (o.lines || []).map((l: any) => ({
         productId: l.productId || '',
         productName: l.productName,
@@ -4396,6 +4397,7 @@ app.get('/api/portal/data', async (req, res) => {
   // 別のグループのURLを開いたときは、そのグループのパスワードでログインし直してもらう
   if (!g || (req.query.slug && req.query.slug !== g.slug)) return res.status(401).json({ error: 'login_required' });
   await loadCarrierStatusCache();
+  await loadPortalEta().catch((e) => console.warn('[PortalEta] load failed:', e?.message || e));
   res.json(buildPortalData(g));
 });
 
@@ -5540,6 +5542,48 @@ app.post('/api/clinic-overrides/:clinicId', async (req, res) => {
   await saveClinicOverrides();
   applyClinicOverrides();
   res.json({ clinic: (serverRakurakuStore.clinics || []).find((x: any) => x.clinicId === id) });
+});
+
+// --- お客様に案内する到着予定日（受注ごと）。納期超過の画面で社内が入れ、お客様の管理画面の「到着予定日」に出す。
+// Cloud Storage の portal-eta.json に保存する。楽楽販売には書き込まない
+interface PortalEta {
+  date: string; // YYYY-MM-DD
+  updatedAt: string;
+}
+const PORTAL_ETA_OBJECT = 'portal-eta.json';
+let portalEta: Record<string, PortalEta> = {};
+let portalEtaLoad: Promise<void> | null = null;
+async function loadPortalEta() {
+  if (!portalEtaLoad) {
+    portalEtaLoad = (async () => {
+      if (!CACHE_BUCKET) return;
+      try {
+        const [buf] = await new Storage().bucket(CACHE_BUCKET).file(PORTAL_ETA_OBJECT).download();
+        portalEta = JSON.parse(buf.toString('utf-8')) || {};
+      } catch (e: any) {
+        if (e?.code !== 404) {
+          portalEtaLoad = null;
+          throw e;
+        }
+      }
+    })();
+  }
+  await portalEtaLoad;
+}
+app.get('/api/portal-eta', async (_req, res) => {
+  await loadPortalEta();
+  res.json({ eta: portalEta });
+});
+app.post('/api/portal-eta/:orderId', async (req, res) => {
+  await loadPortalEta();
+  const id = String(req.params.orderId || '').trim();
+  if (!id || !((serverRakurakuStore.orders?.orders || []) as any[]).some((o) => o.orderId === id)) return res.status(404).json({ error: 'この受注が見つかりません' });
+  const date = String(req.body?.date || '').trim();
+  if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: '日付の形が正しくありません' });
+  if (date) portalEta[id] = { date, updatedAt: new Date().toISOString() };
+  else delete portalEta[id];
+  if (CACHE_BUCKET) await new Storage().bucket(CACHE_BUCKET).file(PORTAL_ETA_OBJECT).save(JSON.stringify(portalEta), { contentType: 'application/json', resumable: false });
+  res.json({ eta: portalEta });
 });
 
 // --- クール便の要・不要（商品ごと）。商品マスタの画面で切り替え、Cloud Storage の product-flags.json に保存する。
