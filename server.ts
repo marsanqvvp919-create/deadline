@@ -4266,6 +4266,11 @@ async function portalGroupFromRequest(req: express.Request): Promise<PortalGroup
 }
 
 const PORTAL_HIDDEN_ORDER_STATUS = ['見積作成中', '見積済み'];
+// お客様の管理画面だけの出荷の手直し（楽楽販売・社内画面は変えない）。delivered：配送完了として出す／hideItems：この出荷から外す商品
+const PORTAL_SHIPMENT_FIXES: Record<string, { delivered?: boolean; hideItems?: RegExp }> = {
+  // 2026/10/29 VIVA Volume(サンプル) は別の伝票で出荷済み。この出荷は配送完了
+  'DO-000005043': { delivered: true, hideItems: /VIVA Volume/i },
+};
 function buildPortalData(g: PortalGroup) {
   const ids = new Set(g.clinicIds);
   const clinics = g.clinicIds.map((id) => {
@@ -4356,6 +4361,17 @@ function buildPortalData(g: PortalGroup) {
             return { productId: r.productId, name: productNameOf.get(`${r.orderId}:${r.productId}`), qty: n > 0 ? n : line?.quantity ?? null };
           }),
         arrivalAirport: s.arrivalAirport && s.arrivalAirport !== '—' ? s.arrivalAirport : '',
+      };
+    })
+    .map((s) => {
+      const fix = PORTAL_SHIPMENT_FIXES[s.shipmentId];
+      if (!fix) return s;
+      const keep = (name: string) => !(fix.hideItems && fix.hideItems.test(name));
+      return {
+        ...s,
+        deliveredAssumed: s.deliveredAssumed || !!fix.delivered,
+        items: s.items.filter(keep),
+        itemLines: s.itemLines.filter((l: any) => keep(l.name)),
       };
     });
   return {
