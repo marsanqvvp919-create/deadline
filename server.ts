@@ -4291,6 +4291,9 @@ const PORTAL_HIDDEN_ORDER_STATUS = ['見積作成中', '見積済み'];
 const PORTAL_SHIPMENT_FIXES: Record<string, { delivered?: boolean; hideItems?: RegExp }> = {
   // 2026/10/29 VIVA Volume(サンプル) は別の伝票で出荷済み。この出荷は配送完了
   'DO-000005043': { delivered: true, hideItems: /VIVA Volume/i },
+  // 2026/10/29 セブンクリニック様 受注000003916 のサンプル2箱は到着済み（佐川の追跡が配達中のまま止まっている）
+  'DO-000004980': { delivered: true },
+  'DO-000004982': { delivered: true },
 };
 function buildPortalData(g: PortalGroup) {
   const ids = new Set(g.clinicIds);
