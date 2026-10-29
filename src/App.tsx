@@ -94,6 +94,7 @@ import {
   CalendarCheck,
   ListChecks,
   Boxes,
+  AlarmClock,
 } from 'lucide-react';
 
 // ソフト名（左上・上部の帯・ブラウザのタブに出す）
@@ -736,8 +737,8 @@ export default function App() {
     portal_admin: 'お客様が見る管理画面のURLとパスワードを発行・管理します',
   };
   // 今日の作業の件数（左メニュー・右上・タブで同じ数を使う）
-  const todayTotal = leakTotal + overdueCounts.ordersCount + (sheetUnmatchedCount || 0);
-  const TODAY_TABS: ViewTab[] = ['leak_check', 'overdue', 'alerts', 'unmatched_sheets'];
+  const todayTotal = leakTotal + (sheetUnmatchedCount || 0);
+  const TODAY_TABS: ViewTab[] = ['leak_check', 'alerts', 'unmatched_sheets'];
   // 画面上部の流れのバーで「今いる段」を光らせる
   const FLOW_CURRENT: Partial<Record<ViewTab, FlowStepId>> = {
     procurement: 'unordered',
@@ -762,6 +763,14 @@ export default function App() {
       badge: todayTotal > 0 ? `${todayTotal}` : null,
       badgeColor: 'bg-rose-600 text-white font-bold',
       match: TODAY_TABS,
+    },
+    {
+      id: 'overdue',
+      group: 'today',
+      label: '納期超過',
+      icon: AlarmClock,
+      badge: overdueCounts.ordersCount > 0 ? `${overdueCounts.ordersCount}` : null,
+      badgeColor: 'bg-rose-600 text-white font-bold',
     },
     {
       id: 'morning_meeting',
@@ -1046,9 +1055,8 @@ export default function App() {
               <div className="inline-flex flex-wrap gap-1 rounded-xl border border-slate-200 bg-white p-1 shadow-2xs">
                 {([
                   ['leak_check', '① 漏れ', leakTotal],
-                  ['overdue', '② 納期超過', overdueCounts.ordersCount],
-                  ['alerts', '③ 楽楽販売の入力漏れ', null],
-                  ['unmatched_sheets', '④ 楽楽販売と未照合', sheetUnmatchedCount ?? null],
+                  ['alerts', '② 楽楽販売の入力漏れ', null],
+                  ['unmatched_sheets', '③ 楽楽販売と未照合', sheetUnmatchedCount ?? null],
                 ] as [ViewTab, string, number | null][]).map(([id, label, n]) => (
                   <button
                     key={id}

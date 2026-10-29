@@ -257,7 +257,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             type="button"
             onClick={onNavigateToAlerts}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-rose-300 bg-rose-50 hover:bg-rose-100 active:bg-rose-200 text-rose-800 shadow-xs hover:shadow active:translate-y-px transition cursor-pointer font-bold"
-            title={`今日の作業（漏れ・納期超過・楽楽販売と未照合）の合計 ${highSeverityCount}件`}
+            title={`今日の作業（漏れ・楽楽販売の入力漏れ・楽楽販売と未照合）の合計 ${highSeverityCount}件`}
           >
             <Bell className="w-3.5 h-3.5 text-rose-600" />
             <span className="text-xs">今日の作業</span>
