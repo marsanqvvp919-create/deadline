@@ -4331,6 +4331,8 @@ function buildPortalData(g: PortalGroup) {
       })),
     }));
   const orderIds = new Set(orders.map((o) => o.orderId));
+  // 社内で納品完了の伝票（楽楽販売で納品済み、または配達完了日が入って全明細出荷済み）は、出荷ごとの配達記録や追跡の状態に関係なく配送完了として出す
+  const deliveredOrderIds = new Set(orders.filter((o) => o.orderState === '納品完了').map((o) => o.orderId));
   const productNameOf = new Map<string, string>();
   orders.forEach((o) => o.lines.forEach((l: any) => l.productId && productNameOf.set(`${o.orderId}:${l.productId}`, l.productName)));
   const shownRef = (r: any) => !isForcedUnshipped(r.orderId, r.productId, productNameOf.get(`${r.orderId}:${r.productId}`) || '');
@@ -4359,10 +4361,11 @@ function buildPortalData(g: PortalGroup) {
       // お届け済みとして表示する（楽楽販売に配達完了日が入っていない古い出荷が「発送済み」で止まって見えないように）
       const shippedMs = s.shippedDate && s.shippedDate !== '—' ? Date.parse(String(s.shippedDate).replace(/\//g, '-')) : NaN;
       const deliveredAssumed =
-        /出荷済|納品済/.test(s.shipStatus || '') &&
+        deliveredOrderIds.has(s.orderId) ||
+        (/出荷済|納品済/.test(s.shipStatus || '') &&
         !Number.isNaN(shippedMs) &&
         Date.now() - shippedMs > CARRIER_TRACK_DAYS * 86400000 &&
-        !tracking.some((t: any) => t.status === 'in_transit' || t.status === 'exception');
+        !tracking.some((t: any) => t.status === 'in_transit' || t.status === 'exception'));
       return {
         shipmentId: s.shipmentId,
         orderId: s.orderId,
