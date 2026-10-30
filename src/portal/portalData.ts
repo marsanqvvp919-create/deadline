@@ -432,7 +432,9 @@ export function buildPortalModel(data: PortalApiData): PortalModel {
       return q;
     };
     for (const s of ships) {
-      const status = shipmentStatus(s);
+      const shipped = shipmentStatus(s);
+      // 出荷待ちの出荷でも、社内で段階（通関中など）を指定した受注はそれを出す
+      const status = shipped === 'PREPARING' && o.unshippedStatus ? o.unshippedStatus : shipped;
       const hub = hubOf([s.arrivalAirport || '']);
       const intl = s.tracking.filter((t) => INTL.has(t.carrier));
       const dom = s.tracking.filter((t) => !INTL.has(t.carrier));

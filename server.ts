@@ -4346,6 +4346,14 @@ function buildPortalData(g: PortalGroup) {
   const deliveredOrderIds = new Set(orders.filter((o) => o.orderState === '納品完了').map((o) => o.orderId));
   const productNameOf = new Map<string, string>();
   orders.forEach((o) => o.lines.forEach((l: any) => l.productId && productNameOf.set(`${o.orderId}:${l.productId}`, l.productName)));
+  // 追跡番号で指定した手直しは、明細の追跡番号（楽楽販売のご注文管理）からも出荷を探す
+  const fixByLine = new Map<string, (typeof PORTAL_SHIPMENT_FIXES)[string]>();
+  ((serverRakurakuStore.orders?.orders || []) as any[]).forEach((o) => {
+    if (!orderIds.has(o.orderId)) return;
+    (o.lines || []).forEach((l: any) => {
+      parseTrackingNumbers(l.trackingNo || '').forEach((n: string) => PORTAL_SHIPMENT_FIXES[n] && fixByLine.set(`${o.orderId}|${l.productId}`, PORTAL_SHIPMENT_FIXES[n]));
+    });
+  });
   const shownRef = (r: any) => !isForcedUnshipped(r.orderId, r.productId, productNameOf.get(`${r.orderId}:${r.productId}`) || '');
   const shipments = ((serverRakurakuStore.shipments || []) as any[])
     .filter((s) => orderIds.has(s.orderId))
@@ -4400,7 +4408,12 @@ function buildPortalData(g: PortalGroup) {
       };
     })
     .map((s) => {
-      const fix = PORTAL_SHIPMENT_FIXES[s.shipmentId] || s.trackingNos.map((n: string) => PORTAL_SHIPMENT_FIXES[n]).find(Boolean);
+      const fix =
+        PORTAL_SHIPMENT_FIXES[s.shipmentId] ||
+        s.trackingNos.map((n: string) => PORTAL_SHIPMENT_FIXES[n]).find(Boolean) ||
+        (((serverRakurakuStore.shipments || []) as any[]).find((x) => x.shipmentId === s.shipmentId)?.lineRefs || [])
+          .map((r: any) => fixByLine.get(`${r.orderId}|${r.productId}`))
+          .find(Boolean);
       if (!fix) return s;
       const keep = (name: string) => !(fix.hideItems && fix.hideItems.test(name));
       return {
