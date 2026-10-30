@@ -1680,7 +1680,8 @@ async function loadStoreSnapshot(): Promise<boolean> {
     serverRakurakuStore.lastSuccessTime = snap.lastSuccessTime ?? null;
     serverRakurakuStore.lastMastersTime = snap.lastMastersTime ?? null;
     if (snap.sourceHeaders) serverRakurakuStore.sourceHeaders = snap.sourceHeaders;
-    serverRakurakuStore.lastFullSyncTime = snap.lastFullSyncTime ?? null;
+    // 起動後の最初の同期は全件で取り直す（プログラムを更新したとき、読み込み方の変更をすべての受注に反映するため）
+    serverRakurakuStore.lastFullSyncTime = null;
     serverRakurakuStore.delayHistory = snap.delayHistory ?? {};
     // 次回の自動同期は前回成功時刻から数えて間隔があいたときに行う
     serverRakurakuStore.lastAttemptTime = snap.lastSuccessTime ?? null;
