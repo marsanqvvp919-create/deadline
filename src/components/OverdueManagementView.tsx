@@ -957,11 +957,11 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
                   <tr className="bg-slate-50/80 text-slate-600 font-semibold border-b border-slate-200">
                     <th className="py-3 px-4">受注ID</th>
                     <th className="py-3 px-4">クリニック</th>
-                    <th className="py-3 px-4">お客様画面の表示</th>
                     <th className="py-3 px-4">最長予定日 / 超過日数</th>
                     <th className="py-3 px-4">原因 / ボトルネック</th>
                     <th className="py-3 px-4">未納品明細品目</th>
                     <th className="py-3 px-4">対応ステータス</th>
+                    <th className="py-3 px-4">お客様画面の表示</th>
                     <th className="py-3 px-4 text-right">アクション</th>
                   </tr>
                 </thead>
@@ -1022,10 +1022,6 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
                             </span>
                           </td>
 
-                          {/* お客様画面の表示（段階・お知らせ）。担当営業はクリニック名の下に出す */}
-                          <td className="py-3.5 px-4 align-top">
-                            <CustomerPortalDisplayInput orderId={item.orderId} />
-                          </td>
 
                           {/* 最長予定日 / 超過日数 */}
                           <td className="py-3.5 px-4 whitespace-nowrap">
@@ -1117,6 +1113,11 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
                                 </div>
                               )}
                             </div>
+                          </td>
+
+                          {/* お客様画面の表示（段階・お知らせ）。担当営業はクリニック名の下に出す */}
+                          <td className="py-3.5 px-4 align-top">
+                            <CustomerPortalDisplayInput orderId={item.orderId} />
                           </td>
 
                           {/* アクションボタン */}
