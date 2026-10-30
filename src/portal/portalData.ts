@@ -434,12 +434,16 @@ export function buildPortalModel(data: PortalApiData): PortalModel {
     for (const s of ships) {
       const shipped = shipmentStatus(s);
       // 出荷待ちの出荷でも、社内で段階（通関中など）を指定した受注はそれを出す
-      const status = shipped === 'PREPARING' && o.unshippedStatus ? o.unshippedStatus : shipped;
+      // 社内で段階を指定した出荷待ちの出荷は、海外から国際便で来ている扱い（数量は出荷待ちのまま数える）
+      const overridden = shipped === 'PREPARING' && !!o.unshippedStatus;
+      const status = overridden ? o.unshippedStatus! : shipped;
       const hub = hubOf([s.arrivalAirport || '']);
       const intl = s.tracking.filter((t) => INTL.has(t.carrier));
       const dom = s.tracking.filter((t) => !INTL.has(t.carrier));
-      const waitingShip = status === 'PREPARING';
-      const intlCarrier = intl[0]
+      const waitingShip = shipped === 'PREPARING';
+      const intlCarrier = overridden
+        ? '国際便'
+        : intl[0]
         ? CARRIER_LABEL[intl[0].carrier]
         : /dhl/i.test(s.courier)
           ? 'DHL'
@@ -448,7 +452,9 @@ export function buildPortalModel(data: PortalApiData): PortalModel {
             : waitingShip
               ? '国際便'
               : '国内発送';
-      const intlNo = waitingShip
+      const intlNo = overridden
+        ? ''
+        : waitingShip
         ? '出荷待ち'
         : intl[0]?.trackingNo ||
           (intlCarrier !== '国内発送' ? s.trackingNos.find((n) => [10, 12, 15].includes(n.length) && !dom.some((t) => t.trackingNo === n)) || '' : '');
@@ -500,11 +506,11 @@ export function buildPortalModel(data: PortalApiData): PortalModel {
         });
       if (step >= 6 && status !== 'DELIVERED')
         tl.push({ step: 'OUT_FOR_DELIVERY', time: ymdhm(latest?.lastEventAt) || '—', location: latest?.lastLocation || '国内', title: '国内配達中', desc: latest?.statusText || 'クリニックへ配達中', operator: domCarrier });
-      if (step >= 5 && intl.length > 0) {
+      if (step >= 5 && (intl.length > 0 || overridden)) {
         const cc = intl.find((t) => t.customsClearedAt)?.customsClearedAt;
         tl.push({ step: 'SAGAWA_HANDOVER', time: ymdhm(cc) || '—', location: HUB_NAME[hub], title: '通関完了・国内配送へ引継ぎ', desc: domNo ? `${domCarrier} 追跡番号: ${domNo}` : '国内配送へ引継ぎ', operator: intlCarrier });
       }
-      if (step >= 4 && intl.length > 0)
+      if (step >= 4 && (intl.length > 0 || overridden))
         tl.push({
           step: 'CUSTOMS_CLEARANCE',
           time: step === 4 ? ymdhm(latest?.lastEventAt) || '—' : '—',
@@ -513,7 +519,7 @@ export function buildPortalModel(data: PortalApiData): PortalModel {
           desc: step === 4 ? latest?.statusText || '輸入通関中' : '輸入通関',
           operator: '税関',
         });
-      if (step >= 3 && intl.length > 0)
+      if (step >= 3 && (intl.length > 0 || overridden))
         tl.push({
           step: 'IN_TRANSIT_INTL',
           time: step === 3 ? ymdhm(latest?.lastEventAt) || '—' : '—',
@@ -531,7 +537,7 @@ export function buildPortalModel(data: PortalApiData): PortalModel {
           desc: intlNo || domNo ? `追跡番号: ${intlNo || domNo}` : '発送しました',
           operator: intlCarrier === '国内発送' ? domCarrier : intlCarrier,
         });
-      tl.push({ step: 'PREPARING', time: '—', location: '出荷準備', title: status === 'PREPARING' ? '出荷準備中' : '検品・梱包', desc: status === 'PREPARING' ? '出荷の準備をしています' : '検品・梱包完了', operator: '株式会社Number1' });
+      tl.push({ step: 'PREPARING', time: '—', location: overridden ? '海外倉庫' : '出荷準備', title: status === 'PREPARING' ? '出荷準備中' : '検品・梱包', desc: status === 'PREPARING' ? '出荷の準備をしています' : '検品・梱包完了', operator: '株式会社Number1' });
       tl.push(orderedEvent);
 
       records.push({
