@@ -4329,7 +4329,8 @@ function buildPortalData(g: PortalGroup) {
       orderState: o.orderState,
       paymentStatus: o.paymentStatus,
       customerEta: portalEta[o.orderId]?.date || null,
-      unshippedStatus: PORTAL_UNSHIPPED_STATUS[o.orderId] || null,
+      unshippedStatus: (portalEta[o.orderId]?.status !== undefined ? portalEta[o.orderId].status : PORTAL_UNSHIPPED_STATUS[o.orderId]) || null,
+      customerMemo: portalEta[o.orderId]?.memo || null,
       lines: (o.lines || []).map((l: any) => ({
         productId: l.productId || '',
         productName: l.productName,
@@ -5609,10 +5610,14 @@ app.post('/api/clinic-overrides/:clinicId', async (req, res) => {
   res.json({ clinic: (serverRakurakuStore.clinics || []).find((x: any) => x.clinicId === id) });
 });
 
-// --- お客様に案内する到着予定日（受注ごと）。納期超過の画面で社内が入れ、お客様の管理画面の「到着予定日」に出す。
+// --- お客様の管理画面に出す内容の手直し（受注ごと）。納期超過の画面で社内が入れる。
+// date：お客様に案内する到着予定日／status：まだ出荷していない分の段階（通関中など）／memo：お客様へのお知らせ
 // Cloud Storage の portal-eta.json に保存する。楽楽販売には書き込まない
+const PORTAL_SHOWN_STATUSES = ['PREPARING', 'IN_TRANSIT_INTL', 'CUSTOMS_CLEARANCE', 'OUT_FOR_DELIVERY'];
 interface PortalEta {
-  date: string; // YYYY-MM-DD
+  date?: string; // YYYY-MM-DD
+  status?: string;
+  memo?: string;
   updatedAt: string;
 }
 const PORTAL_ETA_OBJECT = 'portal-eta.json';
@@ -5637,18 +5642,37 @@ async function loadPortalEta() {
 }
 app.get('/api/portal-eta', async (_req, res) => {
   await loadPortalEta();
-  res.json({ eta: portalEta });
+  res.json({ eta: portalEtaWithDefaults() });
 });
+// 画面に出すときは、決め打ちの段階（PORTAL_UNSHIPPED_STATUS）も入れて返す
+function portalEtaWithDefaults() {
+  const out: Record<string, PortalEta> = { ...portalEta };
+  Object.entries(PORTAL_UNSHIPPED_STATUS).forEach(([id, status]) => {
+    if (out[id]?.status === undefined) out[id] = { ...out[id], status, updatedAt: out[id]?.updatedAt || '' };
+  });
+  return out;
+}
 app.post('/api/portal-eta/:orderId', async (req, res) => {
   await loadPortalEta();
   const id = String(req.params.orderId || '').trim();
   if (!id || !((serverRakurakuStore.orders?.orders || []) as any[]).some((o) => o.orderId === id)) return res.status(404).json({ error: 'この受注が見つかりません' });
-  const date = String(req.body?.date || '').trim();
-  if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: '日付の形が正しくありません' });
-  if (date) portalEta[id] = { date, updatedAt: new Date().toISOString() };
+  // 送られてきた項目だけ書き換える（空なら消す）
+  const next: PortalEta = { ...portalEta[id], updatedAt: new Date().toISOString() };
+  if ('date' in (req.body || {})) {
+    const date = String(req.body.date || '').trim();
+    if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: '日付の形が正しくありません' });
+    next.date = date || undefined;
+  }
+  if ('status' in (req.body || {})) {
+    const status = String(req.body.status || '').trim();
+    if (status && !PORTAL_SHOWN_STATUSES.includes(status)) return res.status(400).json({ error: 'この段階は選べません' });
+    next.status = status; // 空（自動）も残す：下の決め打ちの指定より、画面で選んだ「自動」を優先するため
+  }
+  if ('memo' in (req.body || {})) next.memo = String(req.body.memo || '').trim().slice(0, 500) || undefined;
+  if (next.date || next.status !== undefined || next.memo) portalEta[id] = next;
   else delete portalEta[id];
   if (CACHE_BUCKET) await new Storage().bucket(CACHE_BUCKET).file(PORTAL_ETA_OBJECT).save(JSON.stringify(portalEta), { contentType: 'application/json', resumable: false });
-  res.json({ eta: portalEta });
+  res.json({ eta: portalEtaWithDefaults() });
 });
 
 // --- クール便の要・不要（商品ごと）。商品マスタの画面で切り替え、Cloud Storage の product-flags.json に保存する。

@@ -511,6 +511,11 @@ export const SimpleStatusBarView: React.FC<SimpleStatusBarViewProps> = ({
                         数量: {order.totalQty}箱
                       </span>
                     </div>
+                    {order.notice && (
+                      <div className="mt-1 text-[11px] leading-snug text-violet-800 bg-violet-50 border border-violet-200 rounded px-2 py-1 whitespace-pre-wrap">
+                        お知らせ：{order.notice}
+                      </div>
+                    )}
 
                   </div>
 

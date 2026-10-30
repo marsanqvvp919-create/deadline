@@ -26,7 +26,7 @@ import {
   formatDelayString,
 } from '../utils/delayCalculation';
 import { TableEmptyState } from './TableEmptyState';
-import { CustomerEtaInput } from './CustomerEtaInput';
+import { CustomerEtaInput, CustomerPortalDisplayInput } from './CustomerEtaInput';
 import { useSharedNotes } from '../utils/sharedNotes';
 import {
   AlertTriangle,
@@ -957,7 +957,7 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
                   <tr className="bg-slate-50/80 text-slate-600 font-semibold border-b border-slate-200">
                     <th className="py-3 px-4">受注ID</th>
                     <th className="py-3 px-4">クリニック</th>
-                    <th className="py-3 px-4">担当営業</th>
+                    <th className="py-3 px-4">お客様画面の表示</th>
                     <th className="py-3 px-4">最長予定日 / 超過日数</th>
                     <th className="py-3 px-4">原因 / ボトルネック</th>
                     <th className="py-3 px-4">未納品明細品目</th>
@@ -1017,16 +1017,14 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
                                 <Package className="w-3 h-3" />
                               </span>
                             </button>
-                            <span className="text-[10px] text-slate-500 font-normal">
-                              合計 {item.totalOverdueQty} 点が未納品
+                            <span className="text-[10px] text-slate-500 font-normal block">
+                              合計 {item.totalOverdueQty} 点が未納品・担当 {item.salesRep}
                             </span>
                           </td>
 
-                          {/* 担当営業 */}
-                          <td className="py-3.5 px-4 whitespace-nowrap">
-                            <span className="px-2 py-0.5 rounded-md font-medium text-slate-700 bg-slate-100 border border-slate-200 text-[11px]">
-                              {item.salesRep}
-                            </span>
+                          {/* お客様画面の表示（段階・お知らせ）。担当営業はクリニック名の下に出す */}
+                          <td className="py-3.5 px-4 align-top">
+                            <CustomerPortalDisplayInput orderId={item.orderId} />
                           </td>
 
                           {/* 最長予定日 / 超過日数 */}
@@ -1112,7 +1110,7 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
                               {item.followup.note && (
                                 <div
                                   onClick={() => handleOpenNoteModal(item)}
-                                  className="text-[10px] text-slate-600 bg-slate-50 border border-slate-200 p-1 rounded max-w-[140px] truncate cursor-pointer hover:bg-slate-100"
+                                  className="text-[10px] text-slate-600 bg-slate-50 border border-slate-200 p-1 rounded max-w-[200px] whitespace-normal line-clamp-3 cursor-pointer hover:bg-slate-100"
                                   title={item.followup.note}
                                 >
                                   💬 {item.followup.note}
@@ -1400,6 +1398,7 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
                               </select>
 
                               <CustomerEtaInput orderId={ordItem.orderId} />
+                              <CustomerPortalDisplayInput orderId={ordItem.orderId} />
 
                               <button
                                 onClick={() => onSelectOrder(ordItem.order)}

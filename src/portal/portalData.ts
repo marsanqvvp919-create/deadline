@@ -50,6 +50,8 @@ export interface TimelineEvent {
 
 export interface OrderRecord {
   id: string;
+  /** 社内からのお知らせ（納期超過の画面で入れる。お届け済みの出荷には出さない） */
+  notice?: string | null;
   invoiceNo: string;
   batchId: string;
   batchName: string;
@@ -237,6 +239,8 @@ export interface ApiOrder {
   customerEta?: string | null;
   /** 社内で指定した、まだ出荷していない分の段階（通関中など） */
   unshippedStatus?: OrderStatus | null;
+  /** 社内からお客様へのお知らせ */
+  customerMemo?: string | null;
   lines: ApiLine[];
 }
 export interface ApiShipment {
@@ -389,6 +393,7 @@ export function buildPortalModel(data: PortalApiData): PortalModel {
     const clinic = clinicById.get(o.clinicId) || { ...clinics[0], id: o.clinicId, name: `${o.clinicName}様` };
     const month = ymd(o.orderDate).slice(0, 7).replace('/', '-');
     const base = {
+      notice: o.customerMemo || null,
       batchId: month,
       batchName: `${Number(month.slice(5))}月ご発注分`,
       orderDate: ymd(o.orderDate),
@@ -592,8 +597,15 @@ export function buildPortalModel(data: PortalApiData): PortalModel {
         items: priced(rest.map(({ l, qty }) => ({ name: l.productName, qty, unit: '本', lotNo: '', expDate: '', unitPrice: l.unitPrice ?? null }))),
         totalQty: rest.reduce((a, b) => a + b.qty, 0),
         timeline: [
-          ...(o.unshippedStatus === 'CUSTOMS_CLEARANCE'
-            ? [{ step: 'CUSTOMS_CLEARANCE' as OrderStatus, time: '—', location: '日本', title: '通関手続き中', desc: '日本で通関の手続きをしています', operator: '株式会社Number1' }]
+          // 社内で段階を指定したときは、その段階までの流れを出す
+          ...(o.unshippedStatus === 'OUT_FOR_DELIVERY'
+            ? [{ step: 'OUT_FOR_DELIVERY' as OrderStatus, time: '—', location: '国内', title: '国内配送中', desc: 'クリニックへ配送しています', operator: '国内配送' }]
+            : []),
+          ...(o.unshippedStatus && stepOf(o.unshippedStatus) >= stepOf('CUSTOMS_CLEARANCE')
+            ? [{ step: 'CUSTOMS_CLEARANCE' as OrderStatus, time: '—', location: '日本', title: '通関手続き中', desc: o.unshippedStatus === 'CUSTOMS_CLEARANCE' ? '日本で通関の手続きをしています' : '輸入通関', operator: '税関' }]
+            : []),
+          ...(o.unshippedStatus && stepOf(o.unshippedStatus) >= stepOf('IN_TRANSIT_INTL')
+            ? [{ step: 'IN_TRANSIT_INTL' as OrderStatus, time: '—', location: '国際フライト', title: '国際便 国際航空輸送', desc: o.unshippedStatus === 'IN_TRANSIT_INTL' ? '輸送中' : '国際便にて輸送', operator: '国際便' }]
             : []),
           ...(ordered ? [] : [{ step: 'PREPARING' as OrderStatus, time: '—', location: '商品手配', title: '手配中（出荷準備中）', desc: '商品を手配中です。入荷後に発送します', operator: '株式会社Number1' }]),
           orderedEvent,
@@ -602,7 +614,10 @@ export function buildPortalModel(data: PortalApiData): PortalModel {
     }
   }
 
-  records.forEach((r) => (r.amountTotal = sumAmount(r.items)));
+  records.forEach((r) => {
+    r.amountTotal = sumAmount(r.items);
+    if (r.status === 'DELIVERED') r.notice = null;
+  });
   const orders: Record<string, OrderRecord[]> = {};
   records.forEach((r) => (orders[r.batchId] = [...(orders[r.batchId] || []), r]));
   Object.values(orders).forEach((list) => list.sort((a, b) => stepOf(a.status) - stepOf(b.status) || b.orderDate.localeCompare(a.orderDate)));
