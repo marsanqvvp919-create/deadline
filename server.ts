@@ -4287,13 +4287,20 @@ async function portalGroupFromRequest(req: express.Request): Promise<PortalGroup
 }
 
 const PORTAL_HIDDEN_ORDER_STATUS = ['見積作成中', '見積済み'];
-// お客様の管理画面だけの出荷の手直し（楽楽販売・社内画面は変えない）。delivered：配送完了として出す／hideItems：この出荷から外す商品
+// お客様の管理画面だけの出荷の手直し（楽楽販売・社内画面は変えない）。キーは出荷番号か追跡番号。delivered：配送完了として出す／hideItems：この出荷から外す商品
 const PORTAL_SHIPMENT_FIXES: Record<string, { delivered?: boolean; hideItems?: RegExp }> = {
   // 2026/10/29 VIVA Volume(サンプル) は別の伝票で出荷済み。この出荷は配送完了
   'DO-000005043': { delivered: true, hideItems: /VIVA Volume/i },
   // 2026/10/29 セブンクリニック様 受注000003916 のサンプル2箱は到着済み（佐川の追跡が配達中のまま止まっている）
   'DO-000004980': { delivered: true },
   'DO-000004982': { delivered: true },
+  // 2026/10/30 TAクリニック様 PRX-T33（追跡 1161140676）は到着済み。出荷番号の代わりに追跡番号で指定
+  '1161140676': { delivered: true },
+};
+// お客様の管理画面だけの、まだ出荷していない分の表示の手直し（受注ID → 出す段階）
+const PORTAL_UNSHIPPED_STATUS: Record<string, 'CUSTOMS_CLEARANCE'> = {
+  // 2026/10/30 TAクリニック様 Neuramis Volume (Lido) は通関中
+  '000004058': 'CUSTOMS_CLEARANCE',
 };
 function buildPortalData(g: PortalGroup) {
   const ids = new Set(g.clinicIds);
@@ -4322,6 +4329,7 @@ function buildPortalData(g: PortalGroup) {
       orderState: o.orderState,
       paymentStatus: o.paymentStatus,
       customerEta: portalEta[o.orderId]?.date || null,
+      unshippedStatus: PORTAL_UNSHIPPED_STATUS[o.orderId] || null,
       lines: (o.lines || []).map((l: any) => ({
         productId: l.productId || '',
         productName: l.productName,
@@ -4392,7 +4400,7 @@ function buildPortalData(g: PortalGroup) {
       };
     })
     .map((s) => {
-      const fix = PORTAL_SHIPMENT_FIXES[s.shipmentId];
+      const fix = PORTAL_SHIPMENT_FIXES[s.shipmentId] || s.trackingNos.map((n: string) => PORTAL_SHIPMENT_FIXES[n]).find(Boolean);
       if (!fix) return s;
       const keep = (name: string) => !(fix.hideItems && fix.hideItems.test(name));
       return {

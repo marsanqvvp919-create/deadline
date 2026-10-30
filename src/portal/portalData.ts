@@ -235,6 +235,8 @@ export interface ApiOrder {
   totalAmount: number;
   /** 社内が納期超過の画面で入れた、お客様に案内する到着予定日（YYYY-MM-DD） */
   customerEta?: string | null;
+  /** 社内で指定した、まだ出荷していない分の段階（通関中など） */
+  unshippedStatus?: OrderStatus | null;
   lines: ApiLine[];
 }
 export interface ApiShipment {
@@ -570,7 +572,7 @@ export function buildPortalModel(data: PortalApiData): PortalModel {
         invoiceNo: `${o.orderId} / 未出荷`,
         hub,
         hubName: HUB_NAME[hub],
-        status: ordered ? 'ORDERED' : 'PREPARING',
+        status: o.unshippedStatus || (ordered ? 'ORDERED' : 'PREPARING'),
         intlCarrier: '国際便',
         fedexTracking: '',
         sagawaTracking: '',
@@ -582,6 +584,9 @@ export function buildPortalModel(data: PortalApiData): PortalModel {
         items: priced(rest.map(({ l, qty }) => ({ name: l.productName, qty, unit: '本', lotNo: '', expDate: '', unitPrice: l.unitPrice ?? null }))),
         totalQty: rest.reduce((a, b) => a + b.qty, 0),
         timeline: [
+          ...(o.unshippedStatus === 'CUSTOMS_CLEARANCE'
+            ? [{ step: 'CUSTOMS_CLEARANCE' as OrderStatus, time: '—', location: '日本', title: '通関手続き中', desc: '日本で通関の手続きをしています', operator: '株式会社Number1' }]
+            : []),
           ...(ordered ? [] : [{ step: 'PREPARING' as OrderStatus, time: '—', location: '商品手配', title: '手配中（出荷準備中）', desc: '商品を手配中です。入荷後に発送します', operator: '株式会社Number1' }]),
           orderedEvent,
         ],
