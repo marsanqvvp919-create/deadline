@@ -1434,7 +1434,7 @@ function countOverdueOrders(orders: any[]): number {
 // 楽楽販売では出荷済みでも、実際は出していない明細（未出荷に戻し、納期超過の対象にする）。楽楽販売は変えない
 const FORCED_UNSHIPPED_LINES: { orderId: string; match: RegExp }[] = [
   // 2026/10/29 Detoxion Inj. 600mg は未出荷
-  { orderId: '000002963', match: /Detoxion/i },
+  { orderId: '000002963', match: /Detoxion Inj\. 600mg/i },
 ];
 function isForcedUnshipped(orderId: string, productId: string, productName: string) {
   return FORCED_UNSHIPPED_LINES.some((f) => f.orderId === orderId && (f.match.test(productId || '') || f.match.test(productName || '')));
