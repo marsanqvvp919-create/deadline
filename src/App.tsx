@@ -51,6 +51,7 @@ import { boxesOf } from './utils/shipmentTracking';
 import { BudgetSettingsModal } from './components/BudgetSettingsModal';
 import { BulkDeliveriesView } from './components/BulkDeliveriesView';
 import { PortalAdminView } from './components/PortalAdminView';
+import { ProductQuantityView } from './components/ProductQuantityView';
 import { DailyDigestModal } from './components/DailyDigestModal';
 import { ClinicProductStatusDrawer } from './components/ClinicProductStatusDrawer';
 import { getLocalClinics, getLocalShipments } from './api';
@@ -104,7 +105,7 @@ const APP_TAGLINE = '受注から到着まで ― 楽楽販売 連携';
 const KNOWN_TABS: ViewTab[] = [
   'leak_check', 'dashboard', 'morning_meeting', 'alerts', 'procurement', 'unshipped_clinics', 'partial_shipment', 'overdue',
   'customs_management', 'cool_missing', 'kanto_customs_ng', 'unmatched_sheets', 'inventory_management', 'shipping_calc', 'shipping_instructions', 'invoices',
-  'sheet_import', 'arrival_tracking', 'products', 'clinics', 'carrier_settings', 'bulk_deliveries', 'portal_admin',
+  'sheet_import', 'arrival_tracking', 'products', 'clinics', 'carrier_settings', 'bulk_deliveries', 'portal_admin', 'product_quantity',
   'sales_dashboard', 'sales_rep_sales', 'sales_clinic_master', 'reorder_prediction', 'rep_ranking',
 ];
 
@@ -735,6 +736,7 @@ export default function App() {
     products: '商品ごとの仕入先・原価・クール便の要否を確認・設定します',
     clinics: 'クリニックの情報と、送り先（英語名・住所・電話）を確認・修正します',
     portal_admin: 'お客様が見る管理画面のURLとパスワードを発行・管理します',
+    product_quantity: '製剤ごとに、未発注・未発送の数と、これまでに売れた数を確認します',
   };
   // 今日の作業の件数（左メニュー・右上・タブで同じ数を使う）
   const todayTotal = leakTotal + (sheetUnmatchedCount || 0);
@@ -804,6 +806,13 @@ export default function App() {
       badge: coolMissingCount + kantoNgCount > 0 ? `${coolMissingCount + kantoNgCount}` : null,
       badgeColor: 'bg-amber-600 text-white font-bold',
       match: DELIVERY_TABS,
+    },
+    {
+      id: 'product_quantity',
+      group: 'analysis',
+      label: '製剤別の数量',
+      icon: Boxes,
+      badge: null,
     },
     {
       id: 'unshipped_clinics',
@@ -1303,6 +1312,7 @@ export default function App() {
 
 
           {activeTab === 'portal_admin' && <PortalAdminView />}
+          {activeTab === 'product_quantity' && <ProductQuantityView orders={deliveryData.orders} onSelectOrder={handleOpenDetail} />}
 
           {activeTab === 'bulk_deliveries' && (
             <BulkDeliveriesView orders={deliveryData.orders} clinics={clinics} onSelectOrder={handleOpenDetail} />
