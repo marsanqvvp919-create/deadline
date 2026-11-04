@@ -237,14 +237,16 @@ export const ArrivalTrackingView: React.FC<{
 
   // この出荷の中身：明細の受注ID・商品ID（出荷管理の明細）から、受注日と商品名・数量を出す
   const contentsOf = (s: TrackingShipment) => {
-    const refs: { orderId: string; productId: string }[] = ((s as any).lineRefs || []).filter((r: any) => r?.productId);
+    const refs: { orderId: string; productId: string; shipQty?: string }[] = ((s as any).lineRefs || []).filter((r: any) => r?.productId);
     const orderIds = Array.from(new Set([...(refs.map((r) => r.orderId).filter(Boolean)), s.orderId].filter((id) => id && id !== '—')));
     const ordersHere = orderIds.map((id) => orderById.get(id)).filter((o): o is Order => !!o);
     const items =
       refs.length > 0
         ? refs.map((r) => {
             const line = orderById.get(r.orderId)?.lines.find((l) => l.productId === r.productId);
-            return { name: line?.productName || productNameById.get(r.productId) || `商品ID ${r.productId}`, qty: line?.quantity, lineKey: line?.lineKey, orderId: r.orderId };
+            // 数量はこの出荷で送る数（出荷管理の明細の出荷数）。無ければ注文の数
+            const shipQty = Number(r.shipQty);
+            return { name: line?.productName || productNameById.get(r.productId) || `商品ID ${r.productId}`, qty: shipQty > 0 ? shipQty : line?.quantity, lineKey: line?.lineKey, orderId: r.orderId };
           })
         : (ordersHere[0]?.lines || [])
             .filter((l) => !isShippingOrFee(l.productName, l.productId))

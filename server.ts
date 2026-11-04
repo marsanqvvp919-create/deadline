@@ -1961,7 +1961,7 @@ const isEmptyValue = (v: any) => v === null || v === undefined || v === '' || v 
 let slimCache: { key: string; orders: any; shipments: any } | null = null;
 
 function slimForClient() {
-  const key = `${serverRakurakuStore.lastSuccessTime}|${(serverRakurakuStore.orders?.orders || []).length}|${(serverRakurakuStore.shipments || []).length}|${allocationVersion}`;
+  const key = `${serverRakurakuStore.lastSuccessTime}|${(serverRakurakuStore.orders?.orders || []).length}|${(serverRakurakuStore.shipments || []).length}|${allocationVersion}|${productFlagsVersion}`;
   if (slimCache && slimCache.key === key) return slimCache;
   const src = serverRakurakuStore.orders;
   const orders = src
@@ -1995,6 +1995,8 @@ function slimForClient() {
       if (!SHIPMENT_KEEP_KEYS.has(k) && isEmptyValue(v)) continue;
       out[k] = v;
     }
+    // クール手配の警告は、クール便が必要な商品が入っている出荷だけに出す
+    out.isCoolMissing = !!sh.isCoolMissing && shipmentHasCoolProduct(sh);
     return out;
   });
   slimCache = { key, orders, shipments };
@@ -2009,6 +2011,7 @@ app.get('/api/rakuraku/all-data', async (_req, res) => {
     syncAllRakurakuData(false).catch(() => {});
   }
 
+  await loadProductFlags().catch(() => {});
   const slim = slimForClient();
   res.json({
     success: true,
@@ -5697,6 +5700,7 @@ async function loadProductFlags() {
       try {
         const [buf] = await new Storage().bucket(CACHE_BUCKET).file(PRODUCT_FLAGS_OBJECT).download();
         productFlags = { cool: {}, ...JSON.parse(buf.toString('utf-8')) };
+        productFlagsVersion++;
       } catch (e: any) {
         if (e?.code !== 404) {
           productFlagsLoad = null;
@@ -5718,6 +5722,15 @@ async function loadProductFlags() {
   }
 }
 const isCoolProduct = (productId?: string) => !!(productId && productFlags.cool[productId]);
+// 商品のクール要否が変わったら、画面へ渡すデータ（クール手配の警告）を作り直す
+let productFlagsVersion = 0;
+// 出荷にクール便が必要な商品が入っているか（出荷管理の明細の商品ID。明細がなければ受注の明細で見る）
+function shipmentHasCoolProduct(sh: any): boolean {
+  const refs = ((sh.lineRefs || []) as any[]).map((r) => r?.productId).filter(Boolean);
+  if (refs.length) return refs.some((id) => isCoolProduct(id));
+  const order = (serverRakurakuStore.orders?.orders || []).find((o: any) => o.orderId === sh.orderId);
+  return ((order?.lines || []) as any[]).some((l) => isCoolProduct(l.productId));
+}
 
 app.get('/api/product-flags', async (_req, res) => {
   await loadProductFlags();
@@ -5728,6 +5741,7 @@ app.post('/api/product-flags/cool', async (req, res) => {
   const productId = String(req.body?.productId || '').trim();
   if (!productId) return res.status(400).json({ error: '商品IDがありません' });
   productFlags.cool[productId] = !!req.body?.cool;
+  productFlagsVersion++;
   await saveProductFlags();
   res.json({ ok: true, productId, cool: productFlags.cool[productId] });
 });
@@ -5832,9 +5846,7 @@ function leakChecks() {
     const blank = (v: any) => !v || v === '—';
     // クール対象の商品を含む出荷（出荷管理の明細の商品ID、なければ受注の明細で判定）
     const coolShip = new Set<string>();
-    for (const x of ships) if (isCoolProduct(x.lineRef?.productId)) coolShip.add(x.shipmentId);
-    const orderCool = new Set(invOrders().filter((o) => (o.lines as any[]).some((l) => isCoolProduct(l.productId))).map((o) => o.orderId));
-    for (const x of ships) if (!x.lineRef?.productId && orderCool.has(x.orderId)) coolShip.add(x.shipmentId);
+    for (const x of ships) if (shipmentHasCoolProduct(x)) coolShip.add(x.shipmentId);
     const isCoolShip = (x: any) => coolShip.has(x.shipmentId) || !blank(x.coolApplicationStatus);
     const clinicOf = (s: any) => (blank(s.customerName) ? invOrders().find((o) => o.orderId === s.orderId)?.customerName || '' : s.customerName);
     // 配達済み（楽楽販売の配達日・出荷状態、または追跡で配達完了）は対象外
@@ -5851,7 +5863,7 @@ function leakChecks() {
       ships
         .filter((s) => {
           const d = daysSince(blank(s.warehouseShippedDate) ? (blank(s.shippedDate) ? '' : s.shippedDate) : s.warehouseShippedDate);
-          return (s.isCoolMissing || (coolShip.has(s.shipmentId) && blank(s.coolApplicationStatus))) && d !== null && d <= 30 && notDone(s);
+          return coolShip.has(s.shipmentId) && (s.isCoolMissing || blank(s.coolApplicationStatus)) && d !== null && d <= 30 && notDone(s);
         })
         .map((s) => ({
         id: s.shipmentId,

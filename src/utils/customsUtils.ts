@@ -5,6 +5,8 @@ import { ShipmentItem, Order, ClinicItem } from '../types';
  * クール申請・委任状・伝票のどれかが「未」
  */
 export function isCoolMissingShipment(s: ShipmentItem): boolean {
+  // サーバーで、クール便が必要な商品が入っている出荷だけに絞って判定済み
+  if (typeof s.isCoolMissing === 'boolean') return s.isCoolMissing;
   const cool = (s.coolApplicationStatus || '').trim();
   const poa = (s.powerOfAttorneyStatus || '').trim();
   const slip = (s.slipStatus || '').trim();
