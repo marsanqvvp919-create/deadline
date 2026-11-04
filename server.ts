@@ -1021,6 +1021,8 @@ function parseOrdersFromCsv(csvText: string): any[] | null {
       finalShippedDate = null;
       finalTrackingNo = '';
     }
+    const forcedShipped = isForcedShipped(orderId, productId, productName);
+    if (forcedShipped) shippedQty = quantity;
 
     if (shippedQty > quantity) shippedQty = quantity;
     if (shippedQty < 0) shippedQty = 0;
@@ -1056,6 +1058,7 @@ function parseOrdersFromCsv(csvText: string): any[] | null {
       shippedDate: finalShippedDate,
       rawShippedDate: forcedUnshipped ? null : shippedDate,
       forcedUnshipped: forcedUnshipped || undefined,
+      forcedShipped: forcedShipped || undefined,
       promisedDate: getVal(row, 'promisedDate') || null,
       deliveryRisk: getVal(row, 'deliveryRisk') || '',
       deliveryCompliance: getVal(row, 'deliveryCompliance') || '',
@@ -1074,6 +1077,11 @@ function parseOrdersFromCsv(csvText: string): any[] | null {
     if (o.lines.some((l: any) => l.forcedUnshipped) && ['出荷済み', '納品済み'].includes(String(o.status || '').trim())) {
       o.rakurakuStatus = o.status;
       o.status = '一部出荷';
+    }
+    // 出荷済みにした明細だけの伝票は、楽楽販売のステータスに関係なく、こちらでは出荷済みとして扱う
+    if (o.lines.length > 0 && o.lines.every((l: any) => l.forcedShipped) && !['出荷済み', '納品済み'].includes(String(o.status || '').trim())) {
+      o.rakurakuStatus = o.status;
+      o.status = '出荷済み';
     }
   });
   return Array.from(ordersMap.values());
@@ -1436,6 +1444,15 @@ const FORCED_UNSHIPPED_LINES: { orderId: string; match: RegExp }[] = [
   // 2026/10/29 Detoxion Inj. 600mg は未出荷
   { orderId: '000002963', match: /Detoxion Inj\. 600mg/i },
 ];
+// 楽楽販売では未出荷でも、こちらでは出荷済みとして扱う明細（楽楽販売には書き込まない）
+const FORCED_SHIPPED_LINES: { orderId: string; match: RegExp }[] = [
+  // 2026/11/04 ココミルクリニックの漢方は出荷済み
+  { orderId: '000002135', match: /^000000785$|漢方/ },
+  { orderId: '000002141', match: /^000000785$|漢方/ },
+];
+function isForcedShipped(orderId: string, productId: string, productName: string) {
+  return FORCED_SHIPPED_LINES.some((f) => f.orderId === orderId && (f.match.test(productId || '') || f.match.test(productName || '')));
+}
 function isForcedUnshipped(orderId: string, productId: string, productName: string) {
   return FORCED_UNSHIPPED_LINES.some((f) => f.orderId === orderId && (f.match.test(productId || '') || f.match.test(productName || '')));
 }

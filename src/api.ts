@@ -467,6 +467,9 @@ export function normalizeDeliveryData(data: DeliveryData): DeliveryData {
         line.trackingNo = '';
       }
 
+      // 楽楽販売では未出荷でも、サーバーで出荷済みとして扱う明細（server.ts の FORCED_SHIPPED_LINES）
+      if ((line as any).forcedShipped) sq = q;
+
       if (sq > q) sq = q;
       if (sq < 0) sq = 0;
       line.shippedQty = sq;
