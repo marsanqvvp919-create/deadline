@@ -4,10 +4,11 @@ import { Order, OrderLine } from '../types';
 import { isShippingOrFee } from '../utils';
 import { isQuoteOrder } from '../utils/salesCalculations';
 import { getLocalProducts } from '../api';
+import { PRODUCT_GENRES } from '../data/productGenres';
 
 // 製剤別の数量：製剤ごとに「まだ届けていない注文（未発注・手配済み）」「未発送」「これまでに売れた数」を並べる。
 // 未発送は進行中の受注だけで数える（出荷済み・納品済みで閉じた受注の残りは数えない）。
-// ジャンルは商品マスタのカテゴリ。カテゴリが空の商品は「未分類」にまとめる。
+// ジャンルは商品マスタのカテゴリ。空なら、このシステムで分類したジャンル（data/productGenres.ts）。どちらも無ければ「未分類」。
 
 type Period = 'all' | 'year' | 'this_month' | 'last_month' | '3months';
 const PERIODS: { id: Period; label: string }[] = [
@@ -87,7 +88,7 @@ export function ProductQuantityView({
         const key = l.productId || l.productName;
         let r = map.get(key);
         if (!r) {
-          r = { productId: l.productId, productName: l.productName, genre: genreById.get(l.productId) || NO_GENRE, unordered: 0, arranged: 0, unshipped: 0, shipped: 0, sold: 0, orderCount: 0, pending: [], nameDate: date };
+          r = { productId: l.productId, productName: l.productName, genre: genreById.get(l.productId) || PRODUCT_GENRES[l.productId] || NO_GENRE, unordered: 0, arranged: 0, unshipped: 0, shipped: 0, sold: 0, orderCount: 0, pending: [], nameDate: date };
           map.set(key, r);
         }
         // 名前は一番新しい受注のものを使う
