@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { FileText, Plus, Search, Settings, Package, Building2, Warehouse as WarehouseIcon, X, Trash2, RefreshCw } from 'lucide-react';
+import { FileText, Plus, Search, Settings, Package, Building2, Warehouse as WarehouseIcon, X, Trash2, RefreshCw, Send } from 'lucide-react';
 import { InvoicePdfButtons, downloadInvoicePdf } from './InvoiceDialog';
 import { notifyDone, notifyError } from '../components/flow/UndoToast';
 import { TONE } from '../components/flow/tone';
@@ -149,12 +149,47 @@ function MasterTab({ type }: { type: MasterType }) {
   const [onlyMissing, setOnlyMissing] = useState(false);
   const [showInactive, setShowInactive] = useState(false);
   const [edit, setEdit] = useState<any | null | 'new'>(null);
+  const [rkSync, setRkSync] = useState<any | null>(null);
+  const [rkBusy, setRkBusy] = useState<string | null>(null);
   const load = useCallback(() => {
     api(`/api/invoice-admin/masters/${type}`)
       .then((j) => setItems(j.items))
       .catch((e) => notifyError(e.message));
+    if (type === 'clinics') api('/api/invoice-admin/clinic-sync').then((j) => setRkSync(j.last)).catch(() => {});
   }, [type]);
   useEffect(load, [load]);
+  // 楽楽販売の顧客マスタとの同期（取り込みは1日1回自動。送るのは1件ずつ）
+  const pullFromRakuraku = async () => {
+    setRkBusy('pull');
+    try {
+      const { last } = await api('/api/invoice-admin/clinic-sync', { method: 'POST' });
+      if (last.error) throw new Error(last.error);
+      notifyDone(`楽楽販売から取り込みました（更新 ${last.updated}・追加 ${last.created}・未送信のため除外 ${last.skippedPending.length}）`);
+      load();
+    } catch (e: any) {
+      notifyError(e.message);
+    } finally {
+      setRkBusy(null);
+    }
+  };
+  const pushToRakuraku = async (x: any) => {
+    const ok = await askConfirm({
+      title: x.rakurakuClinicId ? `楽楽販売のクリニック ${x.rakurakuClinicId} を更新します` : '楽楽販売の顧客マスタに新しく登録します',
+      body: `「${x.name}」のクリニック名・院長名・住所・電話・メールを送ります（空の項目は送りません）。`,
+      okLabel: '送る',
+    });
+    if (!ok) return;
+    setRkBusy(x.id);
+    try {
+      const r = await api(`/api/invoice-admin/masters/clinics/${x.id}/rakuraku`, { method: 'POST' });
+      notifyDone(r.created ? `楽楽販売に登録しました（クリニックID ${r.rakurakuClinicId}）` : `楽楽販売へ送りました（${r.rakurakuClinicId}）`);
+      load();
+    } catch (e: any) {
+      notifyError(e.message);
+    } finally {
+      setRkBusy(null);
+    }
+  };
   const shown = useMemo(() => {
     const needle = q.trim().toLowerCase();
     return (items || [])
@@ -180,6 +215,36 @@ function MasterTab({ type }: { type: MasterType }) {
             ['院長（英語）', (x) => x.doctorNameEn || '—'],
             ['電話', (x) => x.phone || '—'],
             ['英語住所', (x) => <span className="line-clamp-2 max-w-72">{x.addressEn || '—'}</span>],
+            [
+              '楽楽販売',
+              (x) => (
+                <div className="flex items-center gap-1 whitespace-nowrap">
+                  {x.rakurakuPending ? (
+                    <span className={`rounded border px-1.5 py-0.5 text-[10px] font-bold ${TONE.action}`} title="この画面かインボイスアプリで直した内容を、楽楽販売へまだ送っていません（毎日の取り込みで上書きしません）">
+                      未送信
+                    </span>
+                  ) : x.rakurakuClinicId ? (
+                    <span className={`rounded border px-1.5 py-0.5 text-[10px] font-bold ${TONE.done}`} title={x.rakurakuSyncedAt ? `最終同期 ${String(x.rakurakuSyncedAt).slice(0, 16).replace('T', ' ')}` : undefined}>
+                      連携済み
+                    </span>
+                  ) : (
+                    <span className={`rounded border px-1.5 py-0.5 text-[10px] font-bold ${TONE.na}`}>未連携</span>
+                  )}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      pushToRakuraku(x);
+                    }}
+                    disabled={rkBusy !== null}
+                    className="inline-flex items-center gap-0.5 rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[10px] font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                    title="楽楽販売へ送る"
+                  >
+                    <Send className={`w-3 h-3 ${rkBusy === x.id ? 'animate-pulse' : ''}`} />
+                    送る
+                  </button>
+                </div>
+              ),
+            ],
           ]
         : [
             ['倉庫', (x) => <><div className="font-semibold">{x.name}{x.isDefault && <span className="ml-1 rounded bg-indigo-50 px-1 text-[10px] text-indigo-700">既定</span>}</div><div className="text-[10px] text-slate-500">{x.nameEn}</div></>],
@@ -203,6 +268,20 @@ function MasterTab({ type }: { type: MasterType }) {
           使っていないものも表示
         </label>
         <span className="text-slate-500">{shown.length}件</span>
+        {type === 'clinics' && (
+          <>
+            <button onClick={pullFromRakuraku} disabled={rkBusy !== null} className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 font-semibold disabled:opacity-50">
+              <RefreshCw className={`w-3.5 h-3.5 ${rkBusy === 'pull' ? 'animate-spin' : ''}`} />
+              楽楽販売から取り込む
+            </button>
+            {rkSync && (
+              <span className={`text-[10px] ${rkSync.error ? 'text-rose-600' : 'text-slate-400'}`} title={rkSync.skippedPending?.join('\n') || undefined}>
+                前回 {String(rkSync.at).slice(5, 16).replace('T', ' ')}
+                {rkSync.error ? `：${rkSync.error}` : `（更新 ${rkSync.updated}・追加 ${rkSync.created}・未送信 ${rkSync.skippedPending.length}）`}
+              </span>
+            )}
+          </>
+        )}
         <button onClick={() => setEdit('new')} className="ml-auto inline-flex items-center gap-1 rounded-lg bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 font-bold">
           <Plus className="w-3.5 h-3.5" />
           追加する

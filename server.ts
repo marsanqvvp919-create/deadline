@@ -1805,7 +1805,12 @@ async function syncAllRakurakuData(isManual = false): Promise<boolean> {
         const parsedClinics = transformCsvToClinics(resClinics.csv);
         if (parsedClinics && parsedClinics.length > 0) {
           serverRakurakuStore.clinics = parsedClinics;
-          refreshClinicOverrides();
+          // 修正を重ねてから、インボイスのクリニックマスタにも反映する
+          loadClinicOverrides()
+            .then(applyClinicOverrides)
+            .catch((e) => console.warn('[ClinicOverrides] load failed:', e?.message || e))
+            .then(() => syncInvoiceClinicsFromRakuraku())
+            .catch((e) => console.warn('[InvoiceClinicSync] failed:', e?.message || e));
         }
         recordMasterStatus('101250', parsedClinics?.length || 0);
       } catch (e) {
@@ -6499,6 +6504,228 @@ async function saveShipmentWithNumber(shipment: any, date: string, prefixFromSet
   });
 }
 
+// --- インボイスのクリニックマスタ（Firestore clinics）と楽楽販売の顧客マスタ（101250）の同期
+// 読み込み：顧客マスタを取得するたび（1日1回と手動のとき）に、楽楽販売を正としてインボイス側へ反映する。
+//   楽楽販売の値が空の項目は上書きしない（インボイスにだけ入れた英語住所などを消さない）。
+//   インボイス側で編集して楽楽販売へまだ送っていないクリニック（rakurakuPending）は上書きしない。
+// 書き込み：クリニックマスタの画面の「楽楽販売へ送る」で1件ずつ。クリニックIDがあれば更新、無ければ新規登録して採番されたIDを保存する
+const RK_CLINIC_DB = '101250';
+// 項目IDは 管理者設定 → メンテナンス機能 → APIパラメータ情報（顧客マスタ）で確認したもの
+const RK_CLINIC_ITEM = {
+  name: '109899', director: '109901', phone: '109911', email: '109919', note: '110249',
+  address: '109905', postal: '109906', prefecture: '109907', city: '109908', street: '109909', building: '109910',
+  deliveryGroup: '110696', paymentMethod: '110114', region: '110129', currency: '110130',
+} as const;
+// レコード更新API（API連携マニュアル「15．レコード更新API」）。keyId（クリニックID）で1件を更新し、送らない項目は変わらない
+const RK_UPDATE_PATH = 'apirecord/update';
+
+type InvoiceClinicSyncResult = { at: string; rakuraku: number; updated: number; created: number; unchanged: number; skippedPending: string[]; error?: string };
+let invoiceClinicSyncLast: InvoiceClinicSyncResult | null = null;
+let invoiceClinicSyncRunning: Promise<InvoiceClinicSyncResult> | null = null;
+
+/** 楽楽販売の顧客マスタ（修正を重ねたもの）1件を、インボイスのクリニックの項目にする（空の値は含めない） */
+function rakurakuClinicToInvoice(c: any): Record<string, string> {
+  const base = String(c.clinicName || '').trim();
+  const branch = String(c.branchName || '').trim();
+  const v: Record<string, string> = {
+    name: branch && !base.includes(branch) ? `${base} ${branch}` : base,
+    nameEn: c.clinicNameEn,
+    doctorName: c.directorName,
+    zip: c.postalCode,
+    prefecture: c.prefecture,
+    address: c.address,
+    addressEn: c.addressEn,
+    phone: c.phone,
+    email: c.email,
+  };
+  return Object.fromEntries(Object.entries(v).map(([k, s]) => [k, String(s ?? '').trim()]).filter(([, s]) => s !== ''));
+}
+
+async function syncInvoiceClinicsFromRakuraku(): Promise<InvoiceClinicSyncResult> {
+  if (invoiceClinicSyncRunning) return invoiceClinicSyncRunning;
+  invoiceClinicSyncRunning = (async () => {
+    const at = new Date().toISOString();
+    const rk = ((serverRakurakuStore.clinics || []) as any[]).filter((c) => c.clinicId && !String(c.clinicId).startsWith('CLN-'));
+    const result: InvoiceClinicSyncResult = { at, rakuraku: rk.length, updated: 0, created: 0, unchanged: 0, skippedPending: [] };
+    try {
+      if (!rk.length) throw new Error('楽楽販売の顧客マスタがまだ読み込まれていません');
+      const db = invoiceDb();
+      const snap = await db.collection('clinics').get();
+      const docs = snap.docs.map((d) => ({ id: d.id, ref: d.ref, data: d.data() as any }));
+      // 結びつけ：rakurakuClinicId → clinicId（楽楽販売と同じIDにしてあるもの）→ 院名（1件に決まるときだけ）
+      const byRkId = new Map<string, (typeof docs)[number]>();
+      for (const d of docs) if (d.data.rakurakuClinicId) byRkId.set(String(d.data.rakurakuClinicId), d);
+      for (const d of docs) if (!d.data.rakurakuClinicId && d.data.clinicId && !byRkId.has(String(d.data.clinicId))) byRkId.set(String(d.data.clinicId), d);
+      const byName = new Map<string, (typeof docs)[number][]>();
+      for (const d of docs) {
+        if (d.data.rakurakuClinicId) continue;
+        const k = normName(d.data.name);
+        if (k) byName.set(k, [...(byName.get(k) || []), d]);
+      }
+      let maxSeq = docs.reduce((m, d) => Math.max(m, Number(d.data.sequenceNo) || 0), 0);
+      const used = new Set<string>();
+      const writes: { ref: ReturnType<Firestore['doc']>; data: any; create: boolean }[] = [];
+
+      for (const c of rk) {
+        const id = String(c.clinicId);
+        const fields = rakurakuClinicToInvoice(c);
+        if (!fields.name) continue;
+        let target = byRkId.get(id);
+        if (!target) {
+          const same = (byName.get(normName(fields.name)) || []).filter((d) => !used.has(d.id));
+          if (same.length === 1) target = same[0];
+        }
+        if (target && used.has(target.id)) target = undefined;
+        if (target) {
+          used.add(target.id);
+          if (target.data.rakurakuPending) {
+            result.skippedPending.push(`${id} ${fields.name}`);
+            continue;
+          }
+          // 楽楽販売の住所は都道府県〜建物名まで1つにつながっているので、分けて入れていた市区町村・建物名は空にする（PDFで二重にならないように）
+          const next: Record<string, string> = fields.address ? { ...fields, city: '', building: '' } : fields;
+          const changed: any = {};
+          for (const [k, v] of Object.entries(next)) if (String(target.data[k] ?? '') !== v) changed[k] = v;
+          if (target.data.rakurakuClinicId !== id) changed.rakurakuClinicId = id;
+          if (!target.data.clinicId || String(target.data.clinicId).startsWith('CLN-')) changed.clinicId = id;
+          if (!Object.keys(changed).length) {
+            result.unchanged++;
+            continue;
+          }
+          writes.push({ ref: target.ref, data: { ...changed, rakurakuSyncedAt: at, updatedAt: at, updatedBy: '楽楽販売' }, create: false });
+          result.updated++;
+        } else {
+          maxSeq++;
+          writes.push({
+            ref: db.collection('clinics').doc(),
+            create: true,
+            data: {
+              clinicId: id, sequenceNo: maxSeq,
+              nameEn: '', corporationName: '', contactPerson: '', doctorName: '', doctorNameEn: '',
+              zip: '', prefecture: '', city: '', address: '', building: '', addressEn: '', phone: '', email: '',
+              notes: '楽楽販売の顧客マスタから取り込み', active: true,
+              ...fields,
+              ...(fields.nameEn ? {} : { nameEn: fields.name }),
+              rakurakuClinicId: id, rakurakuSyncedAt: at, createdAt: at, updatedAt: at, updatedBy: '楽楽販売',
+            },
+          });
+          result.created++;
+        }
+      }
+      for (let i = 0; i < writes.length; i += 400) {
+        const batch = db.batch();
+        for (const w of writes.slice(i, i + 400)) w.create ? batch.set(w.ref, w.data) : batch.update(w.ref, w.data);
+        await batch.commit();
+      }
+      if (writes.length) invoiceMasters = null;
+      console.log(`[InvoiceClinicSync] updated=${result.updated} created=${result.created} unchanged=${result.unchanged} pending=${result.skippedPending.length}`);
+    } catch (e: any) {
+      result.error = String(e?.message || e);
+    }
+    invoiceClinicSyncLast = result;
+    return result;
+  })().finally(() => {
+    invoiceClinicSyncRunning = null;
+  });
+  return invoiceClinicSyncRunning;
+}
+
+async function callRakurakuRecord(path: string, body: Record<string, unknown>): Promise<any> {
+  const token = (process.env.VITE_DATA_KEY || '').trim();
+  const baseUrl = (process.env.VITE_RAKURAKU_BASE_URL || 'https://hnsibot.rakurakuhanbai.jp/ykbxg2a/').replace(/\/+$/, '');
+  const res = await fetch(`${baseUrl}/${path}/version/v1`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json; charset=utf-8', 'X-HD-apitoken': token },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(60000),
+  });
+  const json: any = await res.json().catch(() => ({}));
+  if (!res.ok || json.errors || json.status === 'error') {
+    const e = json.errors || {};
+    const detail = e.description ? ` ${JSON.stringify(e.description).slice(0, 400)}` : '';
+    throw new Error(`楽楽販売 API エラー（${e.code ?? res.status}）: ${e.msg ?? res.statusText}${detail}`);
+  }
+  return json;
+}
+
+app.get('/api/invoice-admin/clinic-sync', (_req, res) => {
+  res.json({ last: invoiceClinicSyncLast, running: !!invoiceClinicSyncRunning });
+});
+app.post('/api/invoice-admin/clinic-sync', async (_req, res) => {
+  if (isDemo()) return res.status(400).json({ error: 'サンプルでは使えません' });
+  res.json({ last: await syncInvoiceClinicsFromRakuraku() });
+});
+
+// インボイスのクリニック1件を楽楽販売の顧客マスタへ送る
+app.post('/api/invoice-admin/masters/clinics/:id/rakuraku', async (req, res) => {
+  if (isDemo()) return res.status(400).json({ error: 'サンプルでは使えません' });
+  try {
+    const ref = invoiceDb().collection('clinics').doc(req.params.id);
+    const snap = await ref.get();
+    if (!snap.exists) return res.status(404).json({ error: 'クリニックが見つかりません' });
+    const c: any = snap.data();
+    if (!String(c.name || '').trim()) return res.status(400).json({ error: 'クリニック名がありません' });
+    const s = (v: any) => String(v ?? '').trim();
+    const values: Record<string, string> = Object.fromEntries(
+      Object.entries({
+        [RK_CLINIC_ITEM.name]: s(c.name),
+        [RK_CLINIC_ITEM.director]: s(c.doctorName),
+        [RK_CLINIC_ITEM.phone]: s(c.phone),
+        [RK_CLINIC_ITEM.email]: s(c.email),
+      }).filter(([, v]) => v !== '') // 空の項目は送らない（楽楽販売の値を空で上書きしない）
+    );
+    // 住所：楽楽販売は「クリニック住所」と、郵便番号〜建物名の欄に分かれている（このシステムは分かれた欄を優先して読む）。
+    // インボイスの住所欄に「〒郵便番号」や都道府県が入っていることがあるので外して町名・番地にする
+    const pref = s(c.prefecture);
+    const street = s(c.address).replace(/^〒?\s*\d{3}-?\d{4}\s*/, '').replace(pref && new RegExp(`^${pref.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`), '').trim();
+    if (street || s(c.city)) {
+      Object.assign(values, {
+        [RK_CLINIC_ITEM.address]: `${pref}${s(c.city)}${street}${s(c.building)}`,
+        [RK_CLINIC_ITEM.prefecture]: pref,
+        [RK_CLINIC_ITEM.city]: s(c.city),
+        [RK_CLINIC_ITEM.street]: street,
+        [RK_CLINIC_ITEM.building]: s(c.building),
+      });
+      if (s(c.zip)) values[RK_CLINIC_ITEM.postal] = s(c.zip);
+    }
+    let rkId = String(c.rakurakuClinicId || '');
+    let created = false;
+    if (rkId) {
+      await callRakurakuRecord(RK_UPDATE_PATH, { dbSchemaId: RK_CLINIC_DB, keyId: rkId, values });
+    } else {
+      const j = await callRakurakuRecord('apirecord/regist', {
+        dbSchemaId: RK_CLINIC_DB,
+        keyMode: '0',
+        values: {
+          ...values,
+          // 既存の顧客と同じ初期値（API 登録では画面の初期値が入らない）
+          [RK_CLINIC_ITEM.deliveryGroup]: '200',
+          [RK_CLINIC_ITEM.paymentMethod]: '前払い',
+          [RK_CLINIC_ITEM.region]: '国内',
+          [RK_CLINIC_ITEM.currency]: 'JPY',
+          [RK_CLINIC_ITEM.note]: `インボイスのクリニックマスタから登録（${jstDate()}）`,
+        },
+      });
+      rkId = String(j?.items?.keyId ?? j?.items?.id ?? '');
+      if (!rkId) throw new Error('楽楽販売に登録しましたが、クリニックIDが返ってきませんでした');
+      created = true;
+    }
+    const at = new Date().toISOString();
+    await ref.update({
+      rakurakuClinicId: rkId,
+      ...(!c.clinicId || String(c.clinicId).startsWith('CLN-') ? { clinicId: rkId } : {}),
+      rakurakuPending: false,
+      rakurakuSyncedAt: at,
+      updatedAt: at,
+      updatedBy: 'No1 Ship',
+    });
+    invoiceMasters = null;
+    res.json({ rakurakuClinicId: rkId, created });
+  } catch (e: any) {
+    res.status(502).json({ error: String(e?.message || e) });
+  }
+});
+
 app.get('/api/invoice-admin/masters/:type', async (req, res) => {
   const type = req.params.type;
   if (!INVOICE_FIELDS[type]) return res.status(404).json({ error: '種類が違います' });
@@ -6517,7 +6744,8 @@ app.post('/api/invoice-admin/masters/:type', async (req, res) => {
   if (!String(data[nameKey] || '').trim()) return res.status(400).json({ error: '名前を入れてください' });
   try {
     const now = new Date().toISOString();
-    const ref = await invoiceDb().collection(type).add({ active: true, ...data, createdAt: now, updatedAt: now, updatedBy: 'No1 Ship' });
+    // クリニックは楽楽販売へ送るまで、毎日の取り込みで上書きしない
+    const ref = await invoiceDb().collection(type).add({ active: true, ...data, ...(type === 'clinics' ? { rakurakuPending: true } : {}), createdAt: now, updatedAt: now, updatedBy: 'No1 Ship' });
     invoiceMasters = null;
     res.json({ id: ref.id });
   } catch (e: any) {
@@ -6537,7 +6765,7 @@ app.post('/api/invoice-admin/masters/:type/:id', async (req, res) => {
       all.docs.forEach((d) => d.id !== req.params.id && d.get('isDefault') && batch.update(d.ref, { isDefault: false }));
       await batch.commit();
     }
-    await db.collection(type).doc(req.params.id).update({ ...data, updatedAt: new Date().toISOString(), updatedBy: 'No1 Ship' });
+    await db.collection(type).doc(req.params.id).update({ ...data, ...(type === 'clinics' ? { rakurakuPending: true } : {}), updatedAt: new Date().toISOString(), updatedBy: 'No1 Ship' });
     invoiceMasters = null;
     res.json({ ok: true });
   } catch (e: any) {
