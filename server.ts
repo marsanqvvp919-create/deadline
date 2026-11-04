@@ -6251,10 +6251,13 @@ function matchInvoiceWarehouse(w: WarehouseId, list: any[]) {
   return list.find((x) => re.test(String(x.country || '')) || re.test(String(x.name || '')) || re.test(String(x.nameEn || ''))) || (w === 'domestic' ? null : list.find((x) => x.isDefault)) || null;
 }
 function matchInvoiceClinic(clinicId: string, names: string[], list: any[]) {
-  const byId = list.find((c) => c.clinicId && String(c.clinicId) === clinicId);
+  // 楽楽販売と結びついた院（rakurakuClinicId）を優先。IDは先頭の0を外して比べる
+  const key = (v: any) => String(v ?? '').trim().replace(/^0+(?=\d)/, '');
+  const live = list.filter((c) => !c.duplicateOf);
+  const byId = clinicId ? live.find((c) => c.rakurakuClinicId && key(c.rakurakuClinicId) === key(clinicId)) || live.find((c) => c.clinicId && key(c.clinicId) === key(clinicId)) : null;
   if (byId) return byId;
   const wanted = names.map(normName).filter(Boolean);
-  return list.find((c) => wanted.includes(normName(c.name)) || wanted.includes(normName(c.nameEn))) || null;
+  return live.find((c) => wanted.includes(normName(c.name)) || wanted.includes(normName(c.nameEn))) || null;
 }
 function matchInvoiceProduct(name: string, list: any[], productId?: string) {
   // 1) インボイス作成の画面で一度選んだ対応 2) 名前が同じ 3) かっこ書きを除いて同じ 4) 片方がもう片方を含む（1件に決まるときだけ）
@@ -6525,7 +6528,8 @@ let invoiceClinicSyncRunning: Promise<InvoiceClinicSyncResult> | null = null;
 
 /** 楽楽販売の顧客マスタ（修正を重ねたもの）1件を、インボイスのクリニックの項目にする（空の値は含めない） */
 function rakurakuClinicToInvoice(c: any): Record<string, string> {
-  const base = String(c.clinicName || '').trim();
+  // 楽楽販売で顧客名が空のときは、読み込み時に仮の名前（クリニック-ID）が入るので使わない
+  const base = /^クリニック-/.test(String(c.clinicName || '')) ? '' : String(c.clinicName || '').trim();
   const branch = String(c.branchName || '').trim();
   const v: Record<string, string> = {
     name: branch && !base.includes(branch) ? `${base} ${branch}` : base,
@@ -6551,11 +6555,14 @@ async function syncInvoiceClinicsFromRakuraku(): Promise<InvoiceClinicSyncResult
       if (!rk.length) throw new Error('楽楽販売の顧客マスタがまだ読み込まれていません');
       const db = invoiceDb();
       const snap = await db.collection('clinics').get();
-      const docs = snap.docs.map((d) => ({ id: d.id, ref: d.ref, data: d.data() as any }));
+      // 重複として別の院にまとめたもの（duplicateOf）は結びつけない
+      const docs = snap.docs.map((d) => ({ id: d.id, ref: d.ref, data: d.data() as any })).filter((d) => !d.data.duplicateOf);
       // 結びつけ：rakurakuClinicId → clinicId（楽楽販売と同じIDにしてあるもの）→ 院名（1件に決まるときだけ）
+      // 楽楽販売のクリニックIDは9桁の0埋め（000592621）、インボイス側は0なし（592621）のことがあるので、先頭の0を外して比べる
+      const idKey = (v: any) => String(v ?? '').trim().replace(/^0+(?=\d)/, '');
       const byRkId = new Map<string, (typeof docs)[number]>();
-      for (const d of docs) if (d.data.rakurakuClinicId) byRkId.set(String(d.data.rakurakuClinicId), d);
-      for (const d of docs) if (!d.data.rakurakuClinicId && d.data.clinicId && !byRkId.has(String(d.data.clinicId))) byRkId.set(String(d.data.clinicId), d);
+      for (const d of docs) if (d.data.rakurakuClinicId) byRkId.set(idKey(d.data.rakurakuClinicId), d);
+      for (const d of docs) if (!d.data.rakurakuClinicId && d.data.clinicId && !byRkId.has(idKey(d.data.clinicId))) byRkId.set(idKey(d.data.clinicId), d);
       const byName = new Map<string, (typeof docs)[number][]>();
       for (const d of docs) {
         if (d.data.rakurakuClinicId) continue;
@@ -6570,7 +6577,7 @@ async function syncInvoiceClinicsFromRakuraku(): Promise<InvoiceClinicSyncResult
         const id = String(c.clinicId);
         const fields = rakurakuClinicToInvoice(c);
         if (!fields.name) continue;
-        let target = byRkId.get(id);
+        let target = byRkId.get(idKey(id));
         if (!target) {
           const same = (byName.get(normName(fields.name)) || []).filter((d) => !used.has(d.id));
           if (same.length === 1) target = same[0];
