@@ -6510,12 +6510,13 @@ async function saveShipmentWithNumber(shipment: any, date: string, prefixFromSet
 //   インボイス側で編集して楽楽販売へまだ送っていないクリニック（rakurakuPending）は上書きしない。
 // 書き込み：クリニックマスタの画面の「楽楽販売へ送る」で1件ずつ。クリニックIDがあれば更新、無ければ新規登録して採番されたIDを保存する
 const RK_CLINIC_DB = '101250';
-// 項目IDはクリニック発注サイト（clinic-order-main/src/lib/rakuraku.ts）と同じもの
+// 項目IDは 管理者設定 → メンテナンス機能 → APIパラメータ情報（顧客マスタ）で確認したもの
 const RK_CLINIC_ITEM = {
-  name: '109899', director: '109901', address: '109905', phone: '109911', email: '109919', note: '110249',
+  name: '109899', director: '109901', phone: '109911', email: '109919', note: '110249',
+  address: '109905', postal: '109906', prefecture: '109907', city: '109908', street: '109909', building: '109910',
   deliveryGroup: '110696', paymentMethod: '110114', region: '110129', currency: '110130',
 } as const;
-// 更新API。楽楽販売のマニュアルで確認できていないので、違っていたらここを直す
+// レコード更新API（API連携マニュアル「15．レコード更新API」）。keyId（クリニックID）で1件を更新し、送らない項目は変わらない
 const RK_UPDATE_PATH = 'apirecord/update';
 
 type InvoiceClinicSyncResult = { at: string; rakuraku: number; updated: number; created: number; unchanged: number; skippedPending: string[]; error?: string };
@@ -6664,19 +6665,29 @@ app.post('/api/invoice-admin/masters/clinics/:id/rakuraku', async (req, res) => 
     if (!snap.exists) return res.status(404).json({ error: 'クリニックが見つかりません' });
     const c: any = snap.data();
     if (!String(c.name || '').trim()) return res.status(400).json({ error: 'クリニック名がありません' });
-    const fullAddress = [c.prefecture, c.city, c.address, c.building].map((s) => String(s || '').trim()).filter((s, i, a) => s && !a.slice(i + 1).some((t) => t.includes(s))).join('');
-    const values = Object.fromEntries(
+    const s = (v: any) => String(v ?? '').trim();
+    const values: Record<string, string> = Object.fromEntries(
       Object.entries({
-        [RK_CLINIC_ITEM.name]: c.name,
-        [RK_CLINIC_ITEM.director]: c.doctorName,
-        // 住所はクリニック発注サイトの登録と同じく「〒郵便番号＋住所」で入れる
-        [RK_CLINIC_ITEM.address]: fullAddress ? `${c.zip && !fullAddress.includes(c.zip) ? `〒${c.zip}` : ''}${fullAddress}` : '',
-        [RK_CLINIC_ITEM.phone]: c.phone,
-        [RK_CLINIC_ITEM.email]: c.email,
-      })
-        .map(([k, v]) => [k, String(v ?? '').trim()])
-        .filter(([, v]) => v !== '') // 空の項目は送らない（楽楽販売の値を空で上書きしない）
+        [RK_CLINIC_ITEM.name]: s(c.name),
+        [RK_CLINIC_ITEM.director]: s(c.doctorName),
+        [RK_CLINIC_ITEM.phone]: s(c.phone),
+        [RK_CLINIC_ITEM.email]: s(c.email),
+      }).filter(([, v]) => v !== '') // 空の項目は送らない（楽楽販売の値を空で上書きしない）
     );
+    // 住所：楽楽販売は「クリニック住所」と、郵便番号〜建物名の欄に分かれている（このシステムは分かれた欄を優先して読む）。
+    // インボイスの住所欄に「〒郵便番号」や都道府県が入っていることがあるので外して町名・番地にする
+    const pref = s(c.prefecture);
+    const street = s(c.address).replace(/^〒?\s*\d{3}-?\d{4}\s*/, '').replace(pref && new RegExp(`^${pref.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`), '').trim();
+    if (street || s(c.city)) {
+      Object.assign(values, {
+        [RK_CLINIC_ITEM.address]: `${pref}${s(c.city)}${street}${s(c.building)}`,
+        [RK_CLINIC_ITEM.prefecture]: pref,
+        [RK_CLINIC_ITEM.city]: s(c.city),
+        [RK_CLINIC_ITEM.street]: street,
+        [RK_CLINIC_ITEM.building]: s(c.building),
+      });
+      if (s(c.zip)) values[RK_CLINIC_ITEM.postal] = s(c.zip);
+    }
     let rkId = String(c.rakurakuClinicId || '');
     let created = false;
     if (rkId) {
