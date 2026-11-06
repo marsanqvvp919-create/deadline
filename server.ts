@@ -5316,6 +5316,17 @@ function loadSt() {
   }
   return stLoad;
 }
+// 結びつけ・取り込み結果は、使うたびに Cloud Storage から読み直す（サーバーが複数台のとき、古い内容で上書きしないように）
+async function reloadStState() {
+  await loadSt();
+  if (!CACHE_BUCKET) return;
+  try {
+    const [buf] = await new Storage().bucket(CACHE_BUCKET).file(ST_STATE_OBJECT).download();
+    stState = { mapping: {}, owned: [], rows: [], ...(JSON.parse(buf.toString('utf-8')) || {}) };
+  } catch (e: any) {
+    if (e?.code !== 404) console.warn('[KoreaSite] Reload failed:', e?.message || e);
+  }
+}
 async function saveStObject(obj: string, data: any) {
   if (!CACHE_BUCKET) return;
   await new Storage().bucket(CACHE_BUCKET).file(obj).save(JSON.stringify(data), { contentType: 'application/json', resumable: false });
@@ -5471,7 +5482,7 @@ async function runStSync(): Promise<{ ok: boolean; changed?: number; error?: str
   if (stRunning) return { ok: false, error: '取り込み中です。少し待ってください' };
   stRunning = true;
   try {
-    await loadSt();
+    await reloadStState();
     await loadInventory();
     const c = stEffectiveCreds();
     if (!c) return { ok: false, error: '倉庫サイトのIDとパスワードが登録されていません' };
@@ -5515,7 +5526,7 @@ function stStatusView() {
 }
 
 app.get('/api/korea-site', async (_req, res) => {
-  await loadSt();
+  await reloadStState();
   res.json(stStatusView());
 });
 
@@ -5544,13 +5555,18 @@ app.post('/api/korea-site/sync', async (_req, res) => {
 
 // 倉庫の製品名をどの商品として数えるかを選ぶ（productId: '' で自動に戻す、'ignore' で取り込まない）
 app.post('/api/korea-site/mapping', async (req, res) => {
-  await loadSt();
+  await reloadStState();
   await loadInventory();
-  const name = String(req.body?.name || '');
-  if (!name) return res.status(400).json({ error: '製品名がありません' });
-  const productId = String(req.body?.productId || '').trim();
-  if (productId) stState.mapping[name] = productId;
-  else delete stState.mapping[name];
+  // 1件（name・productId）か、まとめて（items: [{ name, productId }]）
+  const items: any[] = Array.isArray(req.body?.items) ? req.body.items.slice(0, 500) : [{ name: req.body?.name, productId: req.body?.productId }];
+  if (!items.some((it) => String(it?.name || ''))) return res.status(400).json({ error: '製品名がありません' });
+  for (const it of items) {
+    const name = String(it?.name || '');
+    if (!name) continue;
+    const productId = String(it?.productId || '').trim();
+    if (productId) stState.mapping[name] = productId;
+    else delete stState.mapping[name];
+  }
   if (stState.rows.length && applyStStock(stState.rows) > 0) await saveInventory();
   await saveStObject(ST_STATE_OBJECT, stState);
   res.json(stStatusView());
@@ -5564,6 +5580,7 @@ setInterval(async () => {
     if (!stEffectiveCreds()) return;
     const h = jstHour();
     if (h < 8 || h > 20) return;
+    await reloadStState();
     const last = stState.lastRunAt ? new Date(stState.lastRunAt).getTime() : 0;
     if (Date.now() - last < ST_SYNC_EVERY_MS) return;
     await runStSync();
