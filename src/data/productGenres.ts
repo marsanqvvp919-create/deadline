@@ -63,6 +63,7 @@ export const PRODUCT_GENRES: Record<string, string> = {
 
   // PDLLA/PLLA
   '000000244': 'PDLLA/PLLA', // Juvelook
+  '000000667': 'PDLLA/PLLA', // LAVUEL PIUM（ご確認済み）
   '000000353': 'PDLLA/PLLA', // JUVELOOK i
   '000000553': 'PDLLA/PLLA', // Juvelook i
   '000000670': 'PDLLA/PLLA', // PinkLLA
