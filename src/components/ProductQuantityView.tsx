@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
-import { Boxes, ChevronDown, ChevronRight, Search } from 'lucide-react';
+import { Boxes, ChevronDown, ChevronRight, Download, Search } from 'lucide-react';
 import { Order, OrderLine } from '../types';
-import { isShippingOrFee } from '../utils';
+import { exportToCsv, isShippingOrFee } from '../utils';
 import { isQuoteOrder } from '../utils/salesCalculations';
 import { getLocalProducts } from '../api';
 import { PRODUCT_GENRES } from '../data/productGenres';
@@ -179,6 +179,21 @@ export function ProductQuantityView({
     [shown],
   );
 
+  // 表示中の製剤（検索・期間・製造国・ジャンルの絞り込みと並び順のまま）をCSVで保存
+  const downloadCsv = () => {
+    const today = ymd(new Date()).replace(/-/g, '');
+    const parts = [
+      origin !== 'all' ? ORIGIN_GROUPS.find((g) => g.id === origin)?.label : '',
+      genre !== 'all' ? genre : '',
+      PERIODS.find((p) => p.id === period)!.label,
+    ].filter(Boolean);
+    exportToCsv(`製剤別の数量_${parts.join('_')}_${today}.csv`, [
+      ['商品ID', '製剤', 'ジャンル', '製造国', '未発注', '手配済み・未発送', '未発送の合計', `売れた数（${periodLabel}）`, 'うち出荷済み', '注文件数'],
+      ...shown.map((r) => [r.productId, r.productName, r.genre, r.origin, r.unordered, r.arranged, r.unshipped, r.sold, r.shipped, r.orderCount]),
+      ['', '合計', '', '', total.unordered, total.arranged, total.unshipped, total.sold, shown.reduce((s, r) => s + r.shipped, 0), shown.reduce((s, r) => s + r.orderCount, 0)],
+    ]);
+  };
+
   const periodLabel = period === 'all' ? (firstDate ? `${firstDate.replace(/-/g, '/')} 以降の受注` : '全期間') : PERIODS.find((p) => p.id === period)!.label + 'の受注';
 
   const Th = ({ k, children, className = '' }: { k?: SortKey; children: React.ReactNode; className?: string }) => (
@@ -248,6 +263,14 @@ export function ProductQuantityView({
             未発送があるものだけ
           </label>
           <span className="ml-auto text-xs text-slate-500">{shown.length} 製剤・上の数字は表示中の製剤の合計・期間は「売れた数」だけに効きます</span>
+          <button
+            onClick={downloadCsv}
+            disabled={shown.length === 0}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+          >
+            <Download className="w-3.5 h-3.5" />
+            CSVで保存
+          </button>
         </div>
 
         {/* 製造国：ヨーロッパ・インド・トルコ製剤／韓国製剤など */}
