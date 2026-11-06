@@ -5,6 +5,7 @@ import { isShippingOrFee } from '../utils';
 import { isQuoteOrder } from '../utils/salesCalculations';
 import { getLocalProducts } from '../api';
 import { PRODUCT_GENRES } from '../data/productGenres';
+import { ORIGIN_GROUPS, OriginGroup, originGroupOf, productOrigin } from '../data/productOrigins';
 
 // 製剤別の数量：製剤ごとに「まだ届けていない注文（未発注・手配済み）」「未発送」「これまでに売れた数」を並べる。
 // 未発送は進行中の受注だけで数える（出荷済み・納品済みで閉じた受注の残りは数えない）。
@@ -31,6 +32,8 @@ interface Row {
   productId: string;
   productName: string;
   genre: string;
+  origin: string; // 製造国
+  originGroup: OriginGroup;
   unordered: number; // 仕入先にまだ発注していない（在庫からの確保もしていない）
   arranged: number; // 発注済み・在庫から確保済みで、まだ出荷していない
   unshipped: number;
@@ -68,8 +71,14 @@ export function ProductQuantityView({
   const [onlyPending, setOnlyPending] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
   const [genre, setGenre] = useState<string>('all');
+  const [origin, setOrigin] = useState<OriginGroup | 'all'>('all');
 
-  const genreById = useMemo(() => new Map(getLocalProducts().map((p) => [p.productId, (p.category || '').trim()])), [orders]);
+  const productById = useMemo(() => new Map(getLocalProducts().map((p) => [p.productId, p])), [orders]);
+
+  const originOf = (productId: string, supplier: string) => {
+    const origin = productOrigin(productId, productById.get(productId), supplier);
+    return { origin: origin || '不明', originGroup: originGroupOf(origin) };
+  };
 
   const { rows, firstDate } = useMemo(() => {
     const range = periodRange(period);
@@ -88,7 +97,7 @@ export function ProductQuantityView({
         const key = l.productId || l.productName;
         let r = map.get(key);
         if (!r) {
-          r = { productId: l.productId, productName: l.productName, genre: genreById.get(l.productId) || PRODUCT_GENRES[l.productId] || NO_GENRE, unordered: 0, arranged: 0, unshipped: 0, shipped: 0, sold: 0, orderCount: 0, pending: [], nameDate: date };
+          r = { productId: l.productId, productName: l.productName, genre: (productById.get(l.productId)?.category || '').trim() || PRODUCT_GENRES[l.productId] || NO_GENRE, ...originOf(l.productId, l.supplierName), unordered: 0, arranged: 0, unshipped: 0, shipped: 0, sold: 0, orderCount: 0, pending: [], nameDate: date };
           map.set(key, r);
         }
         // 名前は一番新しい受注のものを使う
@@ -115,10 +124,10 @@ export function ProductQuantityView({
       }
     }
     return { rows: Array.from(map.values()), firstDate };
-  }, [orders, period, genreById]);
+  }, [orders, period, productById]);
 
   // 検索・「未発送があるものだけ」で絞った製剤（ジャンルの絞り込み前）
-  const matched = useMemo(() => {
+  const matchedAnyOrigin = useMemo(() => {
     const k = q.trim().toLowerCase();
     return rows.filter(
       (r) =>
@@ -127,6 +136,17 @@ export function ProductQuantityView({
         (!k || r.productName.toLowerCase().includes(k) || r.productId.toLowerCase().includes(k)),
     );
   }, [rows, q, onlyPending]);
+
+  // 製造国の絞り込み（ジャンル別の数字にも効く）
+  const originTiles = useMemo(
+    () =>
+      ORIGIN_GROUPS.map((g) => {
+        const list = matchedAnyOrigin.filter((r) => r.originGroup === g.id);
+        return { ...g, count: list.length, unshipped: list.reduce((s, r) => s + r.unshipped, 0), sold: list.reduce((s, r) => s + r.sold, 0) };
+      }),
+    [matchedAnyOrigin],
+  );
+  const matched = useMemo(() => matchedAnyOrigin.filter((r) => origin === 'all' || r.originGroup === origin), [matchedAnyOrigin, origin]);
 
   const genres = useMemo(() => {
     const m = new Map<string, { genre: string; count: number; unordered: number; arranged: number; unshipped: number; sold: number }>();
@@ -230,6 +250,37 @@ export function ProductQuantityView({
           <span className="ml-auto text-xs text-slate-500">{shown.length} 製剤・上の数字は表示中の製剤の合計・期間は「売れた数」だけに効きます</span>
         </div>
 
+        {/* 製造国：ヨーロッパ・インド・トルコ製剤／韓国製剤など */}
+        <div className="px-4 py-3 border-b border-slate-200">
+          <div className="text-xs font-bold text-slate-700 mb-2">製造国（押すと、その国の製剤だけを表示）</div>
+          <div className="flex flex-wrap gap-2">
+            {[{ id: 'all' as const, label: 'すべて', count: matchedAnyOrigin.length, unshipped: matchedAnyOrigin.reduce((s, r) => s + r.unshipped, 0), sold: matchedAnyOrigin.reduce((s, r) => s + r.sold, 0) }, ...originTiles]
+              .filter((g) => g.id === 'all' || g.count > 0 || origin === g.id)
+              .map((g) => {
+                const on = origin === g.id;
+                return (
+                  <button
+                    key={g.id}
+                    onClick={() => {
+                      setOrigin(on && g.id !== 'all' ? 'all' : g.id);
+                      setGenre('all');
+                    }}
+                    className={`text-left rounded-xl border px-3 py-2 transition ${on ? 'border-indigo-700 bg-indigo-700 text-white' : 'border-slate-200 bg-white hover:bg-slate-50'}`}
+                  >
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-xs font-bold">{g.label}</span>
+                      <span className={`text-[11px] ${on ? 'text-indigo-200' : 'text-slate-400'}`}>{g.count}製剤</span>
+                    </div>
+                    <div className="mt-1 flex gap-3 text-[11px] font-mono">
+                      <span className={on ? 'text-rose-200' : 'text-rose-600'}>未発送 {n(g.unshipped)}</span>
+                      <span className={on ? 'text-emerald-200' : 'text-emerald-700'}>売 {n(g.sold)}</span>
+                    </div>
+                  </button>
+                );
+              })}
+          </div>
+        </div>
+
         {/* ジャンル別：押すとそのジャンルの製剤だけを下に出す */}
         <div className="px-4 py-3 border-b border-slate-200">
           <div className="text-xs font-bold text-slate-700 mb-2">ジャンル別（押すと、そのジャンルの製剤だけを表示）</div>
@@ -289,6 +340,7 @@ export function ProductQuantityView({
                             <div className="text-[11px] text-slate-400">
                               <span className="font-mono">{r.productId}</span>
                               <span className="ml-2">{r.genre}</span>
+                              <span className="ml-2">{r.origin}</span>
                             </div>
                           </div>
                         </div>
