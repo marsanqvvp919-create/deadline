@@ -5263,137 +5263,62 @@ app.post('/api/inventory/import', async (req, res) => {
 });
 
 // ----------------------------------------------------------------------
-// 韓国倉庫の在庫サイト（ST 재고관리 시스템 / stinter33.com）から在庫を自動で取り込む。
-// 倉庫サイトにログインして在庫表（全ページ）を読み、製品名でこのシステムの商品に結びつけ、韓国倉庫の在庫数をサイトの数に合わせる。
-// 倉庫サイトには書き込まない。ログインIDとパスワードは環境変数（STINTER_ID / STINTER_PASSWORD）を優先し、
-// 無ければ画面から保存したもの（Cloud Storage の stinter-credentials.json）を使う。保存した値はブラウザに返さず、ログにも出さない。
+// 倉庫の在庫を外から自動で取り込む（どちらも読むだけで、取り込み元には書き込まない）
+// ・韓国倉庫：倉庫の在庫サイト（ST 재고관리 시스템 / stinter33.com）。ログインして在庫表（全ページ）を読む。
+//   ログインIDとパスワードは環境変数（STINTER_ID / STINTER_PASSWORD）を優先し、無ければ画面から保存したもの
+//   （Cloud Storage の stinter-credentials.json）を使う。保存した値はブラウザに返さず、ログにも出さない。
+// ・国内倉庫：在庫のスプレッドシート（A列 製品名・B列 在庫数）。サーバーのサービスアカウントで読む（共有が必要）。
+// 製品名でこのシステムの商品に結びつけ（自動、または画面で選ぶ）、その倉庫の在庫数を取り込み元の数に合わせる。
 // ----------------------------------------------------------------------
-const ST_BASE = 'https://stinter33.com';
-const ST_CRED_OBJECT = 'stinter-credentials.json';
-const ST_STATE_OBJECT = 'stinter-sync.json';
-// 自動取り込みの間隔（日本時間 8〜20時）
-const ST_SYNC_EVERY_MS = 3 * 60 * 60 * 1000;
-interface StRow {
-  company: string;
+interface SourceRow {
+  company?: string;
   name: string;
-  code: string;
+  code?: string;
   qty: number;
-  expiry: string;
-  updated: string;
+  expiry?: string;
+  updated?: string;
 }
-interface StState {
-  /** 倉庫の製品名 → このシステムの商品ID（'ignore' は取り込まない）。画面で選んだもの */
+interface SourceState {
+  /** 取り込み元の製品名 → このシステムの商品ID（'ignore' は取り込まない）。画面で選んだもの */
   mapping: Record<string, string>;
   /** この取り込みで在庫数を決めている在庫のキー（前回あって今回無いものは0にする） */
   owned: string[];
-  rows: StRow[];
+  rows: SourceRow[];
   lastRunAt?: string;
   lastOkAt?: string;
   lastError?: string;
 }
-let stCreds: { id?: string; passwd?: string } = {};
-let stState: StState = { mapping: {}, owned: [], rows: [] };
-let stLoad: Promise<void> | null = null;
-let stRunning = false;
-
-function loadSt() {
-  if (!stLoad) {
-    stLoad = (async () => {
-      if (!CACHE_BUCKET) return;
-      const bucket = new Storage().bucket(CACHE_BUCKET);
-      for (const [obj, set] of [
-        [ST_CRED_OBJECT, (j: any) => (stCreds = j || {})],
-        [ST_STATE_OBJECT, (j: any) => (stState = { mapping: {}, owned: [], rows: [], ...(j || {}) })],
-      ] as const) {
-        try {
-          const [buf] = await bucket.file(obj).download();
-          set(JSON.parse(buf.toString('utf-8')));
-        } catch (e: any) {
-          if (e?.code !== 404) console.warn('[KoreaSite] Load failed:', obj, e?.message || e);
-        }
-      }
-    })();
-  }
-  return stLoad;
+interface StockSource {
+  id: string;
+  label: string;
+  warehouse: WarehouseId;
+  stateObject: string;
+  everyMs: number;
+  memo: string;
+  /** 取り込み元が読める設定になっているか */
+  ready: () => boolean;
+  fetchRows: () => Promise<SourceRow[]>;
+  /** 画面に出す設定の情報（パスワードなどは出さない） */
+  info: () => Record<string, any>;
+  state: SourceState;
+  running: boolean;
 }
-// 結びつけ・取り込み結果は、使うたびに Cloud Storage から読み直す（サーバーが複数台のとき、古い内容で上書きしないように）
-async function reloadStState() {
-  await loadSt();
+
+const emptySourceState = (): SourceState => ({ mapping: {}, owned: [], rows: [] });
+
+// 状態は使うたびに Cloud Storage から読み直す（サーバーが複数台のとき、古い内容で上書きしないように）
+async function reloadSourceState(src: StockSource) {
   if (!CACHE_BUCKET) return;
   try {
-    const [buf] = await new Storage().bucket(CACHE_BUCKET).file(ST_STATE_OBJECT).download();
-    stState = { mapping: {}, owned: [], rows: [], ...(JSON.parse(buf.toString('utf-8')) || {}) };
+    const [buf] = await new Storage().bucket(CACHE_BUCKET).file(src.stateObject).download();
+    src.state = { ...emptySourceState(), ...(JSON.parse(buf.toString('utf-8')) || {}) };
   } catch (e: any) {
-    if (e?.code !== 404) console.warn('[KoreaSite] Reload failed:', e?.message || e);
+    if (e?.code !== 404) console.warn(`[${src.id}] Reload failed:`, e?.message || e);
   }
 }
 async function saveStObject(obj: string, data: any) {
   if (!CACHE_BUCKET) return;
   await new Storage().bucket(CACHE_BUCKET).file(obj).save(JSON.stringify(data), { contentType: 'application/json', resumable: false });
-}
-function stEffectiveCreds(): { id: string; passwd: string; source: 'env' | 'saved' } | null {
-  if (process.env.STINTER_ID && process.env.STINTER_PASSWORD) return { id: process.env.STINTER_ID, passwd: process.env.STINTER_PASSWORD, source: 'env' };
-  if (stCreds.id && stCreds.passwd) return { id: stCreds.id, passwd: stCreds.passwd, source: 'saved' };
-  return null;
-}
-
-const stText = (html: string) =>
-  html
-    .replace(/<br\s*\/?>/gi, ' ')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#0?39;/g, "'")
-    .replace(/\s+/g, ' ')
-    .trim();
-
-/** 在庫表の1ページ分（番号・会社名・製品名・製品コード・数量・有効期限・更新日） */
-function parseStPage(html: string): StRow[] {
-  const table = html.match(/<table[\s\S]*?<\/table>/i)?.[0] || '';
-  const rows: StRow[] = [];
-  for (const tr of table.match(/<tr[\s\S]*?<\/tr>/gi) || []) {
-    const cells = (tr.match(/<td[\s\S]*?<\/td>/gi) || []).map(stText);
-    if (cells.length < 5 || !/^\d+$/.test(cells[0])) continue;
-    rows.push({ company: cells[1], name: cells[2], code: cells[3], qty: parseInt(cells[4].replace(/[^\d-]/g, ''), 10) || 0, expiry: cells[5] || '', updated: cells[6] || '' });
-  }
-  return rows;
-}
-
-/** 倉庫サイトにログインし、在庫表を全ページ読む */
-async function fetchStRows(id: string, passwd: string): Promise<StRow[]> {
-  const jar = new Map<string, string>();
-  const keep = (r: Response) => {
-    const list: string[] = (r.headers as any).getSetCookie?.() || (r.headers.get('set-cookie') ? [r.headers.get('set-cookie') as string] : []);
-    for (const c of list) {
-      const [kv] = c.split(';');
-      const i = kv.indexOf('=');
-      if (i > 0) jar.set(kv.slice(0, i).trim(), kv.slice(i + 1).trim());
-    }
-  };
-  const cookie = () => Array.from(jar, ([k, v]) => `${k}=${v}`).join('; ');
-  const ua = { 'User-Agent': 'Mozilla/5.0 (No1 Ship inventory sync)' };
-  keep(await fetch(`${ST_BASE}/st/`, { headers: ua, redirect: 'manual' }));
-  const login = await fetch(`${ST_BASE}/st/member/login_process`, {
-    method: 'POST',
-    headers: { ...ua, 'Content-Type': 'application/x-www-form-urlencoded', Cookie: cookie(), Referer: `${ST_BASE}/st/` },
-    body: new URLSearchParams({ id, passwd, id_rem_val: 'y' }).toString(),
-    redirect: 'manual',
-  });
-  keep(login);
-  const all: StRow[] = [];
-  for (let page = 1; page <= 50; page++) {
-    const r = await fetch(`${ST_BASE}/st/stock/view?page=${page}`, { headers: { ...ua, Cookie: cookie() }, redirect: 'manual' });
-    keep(r);
-    const html = r.status === 200 ? await r.text() : '';
-    if (page === 1 && (r.status !== 200 || /name="member_form"/.test(html))) throw new Error('倉庫サイトにログインできませんでした。IDとパスワードを確かめてください');
-    const rows = parseStPage(html);
-    if (rows.length === 0) break;
-    all.push(...rows);
-  }
-  return all;
 }
 
 const stNorm = (s: string) =>
@@ -5403,7 +5328,7 @@ const stNorm = (s: string) =>
     .replace(/×/g, 'x')
     .replace(/[\s()（）\[\]【】\-_.,/・'’"]/g, '');
 
-/** 倉庫の製品名に合う商品（商品マスタとご注文の明細の名前で、同じ名前か、片方がもう片方を含む候補が1つだけのとき） */
+/** 製品名に合う商品（商品マスタとご注文の明細の名前で、同じ名前か、ほぼ同じ名前の候補が1つだけのとき） */
 function stAutoMatch(): (name: string) => { productId: string; productName: string } | null {
   const names = new Map<string, { productId: string; productName: string }[]>();
   const add = (productId: string, productName: string) => {
@@ -5434,13 +5359,13 @@ function stAutoMatch(): (name: string) => { productId: string; productName: stri
   };
 }
 
-/** 倉庫の各行を、どの商品として数えるか（画面で選んだもの → 自動で見つけたもの → 見つからない） */
-function stResolve(rows: StRow[]) {
+/** 各行を、どの商品として数えるか（画面で選んだもの → 自動で見つけたもの → 見つからない） */
+function resolveSourceRows(src: StockSource, rows: SourceRow[]) {
   const auto = stAutoMatch();
   const productName = new Map<string, string>();
   for (const p of (serverRakurakuStore.products || []) as any[]) if (p.productId) productName.set(String(p.productId), String(p.productName || ''));
   return rows.map((r) => {
-    const chosen = stState.mapping[r.name];
+    const chosen = src.state.mapping[r.name];
     if (chosen === 'ignore') return { ...r, productId: '', productName: '', how: 'ignore' as const };
     if (chosen) return { ...r, productId: chosen, productName: productName.get(chosen) || chosen, how: 'manual' as const };
     const m = auto(r.name);
@@ -5448,94 +5373,244 @@ function stResolve(rows: StRow[]) {
   });
 }
 
-/** 取り込んだ数を韓国倉庫の在庫に反映する。結びついていない製品も、倉庫の製品名で在庫に出す（数は分かるように） */
-function applyStStock(rows: StRow[]) {
+/** 取り込んだ数を倉庫の在庫に反映する（dry なら変えずに変更の一覧だけ返す）。結びついていない製品も、取り込み元の製品名で在庫に出す */
+function applySourceStock(src: StockSource, rows: SourceRow[], dry = false) {
+  const w = src.warehouse;
   const want = new Map<string, { productId: string; productName: string; qty: number }>();
-  for (const r of stResolve(rows)) {
+  for (const r of resolveSourceRows(src, rows)) {
     if (r.how === 'ignore') continue;
     const key = r.productId || `name:${r.name}`;
     const cur = want.get(key) || { productId: r.productId, productName: r.productId ? r.productName : r.name, qty: 0 };
     cur.qty += Math.max(0, r.qty);
     want.set(key, cur);
   }
-  let changed = 0;
-  for (const key of stState.owned) {
+  const changes: { key: string; productName: string; from: number; to: number }[] = [];
+  for (const key of src.state.owned) {
     if (want.has(key)) continue;
-    const s = inv().stock.korea[key];
+    const s = inv().stock[w][key];
     if (s && s.qty !== 0) {
-      addStock('korea', s.productId, s.productName, -s.qty, 'import', 'warehouse', undefined, '韓国倉庫サイトに無い（または結びつけ直した）');
-      changed++;
+      changes.push({ key, productName: s.productName, from: s.qty, to: 0 });
+      if (!dry) addStock(w, s.productId, s.productName, -s.qty, 'import', 'warehouse', undefined, `${src.label}に無い（または結びつけ直した）`);
     }
   }
-  for (const [key, w] of want) {
-    const cur = inv().stock.korea[key]?.qty || 0;
-    if (w.qty !== cur) {
-      addStock('korea', w.productId, w.productName, w.qty - cur, 'import', 'warehouse', undefined, '韓国倉庫サイトから取り込み');
-      changed++;
+  for (const [key, x] of want) {
+    const cur = inv().stock[w][key]?.qty || 0;
+    if (x.qty !== cur) {
+      changes.push({ key, productName: x.productName, from: cur, to: x.qty });
+      if (!dry) addStock(w, x.productId, x.productName, x.qty - cur, 'import', 'warehouse', undefined, src.memo);
     }
   }
-  stState.owned = Array.from(want.keys());
-  return changed;
+  if (!dry) src.state.owned = Array.from(want.keys());
+  return changes;
 }
 
-async function runStSync(): Promise<{ ok: boolean; changed?: number; error?: string }> {
-  if (stRunning) return { ok: false, error: '取り込み中です。少し待ってください' };
-  stRunning = true;
+async function runSourceSync(src: StockSource, dry = false): Promise<{ ok: boolean; changes?: ReturnType<typeof applySourceStock>; error?: string }> {
+  if (src.running) return { ok: false, error: '取り込み中です。少し待ってください' };
+  src.running = true;
   try {
-    await reloadStState();
+    await reloadSourceState(src);
     await loadInventory();
-    const c = stEffectiveCreds();
-    if (!c) return { ok: false, error: '倉庫サイトのIDとパスワードが登録されていません' };
-    stState.lastRunAt = new Date().toISOString();
+    if (!src.ready()) return { ok: false, error: `${src.label}を読む設定がまだありません` };
     try {
-      const rows = await fetchStRows(c.id, c.passwd);
-      if (rows.length === 0) throw new Error('倉庫サイトの在庫表が空でした（画面が変わった可能性があります）');
-      stState.rows = rows;
-      const changed = applyStStock(rows);
-      stState.lastOkAt = stState.lastRunAt;
-      stState.lastError = undefined;
-      if (changed > 0) await saveInventory();
-      await saveStObject(ST_STATE_OBJECT, stState);
-      console.log(`[KoreaSite] Synced ${rows.length} rows, ${changed} stock changes`);
-      return { ok: true, changed };
+      const rows = await src.fetchRows();
+      if (rows.length === 0) throw new Error(`${src.label}が空でした（表の形が変わった可能性があります）`);
+      if (dry) return { ok: true, changes: applySourceStock(src, rows, true) };
+      src.state.lastRunAt = new Date().toISOString();
+      src.state.rows = rows;
+      const changes = applySourceStock(src, rows);
+      src.state.lastOkAt = src.state.lastRunAt;
+      src.state.lastError = undefined;
+      if (changes.length > 0) await saveInventory();
+      await saveStObject(src.stateObject, src.state);
+      console.log(`[${src.id}] Synced ${rows.length} rows, ${changes.length} stock changes`);
+      return { ok: true, changes };
     } catch (e: any) {
-      stState.lastError = String(e?.message || e).slice(0, 300);
-      await saveStObject(ST_STATE_OBJECT, stState).catch(() => {});
-      console.warn('[KoreaSite] Sync failed:', stState.lastError);
-      return { ok: false, error: stState.lastError };
+      if (dry) return { ok: false, error: String(e?.message || e).slice(0, 300) };
+      src.state.lastRunAt = new Date().toISOString();
+      src.state.lastError = String(e?.message || e).slice(0, 300);
+      await saveStObject(src.stateObject, src.state).catch(() => {});
+      console.warn(`[${src.id}] Sync failed:`, src.state.lastError);
+      return { ok: false, error: src.state.lastError };
     }
   } finally {
-    stRunning = false;
+    src.running = false;
   }
 }
 
-function stStatusView() {
-  const c = stEffectiveCreds();
-  const rows = stResolve(stState.rows);
+function sourceStatusView(src: StockSource) {
   return {
-    configured: !!c,
-    source: c?.source || null,
-    idMasked: c ? `${c.id.slice(0, 2)}…` : '',
-    passcodeConfigured: !!process.env.ADMIN_PASSCODE,
-    lastRunAt: stState.lastRunAt || null,
-    lastOkAt: stState.lastOkAt || null,
-    lastError: stState.lastError || null,
-    everyHours: ST_SYNC_EVERY_MS / 3600000,
-    rows,
+    ...src.info(),
+    configured: src.ready(),
+    lastRunAt: src.state.lastRunAt || null,
+    lastOkAt: src.state.lastOkAt || null,
+    lastError: src.state.lastError || null,
+    everyHours: src.everyMs / 3600000,
+    rows: resolveSourceRows(src, src.state.rows),
   };
 }
 
-app.get('/api/korea-site', async (_req, res) => {
-  await reloadStState();
-  res.json(stStatusView());
-});
+function registerStockSource(src: StockSource, prepare: () => Promise<void> = async () => {}) {
+  const base = `/api/${src.id}`;
+  app.get(base, async (_req, res) => {
+    await prepare();
+    await reloadSourceState(src);
+    res.json(sourceStatusView(src));
+  });
+  // 今すぐ取り込む（?dry=1 なら在庫を変えずに、変わる内容だけ返す）
+  app.post(`${base}/sync`, async (req, res) => {
+    await prepare();
+    const dry = req.query.dry === '1';
+    const r = await runSourceSync(src, dry);
+    if (!r.ok) return res.status(400).json({ error: r.error, ...sourceStatusView(src) });
+    res.json({ changed: r.changes?.length || 0, changes: r.changes, dry, ...sourceStatusView(src) });
+  });
+  // 製品名をどの商品として数えるかを選ぶ（productId: '' で自動に戻す、'ignore' で取り込まない）。1件か、まとめて（items）
+  app.post(`${base}/mapping`, async (req, res) => {
+    await prepare();
+    await reloadSourceState(src);
+    await loadInventory();
+    const items: any[] = Array.isArray(req.body?.items) ? req.body.items.slice(0, 500) : [{ name: req.body?.name, productId: req.body?.productId }];
+    if (!items.some((it) => String(it?.name || ''))) return res.status(400).json({ error: '製品名がありません' });
+    for (const it of items) {
+      const name = String(it?.name || '');
+      if (!name) continue;
+      const productId = String(it?.productId || '').trim();
+      if (productId) src.state.mapping[name] = productId;
+      else delete src.state.mapping[name];
+    }
+    if (src.state.rows.length && applySourceStock(src, src.state.rows).length > 0) await saveInventory();
+    await saveStObject(src.stateObject, src.state);
+    res.json(sourceStatusView(src));
+  });
+  // 自動取り込み：日本時間 8〜20時、前回から決めた時間がたったら
+  setInterval(async () => {
+    try {
+      if (isDemo()) return;
+      await prepare();
+      if (!src.ready()) return;
+      const h = jstHour();
+      if (h < 8 || h > 20) return;
+      await reloadSourceState(src);
+      // 最初の1回は画面の「今すぐ取り込む」で（結びつけを確かめてから）。それまでは自動で動かさない
+      if (!src.state.lastOkAt) return;
+      const last = src.state.lastRunAt ? new Date(src.state.lastRunAt).getTime() : 0;
+      if (Date.now() - last < src.everyMs) return;
+      await runSourceSync(src);
+    } catch (e: any) {
+      console.warn(`[${src.id}] Auto sync error:`, e?.message || e);
+    }
+  }, 10 * 60 * 1000);
+}
+
+// --- 韓国倉庫の在庫サイト（stinter33.com） ---
+const ST_BASE = 'https://stinter33.com';
+const ST_CRED_OBJECT = 'stinter-credentials.json';
+let stCreds: { id?: string; passwd?: string } = {};
+let stCredLoad: Promise<void> | null = null;
+function loadStCreds() {
+  if (!stCredLoad) {
+    stCredLoad = (async () => {
+      if (!CACHE_BUCKET) return;
+      try {
+        const [buf] = await new Storage().bucket(CACHE_BUCKET).file(ST_CRED_OBJECT).download();
+        stCreds = JSON.parse(buf.toString('utf-8')) || {};
+      } catch (e: any) {
+        if (e?.code !== 404) console.warn('[korea-site] Credentials load failed:', e?.message || e);
+      }
+    })();
+  }
+  return stCredLoad;
+}
+function stEffectiveCreds(): { id: string; passwd: string; source: 'env' | 'saved' } | null {
+  if (process.env.STINTER_ID && process.env.STINTER_PASSWORD) return { id: process.env.STINTER_ID, passwd: process.env.STINTER_PASSWORD, source: 'env' };
+  if (stCreds.id && stCreds.passwd) return { id: stCreds.id, passwd: stCreds.passwd, source: 'saved' };
+  return null;
+}
+
+const stText = (html: string) =>
+  html
+    .replace(/<br\s*\/?>/gi, ' ')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#0?39;/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+
+/** 在庫表の1ページ分（番号・会社名・製品名・製品コード・数量・有効期限・更新日） */
+function parseStPage(html: string): SourceRow[] {
+  const table = html.match(/<table[\s\S]*?<\/table>/i)?.[0] || '';
+  const rows: SourceRow[] = [];
+  for (const tr of table.match(/<tr[\s\S]*?<\/tr>/gi) || []) {
+    const cells = (tr.match(/<td[\s\S]*?<\/td>/gi) || []).map(stText);
+    if (cells.length < 5 || !/^\d+$/.test(cells[0])) continue;
+    rows.push({ company: cells[1], name: cells[2], code: cells[3], qty: parseInt(cells[4].replace(/[^\d-]/g, ''), 10) || 0, expiry: cells[5] || '', updated: cells[6] || '' });
+  }
+  return rows;
+}
+
+/** 倉庫サイトにログインし、在庫表を全ページ読む */
+async function fetchStRows(): Promise<SourceRow[]> {
+  const c = stEffectiveCreds()!;
+  const jar = new Map<string, string>();
+  const keep = (r: Response) => {
+    const list: string[] = (r.headers as any).getSetCookie?.() || (r.headers.get('set-cookie') ? [r.headers.get('set-cookie') as string] : []);
+    for (const ck of list) {
+      const [kv] = ck.split(';');
+      const i = kv.indexOf('=');
+      if (i > 0) jar.set(kv.slice(0, i).trim(), kv.slice(i + 1).trim());
+    }
+  };
+  const cookie = () => Array.from(jar, ([k, v]) => `${k}=${v}`).join('; ');
+  const ua = { 'User-Agent': 'Mozilla/5.0 (No1 Ship inventory sync)' };
+  keep(await fetch(`${ST_BASE}/st/`, { headers: ua, redirect: 'manual' }));
+  const login = await fetch(`${ST_BASE}/st/member/login_process`, {
+    method: 'POST',
+    headers: { ...ua, 'Content-Type': 'application/x-www-form-urlencoded', Cookie: cookie(), Referer: `${ST_BASE}/st/` },
+    body: new URLSearchParams({ id: c.id, passwd: c.passwd, id_rem_val: 'y' }).toString(),
+    redirect: 'manual',
+  });
+  keep(login);
+  const all: SourceRow[] = [];
+  for (let page = 1; page <= 50; page++) {
+    const r = await fetch(`${ST_BASE}/st/stock/view?page=${page}`, { headers: { ...ua, Cookie: cookie() }, redirect: 'manual' });
+    keep(r);
+    const html = r.status === 200 ? await r.text() : '';
+    if (page === 1 && (r.status !== 200 || /name="member_form"/.test(html))) throw new Error('倉庫サイトにログインできませんでした。IDとパスワードを確かめてください');
+    const rows = parseStPage(html);
+    if (rows.length === 0) break;
+    all.push(...rows);
+  }
+  return all;
+}
+
+const koreaSite: StockSource = {
+  id: 'korea-site',
+  label: '韓国倉庫サイト',
+  warehouse: 'korea',
+  stateObject: 'stinter-sync.json',
+  everyMs: 3 * 60 * 60 * 1000,
+  memo: '韓国倉庫サイトから取り込み',
+  ready: () => !!stEffectiveCreds(),
+  fetchRows: fetchStRows,
+  info: () => {
+    const c = stEffectiveCreds();
+    return { source: c?.source || null, passcodeConfigured: !!process.env.ADMIN_PASSCODE, canEditCredentials: true };
+  },
+  state: emptySourceState(),
+  running: false,
+};
+registerStockSource(koreaSite, loadStCreds);
 
 // IDとパスワードの登録（管理用パスコードが必要。保存した値は返さない）
 app.put('/api/korea-site/credentials', async (req, res) => {
   if (!process.env.ADMIN_PASSCODE) return res.status(403).json({ error: '管理用パスコード（ADMIN_PASSCODE）がサーバーに設定されていないため保存できません' });
   if (req.get('X-Admin-Passcode') !== process.env.ADMIN_PASSCODE) return res.status(403).json({ error: '管理用パスコードが違います' });
   if (!CACHE_BUCKET) return res.status(500).json({ error: '保存先（Cloud Storage）が設定されていません' });
-  await loadSt();
+  await loadStCreds();
   if (req.body?.clear) stCreds = {};
   else {
     const id = String(req.body?.id || '').trim();
@@ -5544,50 +5619,55 @@ app.put('/api/korea-site/credentials', async (req, res) => {
     stCreds = { id, passwd };
   }
   await saveStObject(ST_CRED_OBJECT, stCreds);
-  res.json(stStatusView());
+  await reloadSourceState(koreaSite);
+  res.json(sourceStatusView(koreaSite));
 });
 
-app.post('/api/korea-site/sync', async (_req, res) => {
-  const r = await runStSync();
-  if (!r.ok) return res.status(400).json({ error: r.error, ...stStatusView() });
-  res.json({ changed: r.changed, ...stStatusView() });
-});
+// --- 国内倉庫の在庫スプレッドシート ---
+const JP_STOCK_SHEET_ID = process.env.JP_STOCK_SHEET_ID || '1Z4ug7rI9mOlI__1DKmWUFisV8hrA1rpTiJrRAdDCka0';
+const JP_STOCK_SHEET_RANGE = process.env.JP_STOCK_SHEET_RANGE || 'シート1!A1:B2000';
+let jpSheetAccount = '';
 
-// 倉庫の製品名をどの商品として数えるかを選ぶ（productId: '' で自動に戻す、'ignore' で取り込まない）
-app.post('/api/korea-site/mapping', async (req, res) => {
-  await reloadStState();
-  await loadInventory();
-  // 1件（name・productId）か、まとめて（items: [{ name, productId }]）
-  const items: any[] = Array.isArray(req.body?.items) ? req.body.items.slice(0, 500) : [{ name: req.body?.name, productId: req.body?.productId }];
-  if (!items.some((it) => String(it?.name || ''))) return res.status(400).json({ error: '製品名がありません' });
-  for (const it of items) {
-    const name = String(it?.name || '');
-    if (!name) continue;
-    const productId = String(it?.productId || '').trim();
-    if (productId) stState.mapping[name] = productId;
-    else delete stState.mapping[name];
-  }
-  if (stState.rows.length && applyStStock(stState.rows) > 0) await saveInventory();
-  await saveStObject(ST_STATE_OBJECT, stState);
-  res.json(stStatusView());
-});
-
-// 自動取り込み：日本時間 8〜20時、前回から3時間たったら
-setInterval(async () => {
+/** A列 製品名・B列 在庫数。在庫数が空・数字でない（#REF! など）・整数でない行は読まない */
+async function fetchJpSheetRows(): Promise<SourceRow[]> {
+  const auth = new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'] });
+  const client = await auth.getClient();
+  if (!jpSheetAccount) jpSheetAccount = String((await auth.getCredentials().catch(() => ({} as any)))?.client_email || '');
+  let values: string[][] = [];
   try {
-    if (isDemo()) return;
-    await loadSt();
-    if (!stEffectiveCreds()) return;
-    const h = jstHour();
-    if (h < 8 || h > 20) return;
-    await reloadStState();
-    const last = stState.lastRunAt ? new Date(stState.lastRunAt).getTime() : 0;
-    if (Date.now() - last < ST_SYNC_EVERY_MS) return;
-    await runStSync();
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${JP_STOCK_SHEET_ID}/values/${encodeURIComponent(JP_STOCK_SHEET_RANGE)}`;
+    values = (await client.request<{ values?: string[][] }>({ url })).data.values || [];
   } catch (e: any) {
-    console.warn('[KoreaSite] Auto sync error:', e?.message || e);
+    const code = e?.response?.status || e?.code;
+    if (code === 403 || code === 404) throw new Error(`スプレッドシートを読めません。シートをサーバーのアカウント（${jpSheetAccount || 'サービスアカウント'}）に「閲覧者」で共有してください`);
+    throw e;
   }
-}, 10 * 60 * 1000);
+  const rows: SourceRow[] = [];
+  for (const v of values.slice(1)) {
+    const name = String(v[0] || '')
+      .replace(/[\s　]+/g, ' ')
+      .trim();
+    const raw = String(v[1] ?? '').trim();
+    if (!name || !/^\d+$/.test(raw)) continue;
+    rows.push({ name, qty: parseInt(raw, 10) });
+  }
+  return rows;
+}
+
+const japanSheet: StockSource = {
+  id: 'japan-sheet',
+  label: '国内在庫のスプレッドシート',
+  warehouse: 'domestic',
+  stateObject: 'japan-stock-sheet.json',
+  everyMs: 60 * 60 * 1000,
+  memo: '国内在庫のスプレッドシートから取り込み',
+  ready: () => true,
+  fetchRows: fetchJpSheetRows,
+  info: () => ({ sheetUrl: `https://docs.google.com/spreadsheets/d/${JP_STOCK_SHEET_ID}/edit`, account: jpSheetAccount || null }),
+  state: emptySourceState(),
+  running: false,
+};
+registerStockSource(japanSheet);
 
 app.post('/api/inventory/settings', async (req, res) => {
   await loadInventory();

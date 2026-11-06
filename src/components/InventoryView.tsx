@@ -515,7 +515,7 @@ function StockTable({ warehouse, rows, onSaved, products }: { warehouse: Warehou
 }
 
 /** 倉庫のCSV（韓国倉庫の在庫表など）を取り込む */
-// 韓国倉庫の在庫サイト（stinter33.com）からの自動取り込み：状態・今すぐ取り込む・ID登録・製品名の結びつけ
+// 在庫の自動取り込み（韓国倉庫：倉庫の在庫サイト、国内倉庫：在庫のスプレッドシート）：状態・今すぐ取り込む・ID登録・製品名の結びつけ
 interface KoreaSiteRow {
   company: string;
   name: string;
@@ -527,8 +527,11 @@ interface KoreaSiteRow {
 }
 interface KoreaSite {
   configured: boolean;
-  source: 'env' | 'saved' | null;
-  passcodeConfigured: boolean;
+  source?: 'env' | 'saved' | null;
+  passcodeConfigured?: boolean;
+  canEditCredentials?: boolean;
+  sheetUrl?: string;
+  account?: string | null;
   lastRunAt: string | null;
   lastOkAt: string | null;
   lastError: string | null;
@@ -537,7 +540,9 @@ interface KoreaSite {
 }
 const fmtAt = (s: string | null) => (s ? new Date(s).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—');
 
-function KoreaSitePanel({ products, onSynced }: { products: { productId: string; productName: string }[]; onSynced: () => void }) {
+function StockSourcePanel({ sourceId, title, products, onSynced }: { sourceId: 'korea-site' | 'japan-sheet'; title: string; products: { productId: string; productName: string }[]; onSynced: () => void }) {
+  const base = `/api/${sourceId}`;
+  const [preview, setPreview] = useState<{ productName: string; from: number; to: number }[] | null>(null);
   const [st, setSt] = useState<KoreaSite | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -548,10 +553,10 @@ function KoreaSitePanel({ products, onSynced }: { products: { productId: string;
   const [editing, setEditing] = useState<string | null>(null);
   const [pick, setPick] = useState('');
   const load = useCallback(() => {
-    api('/api/korea-site')
+    api(base)
       .then(setSt)
       .catch((e) => setError(e.message));
-  }, []);
+  }, [base]);
   useEffect(load, [load]);
   const byLabel = useMemo(() => new Map(products.map((p) => [`${p.productName}（${p.productId}）`, p.productId])), [products]);
   if (!st) return null;
@@ -571,7 +576,21 @@ function KoreaSitePanel({ products, onSynced }: { products: { productId: string;
       setBusy(false);
     }
   };
-  const sync = () => run(() => api('/api/korea-site/sync', { method: 'POST' }), '韓国倉庫サイトから在庫を取り込みました');
+  const sync = () => run(() => api(`${base}/sync`, { method: 'POST' }), `${title}から在庫を取り込みました`).then((ok) => ok && setPreview(null));
+  // 最初の1回は、在庫を変えずに変わる内容を先に見せる
+  const dryRun = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      const j = await api(`${base}/sync?dry=1`, { method: 'POST' });
+      setPreview(j.changes || []);
+      setSt(j);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
   const saveCred = () =>
     run(
       () => api('/api/korea-site/credentials', { method: 'PUT', headers: { 'X-Admin-Passcode': cred.passcode }, body: JSON.stringify({ id: cred.id, passwd: cred.passwd }) }),
@@ -582,7 +601,7 @@ function KoreaSitePanel({ products, onSynced }: { products: { productId: string;
       setCredOpen(false);
     });
   const setMapping = (name: string, productId: string) =>
-    run(() => api('/api/korea-site/mapping', { method: 'POST', body: JSON.stringify({ name, productId }) })).then((ok) => {
+    run(() => api(`${base}/mapping`, { method: 'POST', body: JSON.stringify({ name, productId }) })).then((ok) => {
       if (!ok) return;
       setEditing(null);
       setPick('');
@@ -592,8 +611,15 @@ function KoreaSitePanel({ products, onSynced }: { products: { productId: string;
   return (
     <div className="rounded-xl border border-indigo-200 bg-indigo-50/40 p-3 space-y-2 text-xs">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="font-bold text-sm text-slate-900">韓国倉庫サイトから自動取り込み</span>
-        {st.configured ? (
+        <span className="font-bold text-sm text-slate-900">{title}から自動取り込み</span>
+        {st.sheetUrl && (
+          <a href={st.sheetUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 text-indigo-700 hover:underline">
+            シートを開く <ExternalLink className="w-3 h-3" />
+          </a>
+        )}
+        {st.configured && !st.lastOkAt ? (
+          <span className="text-amber-700 font-bold">まだ取り込んでいません。最初の1回は、変わる内容を確かめてから取り込みます</span>
+        ) : st.configured ? (
           <span className="text-slate-600">
             {st.everyHours}時間ごと（8〜20時）・最終取り込み {fmtAt(st.lastOkAt)}
             {todo.length > 0 && <b className="ml-2 text-amber-700">結びついていない製品 {todo.length}件</b>}
@@ -603,12 +629,12 @@ function KoreaSitePanel({ products, onSynced }: { products: { productId: string;
         )}
         <div className="ml-auto flex gap-1.5">
           {st.configured && (
-            <button onClick={sync} disabled={busy} className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 text-white px-3 py-1.5 font-bold disabled:opacity-50">
+            <button onClick={st.lastOkAt ? sync : dryRun} disabled={busy} className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 text-white px-3 py-1.5 font-bold disabled:opacity-50">
               <RefreshCw className={`w-3.5 h-3.5 ${busy ? 'animate-spin' : ''}`} />
-              今すぐ取り込む
+              {st.lastOkAt ? '今すぐ取り込む' : '変わる内容を見る'}
             </button>
           )}
-          {st.source !== 'env' && (
+          {st.canEditCredentials && st.source !== 'env' && (
             <button onClick={() => setCredOpen(!credOpen)} className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-bold text-slate-700">
               {st.configured ? 'IDとパスワードを変える' : 'IDとパスワードを登録'}
             </button>
@@ -622,6 +648,31 @@ function KoreaSitePanel({ products, onSynced }: { products: { productId: string;
       </div>
       {st.lastError && <ErrorNote message={`前回の取り込みに失敗しました（${fmtAt(st.lastRunAt)}）：${st.lastError}`} compact />}
       {error && <ErrorNote message={error} compact />}
+      {preview && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 space-y-2">
+          <div className="font-bold text-amber-900">取り込むと、次の {preview.length} 品目の在庫数が変わります（まだ変えていません）</div>
+          <div className="max-h-60 overflow-auto bg-white rounded border border-amber-200">
+            {preview.map((c, i) => (
+              <div key={i} className="flex justify-between px-2 py-0.5 border-b border-slate-100 last:border-0">
+                <span>{c.productName}</span>
+                <span className="font-mono">
+                  {c.from} → <b>{c.to}</b>
+                </span>
+              </div>
+            ))}
+            {preview.length === 0 && <div className="px-2 py-1 text-slate-500">変わる在庫はありません</div>}
+          </div>
+          <div className="flex gap-2">
+            <button onClick={sync} disabled={busy} className="rounded-lg bg-indigo-600 text-white px-3 py-1.5 font-bold disabled:opacity-50">
+              この内容で取り込む
+            </button>
+            <button onClick={() => setPreview(null)} className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-bold text-slate-700">
+              やめる
+            </button>
+            <span className="text-slate-500 self-center">先に下の「製品の結びつけ」を直してから取り込むこともできます</span>
+          </div>
+        </div>
+      )}
       {credOpen && (
         <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-2">
           <p className="text-slate-500">倉庫サイト（stinter33.com）にログインするときのIDとパスワードです。サーバーにだけ保存し、画面には表示しません。登録には管理用パスコードが必要です。</p>
@@ -633,13 +684,17 @@ function KoreaSitePanel({ products, onSynced }: { products: { productId: string;
               登録する
             </button>
           </div>
-          {!st.passcodeConfigured && <p className="text-rose-700">管理用パスコードがサーバーに設定されていないため、登録できません。</p>}
+          {st.passcodeConfigured === false && <p className="text-rose-700">管理用パスコードがサーバーに設定されていないため、登録できません。</p>}
         </div>
       )}
       {open && (
         <div className="rounded-lg border border-slate-200 bg-white">
           <div className="flex items-center gap-2 px-3 py-2 border-b border-slate-100">
-            <span className="text-slate-500">倉庫の製品名を、このシステムの商品に結びつけます。結びつけた商品の韓国在庫が、倉庫サイトの数になります（VNとNO.1は合計します）。</span>
+            <span className="text-slate-500">
+              {sourceId === 'korea-site'
+                ? '倉庫の製品名を、このシステムの商品に結びつけます。結びつけた商品の韓国在庫が、倉庫サイトの数になります（VNとNO.1は合計します）。'
+                : 'シートの製品名を、このシステムの商品に結びつけます。結びつけた商品の国内在庫が、シートの数になります（同じ商品に結びつけた行は合計します）。'}
+            </span>
             <div className="ml-auto flex rounded-md border border-slate-300 overflow-hidden font-semibold">
               {(
                 [
@@ -653,7 +708,7 @@ function KoreaSitePanel({ products, onSynced }: { products: { productId: string;
               ))}
             </div>
           </div>
-          <datalist id="korea-site-products">
+          <datalist id={`${sourceId}-products`}>
             {products.map((p) => (
               <option key={p.productId} value={`${p.productName}（${p.productId}）`} />
             ))}
@@ -662,8 +717,8 @@ function KoreaSitePanel({ products, onSynced }: { products: { productId: string;
             <table className="w-full">
               <thead className="sticky top-0 bg-slate-50 text-slate-500">
                 <tr>
-                  <th className="text-left px-3 py-1.5">倉庫の製品名</th>
-                  <th className="text-left px-2">会社</th>
+                  <th className="text-left px-3 py-1.5">{sourceId === 'korea-site' ? '倉庫の製品名' : 'シートの製品名'}</th>
+                  {sourceId === 'korea-site' && <th className="text-left px-2">会社</th>}
                   <th className="text-right px-2">数量</th>
                   <th className="text-left px-3">このシステムの商品</th>
                 </tr>
@@ -674,12 +729,12 @@ function KoreaSitePanel({ products, onSynced }: { products: { productId: string;
                   return (
                     <tr key={key}>
                       <td className="px-3 py-1.5 font-semibold text-slate-800">{r.name}</td>
-                      <td className="px-2 text-slate-500">{r.company}</td>
+                      {sourceId === 'korea-site' && <td className="px-2 text-slate-500">{r.company}</td>}
                       <td className="px-2 text-right font-mono">{r.qty}</td>
                       <td className="px-3 py-1">
                         {editing === key ? (
                           <div className="flex gap-1">
-                            <input autoFocus list="korea-site-products" value={pick} onChange={(e) => setPick(e.target.value)} placeholder="商品名で探す" className="flex-1 rounded border border-slate-300 px-2 py-0.5" />
+                            <input autoFocus list={`${sourceId}-products`} value={pick} onChange={(e) => setPick(e.target.value)} placeholder="商品名で探す" className="flex-1 rounded border border-slate-300 px-2 py-0.5" />
                             <button disabled={!byLabel.get(pick) || busy} onClick={() => setMapping(r.name, byLabel.get(pick)!)} className="rounded bg-indigo-600 text-white px-2 font-bold disabled:opacity-40">
                               決定
                             </button>
@@ -1927,7 +1982,8 @@ export function InventoryView({ orders, onNavigate }: { orders: Order[]; onNavig
             )}
           </div>
           {importOpen && <ImportPanel products={products} onDone={load} onClose={() => setImportOpen(false)} />}
-          {(wh === 'all' || wh === 'korea') && <KoreaSitePanel products={products} onSynced={load} />}
+          {(wh === 'all' || wh === 'domestic') && <StockSourcePanel sourceId="japan-sheet" title="国内在庫のスプレッドシート" products={products} onSynced={load} />}
+          {(wh === 'all' || wh === 'korea') && <StockSourcePanel sourceId="korea-site" title="韓国倉庫サイト" products={products} onSynced={load} />}
           <div className={`grid gap-3 ${wh === 'all' ? 'xl:grid-cols-3' : ''}`}>
             {WH_IDS.filter((w) => wh === 'all' || w === wh).map((w) => (
               <StockTable key={w} warehouse={w} rows={data.stock[w] || []} onSaved={load} products={products} />
