@@ -5411,9 +5411,14 @@ function stAutoMatch(): (name: string) => { productId: string; productName: stri
     if (!n) return null;
     const exact = names.get(n);
     if (exact?.length === 1) return exact[0];
-    if (n.length < 5) return null;
+    if (n.length < 8) return null;
+    // 片方がもう片方を含むときは、短い方が8文字以上で長い方の6割以上あるときだけ（「HYDRO」が「iLLUMA Hydro Booster」に付くのを防ぐ）
+    const close = (k: string) => {
+      const [short, long] = k.length < n.length ? [k, n] : [n, k];
+      return short.length >= 8 && short.length >= long.length * 0.6 && long.includes(short);
+    };
     const ids = new Map<string, { productId: string; productName: string }>();
-    for (const k of keys) if (k.length >= 5 && (k.includes(n) || n.includes(k))) for (const x of names.get(k)!) ids.set(x.productId, x);
+    for (const k of keys) if (close(k)) for (const x of names.get(k)!) ids.set(x.productId, x);
     return ids.size === 1 ? Array.from(ids.values())[0] : null;
   };
 }
