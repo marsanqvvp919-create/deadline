@@ -515,6 +515,213 @@ function StockTable({ warehouse, rows, onSaved, products }: { warehouse: Warehou
 }
 
 /** 倉庫のCSV（韓国倉庫の在庫表など）を取り込む */
+// 韓国倉庫の在庫サイト（stinter33.com）からの自動取り込み：状態・今すぐ取り込む・ID登録・製品名の結びつけ
+interface KoreaSiteRow {
+  company: string;
+  name: string;
+  qty: number;
+  updated: string;
+  productId: string;
+  productName: string;
+  how: 'manual' | 'auto' | 'none' | 'ignore';
+}
+interface KoreaSite {
+  configured: boolean;
+  source: 'env' | 'saved' | null;
+  passcodeConfigured: boolean;
+  lastRunAt: string | null;
+  lastOkAt: string | null;
+  lastError: string | null;
+  everyHours: number;
+  rows: KoreaSiteRow[];
+}
+const fmtAt = (s: string | null) => (s ? new Date(s).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—');
+
+function KoreaSitePanel({ products, onSynced }: { products: { productId: string; productName: string }[]; onSynced: () => void }) {
+  const [st, setSt] = useState<KoreaSite | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [open, setOpen] = useState(false);
+  const [credOpen, setCredOpen] = useState(false);
+  const [cred, setCred] = useState({ id: '', passwd: '', passcode: '' });
+  const [show, setShow] = useState<'todo' | 'all'>('todo');
+  const [editing, setEditing] = useState<string | null>(null);
+  const [pick, setPick] = useState('');
+  const load = useCallback(() => {
+    api('/api/korea-site')
+      .then(setSt)
+      .catch((e) => setError(e.message));
+  }, []);
+  useEffect(load, [load]);
+  const byLabel = useMemo(() => new Map(products.map((p) => [`${p.productName}（${p.productId}）`, p.productId])), [products]);
+  if (!st) return null;
+  const run = async (fn: () => Promise<KoreaSite>, done?: string) => {
+    setBusy(true);
+    setError('');
+    try {
+      setSt(await fn());
+      if (done) notifyDone(done);
+      onSynced();
+      return true;
+    } catch (e: any) {
+      setError(e.message);
+      load();
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+  const sync = () => run(() => api('/api/korea-site/sync', { method: 'POST' }), '韓国倉庫サイトから在庫を取り込みました');
+  const saveCred = () =>
+    run(
+      () => api('/api/korea-site/credentials', { method: 'PUT', headers: { 'X-Admin-Passcode': cred.passcode }, body: JSON.stringify({ id: cred.id, passwd: cred.passwd }) }),
+      '倉庫サイトのIDとパスワードを登録しました',
+    ).then((ok) => {
+      if (!ok) return;
+      setCred({ id: '', passwd: '', passcode: '' });
+      setCredOpen(false);
+    });
+  const setMapping = (name: string, productId: string) =>
+    run(() => api('/api/korea-site/mapping', { method: 'POST', body: JSON.stringify({ name, productId }) })).then((ok) => {
+      if (!ok) return;
+      setEditing(null);
+      setPick('');
+    });
+  const todo = st.rows.filter((r) => r.how === 'none');
+  const rows = (show === 'todo' ? todo : st.rows).slice().sort((a, b) => b.qty - a.qty || a.name.localeCompare(b.name));
+  return (
+    <div className="rounded-xl border border-indigo-200 bg-indigo-50/40 p-3 space-y-2 text-xs">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-bold text-sm text-slate-900">韓国倉庫サイトから自動取り込み</span>
+        {st.configured ? (
+          <span className="text-slate-600">
+            {st.everyHours}時間ごと（8〜20時）・最終取り込み {fmtAt(st.lastOkAt)}
+            {todo.length > 0 && <b className="ml-2 text-amber-700">結びついていない製品 {todo.length}件</b>}
+          </span>
+        ) : (
+          <span className="text-amber-700 font-bold">倉庫サイトのIDとパスワードがまだ登録されていません</span>
+        )}
+        <div className="ml-auto flex gap-1.5">
+          {st.configured && (
+            <button onClick={sync} disabled={busy} className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 text-white px-3 py-1.5 font-bold disabled:opacity-50">
+              <RefreshCw className={`w-3.5 h-3.5 ${busy ? 'animate-spin' : ''}`} />
+              今すぐ取り込む
+            </button>
+          )}
+          {st.source !== 'env' && (
+            <button onClick={() => setCredOpen(!credOpen)} className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-bold text-slate-700">
+              {st.configured ? 'IDとパスワードを変える' : 'IDとパスワードを登録'}
+            </button>
+          )}
+          {st.rows.length > 0 && (
+            <button onClick={() => setOpen(!open)} className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-bold text-slate-700">
+              {open ? '製品の結びつけを閉じる' : '製品の結びつけを見る'}
+            </button>
+          )}
+        </div>
+      </div>
+      {st.lastError && <ErrorNote message={`前回の取り込みに失敗しました（${fmtAt(st.lastRunAt)}）：${st.lastError}`} compact />}
+      {error && <ErrorNote message={error} compact />}
+      {credOpen && (
+        <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-2">
+          <p className="text-slate-500">倉庫サイト（stinter33.com）にログインするときのIDとパスワードです。サーバーにだけ保存し、画面には表示しません。登録には管理用パスコードが必要です。</p>
+          <div className="flex flex-wrap gap-2">
+            <input value={cred.id} onChange={(e) => setCred({ ...cred, id: e.target.value })} placeholder="倉庫サイトのID" autoComplete="off" className="rounded-md border border-slate-300 px-2 py-1" />
+            <input type="password" value={cred.passwd} onChange={(e) => setCred({ ...cred, passwd: e.target.value })} placeholder="倉庫サイトのパスワード" autoComplete="new-password" className="rounded-md border border-slate-300 px-2 py-1" />
+            <input type="password" value={cred.passcode} onChange={(e) => setCred({ ...cred, passcode: e.target.value })} placeholder="管理用パスコード" autoComplete="off" className="rounded-md border border-slate-300 px-2 py-1" />
+            <button onClick={saveCred} disabled={busy || !cred.id || !cred.passwd || !cred.passcode} className="rounded-lg bg-slate-900 text-white px-3 py-1 font-bold disabled:opacity-40">
+              登録する
+            </button>
+          </div>
+          {!st.passcodeConfigured && <p className="text-rose-700">管理用パスコードがサーバーに設定されていないため、登録できません。</p>}
+        </div>
+      )}
+      {open && (
+        <div className="rounded-lg border border-slate-200 bg-white">
+          <div className="flex items-center gap-2 px-3 py-2 border-b border-slate-100">
+            <span className="text-slate-500">倉庫の製品名を、このシステムの商品に結びつけます。結びつけた商品の韓国在庫が、倉庫サイトの数になります（VNとNO.1は合計します）。</span>
+            <div className="ml-auto flex rounded-md border border-slate-300 overflow-hidden font-semibold">
+              {(
+                [
+                  ['todo', `結びついていない ${todo.length}`],
+                  ['all', `すべて ${st.rows.length}`],
+                ] as const
+              ).map(([id, label]) => (
+                <button key={id} onClick={() => setShow(id)} className={`px-2 py-1 ${show === id ? 'bg-slate-900 text-white' : 'bg-white text-slate-600'}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <datalist id="korea-site-products">
+            {products.map((p) => (
+              <option key={p.productId} value={`${p.productName}（${p.productId}）`} />
+            ))}
+          </datalist>
+          <div className="max-h-[420px] overflow-auto">
+            <table className="w-full">
+              <thead className="sticky top-0 bg-slate-50 text-slate-500">
+                <tr>
+                  <th className="text-left px-3 py-1.5">倉庫の製品名</th>
+                  <th className="text-left px-2">会社</th>
+                  <th className="text-right px-2">数量</th>
+                  <th className="text-left px-3">このシステムの商品</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {rows.map((r) => {
+                  const key = `${r.company}|${r.name}`;
+                  return (
+                    <tr key={key}>
+                      <td className="px-3 py-1.5 font-semibold text-slate-800">{r.name}</td>
+                      <td className="px-2 text-slate-500">{r.company}</td>
+                      <td className="px-2 text-right font-mono">{r.qty}</td>
+                      <td className="px-3 py-1">
+                        {editing === key ? (
+                          <div className="flex gap-1">
+                            <input autoFocus list="korea-site-products" value={pick} onChange={(e) => setPick(e.target.value)} placeholder="商品名で探す" className="flex-1 rounded border border-slate-300 px-2 py-0.5" />
+                            <button disabled={!byLabel.get(pick) || busy} onClick={() => setMapping(r.name, byLabel.get(pick)!)} className="rounded bg-indigo-600 text-white px-2 font-bold disabled:opacity-40">
+                              決定
+                            </button>
+                            <button onClick={() => setMapping(r.name, 'ignore')} disabled={busy} className="rounded border border-slate-300 px-2">
+                              取り込まない
+                            </button>
+                            {r.how === 'manual' || r.how === 'ignore' ? (
+                              <button onClick={() => setMapping(r.name, '')} disabled={busy} className="rounded border border-slate-300 px-2">
+                                自動に戻す
+                              </button>
+                            ) : null}
+                            <button onClick={() => setEditing(null)} className="px-1 text-slate-400">
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ) : (
+                          <button onClick={() => (setEditing(key), setPick(''))} className="text-left hover:underline">
+                            {r.how === 'none' ? (
+                              <span className="font-bold text-amber-700">未選択（押して選ぶ）</span>
+                            ) : r.how === 'ignore' ? (
+                              <span className="text-slate-400">取り込まない</span>
+                            ) : (
+                              <span className="text-slate-700">
+                                {r.productName}
+                                <span className="ml-1 text-[10px] text-slate-400">{r.how === 'auto' ? '自動' : '手動'}</span>
+                              </span>
+                            )}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ImportPanel({ onDone, products, onClose }: { onDone: () => void; products: { productId: string; productName: string }[]; onClose: () => void }) {
   const [warehouse, setWarehouse] = useState<WarehouseId>('korea');
   const [text, setText] = useState('');
@@ -1720,6 +1927,7 @@ export function InventoryView({ orders, onNavigate }: { orders: Order[]; onNavig
             )}
           </div>
           {importOpen && <ImportPanel products={products} onDone={load} onClose={() => setImportOpen(false)} />}
+          {(wh === 'all' || wh === 'korea') && <KoreaSitePanel products={products} onSynced={load} />}
           <div className={`grid gap-3 ${wh === 'all' ? 'xl:grid-cols-3' : ''}`}>
             {WH_IDS.filter((w) => wh === 'all' || w === wh).map((w) => (
               <StockTable key={w} warehouse={w} rows={data.stock[w] || []} onSaved={load} products={products} />
