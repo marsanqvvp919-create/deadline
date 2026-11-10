@@ -49,7 +49,7 @@ main th {
   overflow-wrap: normal;
 }
 .data-table-wrap th {
-  font-size: 11px;
+  font-size: 12px;
 }
 main td .whitespace-nowrap,
 main th .whitespace-nowrap {
@@ -245,7 +245,7 @@ main .font-extrabold {
 main thead th {
   color: #475569;
   font-weight: 700;
-  font-size: 11px;
+  font-size: 12px;
 }
 main tbody td {
   vertical-align: top;
@@ -264,4 +264,47 @@ main select:focus,
 main textarea:focus {
   outline: 2px solid #c7d2fe;
   outline-offset: 0;
+}
+
+/* ======================================================================
+   文字の大きさとめりはり（全画面共通）
+   小さすぎて読みにくかった文字を一段ずつ大きくし、見出しは太く大きく、補足は灰色で控えめに。
+   10px以下 → 11px／11px → 12px／12px（text-xs）→ 13px。本文13px・見出し15px・大事な数字は太字。
+   ====================================================================== */
+#root .text-\[9px\],
+#root .text-\[10px\] {
+  font-size: 11px;
+  line-height: 1.4;
+}
+#root .text-\[11px\] {
+  font-size: 12px;
+  line-height: 1.45;
+}
+#root .text-xs {
+  font-size: 13px;
+  line-height: 1.5;
+}
+/* 画面の中の見出し：本文より大きく・太く・濃く */
+main h2,
+main h3,
+#root [class*='fixed'] h3 {
+  color: #0f172a;
+  font-weight: 700;
+}
+main h2.text-sm,
+main h3.text-sm,
+main h2.text-xs,
+main h3.text-xs,
+#root [class*='fixed'] h3.text-xs {
+  font-size: 15px;
+  line-height: 1.4;
+}
+/* 補足の灰色は薄すぎたので一段濃く（アイコンはそのまま） */
+#root .text-slate-400:not(svg) {
+  color: #64748b;
+}
+/* 表の行の上下に少し余白をとって読みやすく */
+main tbody td {
+  padding-top: 0.55rem;
+  padding-bottom: 0.55rem;
 }
