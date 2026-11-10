@@ -216,9 +216,6 @@ export const ClinicPortalView: React.FC<ClinicPortalViewProps> = ({
                   <h4 className="text-sm font-bold text-slate-800">
                     今回の納品予定品目 (合計: {currentOrder.totalQty} 箱/本)
                   </h4>
-                  <p className="text-xs text-slate-500">
-                    シンガポール調達ハブより直接出荷された医療用製剤
-                  </p>
                 </div>
                 <div className="flex items-center gap-2">
                   <button

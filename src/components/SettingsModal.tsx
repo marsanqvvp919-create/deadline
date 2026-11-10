@@ -47,7 +47,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
   useEffect(() => {
     if (isOpen) setSettingsTab(initialTab || 'connection');
   }, [isOpen, initialTab]);
-  const [refreshInterval, setRefreshInterval] = useState<string>(() => localStorage.getItem('nouki_refresh_interval') || '5');
 
   useEffect(() => {
     fetchServerIp().then((ip) => {
@@ -141,7 +140,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
   };
 
   const handleSave = () => {
-    localStorage.setItem('nouki_refresh_interval', refreshInterval);
     saveConnectionConfig(
       mode,
       dataUrl.trim(),
@@ -329,26 +327,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
             <CarrierSettingsView />
           ) : settingsTab === 'tuning' ? (
             <div className="space-y-5">
-              {/* 1. 自動データ更新間隔 */}
-              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2">
-                <label className="block text-xs font-bold text-slate-900">
-                  ⏱️ 自動データ同期・更新間隔の設定
-                </label>
-                <p className="text-xs text-slate-600">
-                  楽楽販売APIまたはGASから定期的に最新データをバックグラウンドで自動再取得する間隔を指定します。
-                </p>
-                <select
-                  value={refreshInterval}
-                  onChange={(e) => setRefreshInterval(e.target.value)}
-                  className="w-full text-xs px-3 py-2 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 font-medium"
-                >
-                  <option value="1">1分毎に自動同期</option>
-                  <option value="5">5分毎に自動同期（推奨）</option>
-                  <option value="15">15分毎に自動同期</option>
-                  <option value="30">30分毎に自動同期</option>
-                  <option value="manual">手動更新のみ（自動同期なし）</option>
-                </select>
-              </div>
+              <p className="text-xs text-slate-600">楽楽販売のデータは15分ごとに自動で読み込みます（右上の更新ボタンですぐ読み込めます）。</p>
 
               {/* 3. キャッシュクリア & 強制再同期 */}
               <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
@@ -419,6 +398,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                 <span className="text-[10px] font-normal text-slate-500">（パターンC: 推奨）</span>
               </button>
 
+              {/* GAS連携・内蔵サンプルは試作のときの方式。今は使わないので、選ばれているときだけ出す（楽楽販売に戻せるように） */}
+              {mode !== 'rakuraku' && (
+                <>
               <button
                 type="button"
                 onClick={() => setMode('gas')}
@@ -446,6 +428,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                 <span>内蔵サンプルデータ</span>
                 <span className="text-[10px] font-normal text-slate-500">（デモ動作モード）</span>
               </button>
+                </>
+              )}
             </div>
           </div>
 

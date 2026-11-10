@@ -128,7 +128,7 @@ export const SimpleStatusBarView: React.FC<SimpleStatusBarViewProps> = ({
   };
 
   const STAGES_HEADER = [
-    { label: '① 出荷準備・梱包', desc: 'シンガポール' },
+    { label: '① 出荷準備・梱包', desc: '海外の倉庫' },
     { label: '② FedEx・DHL 国際空輸', desc: '航空便輸送' },
     { label: '③ 日本通関審査', desc: '成田 / 関西保税' },
     { label: '④ 佐川急便', desc: '国内配送' },

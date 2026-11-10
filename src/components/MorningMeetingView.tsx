@@ -230,7 +230,7 @@ export const MorningMeetingView: React.FC<{
   const Diff: React.FC<{ id: SectionId }> = ({ id }) => {
     const now = counts[id];
     const before = previous?.counts?.[id];
-    if (now === null || before === undefined) return <span className="text-[11px] text-slate-400">前日比 —</span>;
+    if (now === null || before === undefined) return null; // 比べる日が無いときは何も出さない
     const d = now - before;
     // 件数は減るほど良い
     const cls = d > 0 ? 'text-rose-600' : d < 0 ? 'text-emerald-600' : 'text-slate-500';
@@ -323,19 +323,9 @@ export const MorningMeetingView: React.FC<{
   return (
     <div className="space-y-4">
       <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-3">
-        <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h2 className="text-lg font-bold text-slate-900">朝の納期会議</h2>
-          <span className="text-xs text-slate-500">
-            楽楽販売のデータ：{generatedAt ? new Date(generatedAt).toLocaleString('ja-JP') : '—'}（15分ごとに自動更新・右上の「再読み込み」ですぐ反映）
-          </span>
-        </div>
-        <p className="text-xs text-slate-500">
-          会議で決めた「誰が・いつまでに・何をする」は、楽楽販売の「対応メモ」に入力してください（このアプリからは書き込みません）。入力した内容は次の更新でこの画面に出ます。
-        </p>
         {carrierLoaded && (
-          <p className="text-sm text-slate-800">
-            要対応（納期超過＋配送の問題。同じ伝票は1件）：<b className="font-mono text-lg text-rose-700">{attention.total}</b>件
-            <span className="text-[11px] text-slate-500 ml-2">左のメニューの数字と同じです</span>
+          <p className="text-sm text-slate-800" title="納期超過＋配送の問題。同じ伝票は1件として数えます（左のメニューの数字と同じ）">
+            要対応 <b className="font-mono text-lg text-rose-700">{attention.total}</b>件
           </p>
         )}
         <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-2">
@@ -362,7 +352,7 @@ export const MorningMeetingView: React.FC<{
             <h3 className="text-sm font-bold text-slate-900">{sec.label}</h3>
             <span className="text-sm font-bold font-mono text-slate-900">{counts[sec.id] ?? '…'}件</span>
             <Diff id={sec.id} />
-            <span className="text-[11px] text-slate-500 w-full sm:w-auto sm:ml-2">{sec.rule}</span>
+            <span className="hidden lg:inline text-[11px] text-slate-400 sm:ml-2 truncate max-w-[40rem]" title={sec.rule}>{sec.rule}</span>
             {(sec.id === 'overdue' || sec.id === 'approaching') && (
               <a
                 href={RAKURAKU_OVERDUE_LIST_URL}

@@ -143,7 +143,7 @@ export const TrackingTimelineModal: React.FC<TrackingTimelineModalProps> = ({
                   {order.intlCarrier} 国際航空輸送
                 </span>
                 <span className="text-[10px] bg-purple-200/80 text-purple-900 px-1.5 py-0.5 rounded font-mono">
-                  SIN ➔ {order.hub}
+                  到着 {order.hub}
                 </span>
               </div>
               <div className="mt-2 flex items-center justify-between gap-2">
@@ -161,7 +161,7 @@ export const TrackingTimelineModal: React.FC<TrackingTimelineModalProps> = ({
                 )}
               </div>
               <div className="mt-2 pt-2 border-t border-purple-200/70 flex items-center justify-between text-xs">
-                <span className="text-purple-700 text-[11px]">シンガポール発 国際貨物</span>
+                <span className="text-purple-700 text-[11px]">国際貨物</span>
                 {order.fedexTracking && (
                   <a
                     href={getFedexTrackingUrl(order.fedexTracking)}
@@ -209,7 +209,6 @@ export const TrackingTimelineModal: React.FC<TrackingTimelineModalProps> = ({
           <div className="border border-slate-200 rounded-xl overflow-hidden">
             <div className="bg-slate-100/70 px-4 py-2.5 text-xs font-bold text-slate-700 flex items-center justify-between">
               <span>同梱商品明細 (計 {order.totalQty} 箱)</span>
-              <span className="text-[11px] font-normal text-slate-500">シンガポール供給ハブ梱包</span>
             </div>
             <div className="divide-y divide-slate-100 p-3 bg-white space-y-2">
               {order.items.map((item, idx) => (

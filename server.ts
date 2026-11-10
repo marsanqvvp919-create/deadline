@@ -32,6 +32,28 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = Number(process.env.PORT) || 8080;
 
+// Express 4 は async の処理で起きたエラーを拾わず、応答が返らないまま止まる（画面は「読み込み中」のまま）。
+// すべての処理を包み、エラーは下のエラー処理（500とメッセージを返す）へ回す
+for (const m of ['get', 'post', 'put', 'patch', 'delete', 'use'] as const) {
+  const orig = (app as any)[m].bind(app);
+  (app as any)[m] = (...args: any[]) =>
+    orig(
+      ...args.map((h) =>
+        typeof h === 'function' && h.length < 4
+          ? function (this: any, req: any, res: any, next: any) {
+              try {
+                const r = h.call(this, req, res, next);
+                if (r && typeof r.catch === 'function') r.catch(next);
+                return r;
+              } catch (e) {
+                next(e);
+              }
+            }
+          : h,
+      ),
+    );
+}
+
 // 応答を圧縮する（注文・出荷データは約10MBあり、圧縮しないと読み込みに時間がかかる）
 app.use(compression());
 app.use(express.json());
@@ -3070,7 +3092,9 @@ setInterval(async () => {
       (h: any) => h.trigger === 'schedule' && new Date(new Date(h.runAt).getTime() + 9 * 3600000).toISOString().slice(0, 10) === today
     );
     if (!ranToday) await runSheetImportDryRun('schedule', true);
-  } catch {}
+  } catch (e: any) {
+    console.warn('[Sheet Import] scheduled run failed:', e?.message || e);
+  }
 }, 5 * 60 * 1000);
 
 app.get('/api/sheet-import/preview', async (_req, res) => {
@@ -7873,6 +7897,12 @@ app.post('/api/warehouse/outbound', async (req, res) => {
 });
 
 async function startServer() {
+  // どの処理でエラーが起きても、止まらずに 500 とメッセージを返す（上の包みから回ってくる）
+  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    console.error(`[Error] ${req.method} ${req.path}:`, err?.message || err);
+    if (res.headersSent) return next(err);
+    res.status(500).json({ error: `サーバーで問題が起きました（${err?.message || err}）。もう一度お試しください` });
+  });
   const distPath = path.resolve(process.cwd(), 'dist');
   const distIndexPath = path.resolve(distPath, 'index.html');
   const hasDist = fs.existsSync(distIndexPath);
