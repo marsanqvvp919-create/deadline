@@ -308,3 +308,21 @@ main tbody td {
   padding-top: 0.55rem;
   padding-bottom: 0.55rem;
 }
+
+/* 表：1行おきに薄い色をつけ、横に長い行でも目で追いやすく（色つきの行はそのまま） */
+main tbody tr:nth-child(even):not([class*='bg-']) {
+  background-color: #f8fafc;
+}
+main tbody tr:hover {
+  background-color: #eef2ff;
+}
+
+/* 左メニュー：文字を大きく、押す場所を広く */
+aside nav button {
+  font-size: 14px;
+  padding-top: 0.45rem;
+  padding-bottom: 0.45rem;
+}
+aside nav button span.font-mono {
+  font-size: 12px;
+}

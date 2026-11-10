@@ -2,6 +2,7 @@ import React from 'react';
 import { PeriodFilter } from '../types';
 import { formatDateTime } from '../utils';
 import { HelpMenu } from './flow/HelpMenu';
+import { TextSizeButton } from './flow/TextSizeButton';
 import {
   RefreshCw,
   SlidersHorizontal,
@@ -250,6 +251,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         {/* Right: Status, Alerts Badge, Refresh, Settings */}
         {search && <div className="order-last basis-full sm:order-none sm:basis-auto">{search}</div>}
         <div className="flex flex-wrap items-center justify-end gap-1.5 sm:gap-2.5 ml-auto">
+          <TextSizeButton />
           <HelpMenu pageGuide={pageGuide} />
           {/* 今日の作業の件数（パソコンでは左メニューに同じ数が出るので、スマホのときだけ出す） */}
           <button
