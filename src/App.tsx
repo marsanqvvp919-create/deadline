@@ -52,6 +52,8 @@ import { BudgetSettingsModal } from './components/BudgetSettingsModal';
 import { BulkDeliveriesView } from './components/BulkDeliveriesView';
 import { PortalAdminView } from './components/PortalAdminView';
 import { ProductQuantityView } from './components/ProductQuantityView';
+import { DelayForecastView } from './components/DelayForecastView';
+import { forecastDelays } from './utils/delayForecast';
 import { DailyDigestModal } from './components/DailyDigestModal';
 import { ClinicProductStatusDrawer } from './components/ClinicProductStatusDrawer';
 import { getLocalClinics, getLocalShipments } from './api';
@@ -105,7 +107,7 @@ const APP_TAGLINE = '受注から到着まで ― 楽楽販売 連携';
 const KNOWN_TABS: ViewTab[] = [
   'leak_check', 'dashboard', 'morning_meeting', 'alerts', 'procurement', 'unshipped_clinics', 'partial_shipment', 'overdue',
   'customs_management', 'cool_missing', 'kanto_customs_ng', 'unmatched_sheets', 'inventory_management', 'shipping_calc', 'shipping_instructions', 'invoices',
-  'sheet_import', 'arrival_tracking', 'products', 'clinics', 'carrier_settings', 'bulk_deliveries', 'portal_admin', 'product_quantity',
+  'sheet_import', 'arrival_tracking', 'products', 'clinics', 'carrier_settings', 'bulk_deliveries', 'portal_admin', 'product_quantity', 'delay_forecast',
   'sales_dashboard', 'sales_rep_sales', 'sales_clinic_master', 'reorder_prediction', 'rep_ranking',
 ];
 
@@ -649,6 +651,9 @@ export default function App() {
   };
 
 
+  // 遅れそう（予測）の「このままだと遅れる」件数（左メニューの数字）。フックなので起動中の表示より前に置く
+  const forecastHigh = useMemo(() => (deliveryData ? forecastDelays(deliveryData.orders).rows.filter((r) => r.risk === 'high').length : 0), [deliveryData?.orders]);
+
   if (!deliveryData) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-100">
@@ -737,6 +742,7 @@ export default function App() {
     clinics: 'クリニックの情報と、送り先（英語名・住所・電話）を確認・修正します',
     portal_admin: 'お客様が見る管理画面のURLとパスワードを発行・管理します',
     product_quantity: '製剤ごとに、未発注・未発送の数と、これまでに売れた数を確認します',
+    delay_forecast: 'まだ納期を過ぎていないが、仕入先のいつもの日数だと間に合わない明細を、遅れる前に見つけます。仕入先への催促や、お客様への早めの連絡に使います。行を押すと伝票の詳細が出ます',
     sales_dashboard: '全社の月別売上（入金済・請求・受注ベース）と、当月の目標の達成状況を見ます',
     sales_rep_sales: '営業担当ごとの売上を見ます。担当を押すと伝票の内訳が出ます',
     sales_clinic_master: 'クリニックごとの売上とランクを確認・設定します',
@@ -778,6 +784,14 @@ export default function App() {
       icon: AlarmClock,
       badge: overdueCounts.ordersCount > 0 ? `${overdueCounts.ordersCount}` : null,
       badgeColor: 'bg-rose-600 text-white font-bold',
+    },
+    {
+      id: 'delay_forecast',
+      group: 'today',
+      label: '遅れそう（予測）',
+      icon: TrendingUp,
+      badge: forecastHigh > 0 ? `${forecastHigh}` : null,
+      badgeColor: 'bg-orange-500 text-white font-bold',
     },
     {
       id: 'morning_meeting',
@@ -1313,6 +1327,7 @@ export default function App() {
 
           {activeTab === 'portal_admin' && <PortalAdminView />}
           {activeTab === 'product_quantity' && <ProductQuantityView orders={deliveryData.orders} onSelectOrder={handleOpenDetail} />}
+          {activeTab === 'delay_forecast' && <DelayForecastView orders={deliveryData.orders} onSelectOrder={handleOpenDetail} />}
 
           {activeTab === 'bulk_deliveries' && (
             <BulkDeliveriesView orders={deliveryData.orders} clinics={clinics} onSelectOrder={handleOpenDetail} />
