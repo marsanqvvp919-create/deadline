@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { InvoicePdfButtons } from '../invoice/InvoiceDialog';
+import { AwbDownloadButton } from '../invoice/AwbDialog';
 import { CheckCircle2, ClipboardList, History, Loader2, Lock, LogOut, PackageCheck, PackageMinus, RefreshCw, Search, Send, Truck, Warehouse } from 'lucide-react';
 import { askConfirm, ConfirmHost } from '../components/flow/Confirm';
 import { ErrorNote } from '../components/flow/Messages';
@@ -330,6 +331,14 @@ function InstructionCard({ si, slug, onDone }: { si: Instruction; slug: string; 
             <a href={`/api/warehouse/awb-label/${si.id}?slug=${slug}`} target="_blank" rel="noreferrer" className="rounded border border-amber-300 bg-amber-50 px-2 py-1 font-bold text-amber-800">
               ラベルを印刷 / Print label
             </a>
+          )}
+          {si.awbLabel && (
+            <AwbDownloadButton
+              url={`/api/warehouse/awb-label/${si.id}?slug=${slug}&download=1`}
+              fileName={`AWB_${si.awbCarrier || ''}_${si.awbNo}_${si.id}.pdf`}
+              label="ダウンロード / Download"
+              className="inline-flex items-center gap-1 rounded border border-amber-300 bg-amber-50 px-2 py-1 font-bold text-amber-800 disabled:opacity-50"
+            />
           )}
         </div>
       )}

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { demoHeaders } from '../utils/demo';
-import { CheckCircle2, Loader2, Plane, Settings, X } from 'lucide-react';
+import { CheckCircle2, Download, Loader2, Plane, Settings, X } from 'lucide-react';
 import { DialogFrame, InvoiceDialog } from './InvoiceDialog';
 import { ErrorNote } from '../components/flow/Messages';
 
@@ -43,6 +43,54 @@ function PartyForm({ title, value, onChange }: { title: string; value: any; onCh
         </label>
       ))}
     </div>
+  );
+}
+
+/**
+ * 送り状（AWB）のラベルPDFを保存するボタン。
+ * リンクの download 属性が効かない画面（アプリ内のブラウザなど）でも保存できるよう、PDFを読み込んでから保存する。
+ * 読めなかったときは理由をボタンの横に出す。
+ */
+export function AwbDownloadButton({ url, fileName, label = '送り状（AWB）のPDFをダウンロード', className }: { url: string; fileName: string; label?: string; className?: string }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const save = async () => {
+    setBusy(true);
+    setErr('');
+    try {
+      const r = await fetch(url, { headers: demoHeaders(), credentials: 'same-origin' });
+      if (!r.ok) {
+        const j = await r.json().catch(() => null);
+        throw new Error(r.status === 401 ? 'ログインが切れています。画面を読み込み直してログインしてください' : j?.error || `読み込めませんでした（${r.status}）`);
+      }
+      const blob = await r.blob();
+      const href = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = href;
+      a.download = fileName.replace(/[^\w.-]+/g, '_');
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(href), 60_000);
+    } catch (e: any) {
+      setErr(e?.message || String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <span className="inline-flex flex-wrap items-center gap-1.5">
+      <button
+        type="button"
+        onClick={save}
+        disabled={busy}
+        className={className || 'inline-flex w-fit items-center gap-1 rounded-lg border border-indigo-300 bg-indigo-50 px-2.5 py-1 text-[11px] font-bold text-indigo-800 hover:bg-indigo-100 disabled:opacity-50'}
+      >
+        {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+        {label}
+      </button>
+      {err && <span className="text-[11px] font-bold text-rose-600">{err}</span>}
+    </span>
   );
 }
 
@@ -229,9 +277,7 @@ export function AwbDialog({ instructionId, onClose, onDone, embedded }: { instru
                 <a href={`/api/awb/label/${instructionId}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded border border-indigo-300 bg-indigo-50 px-2 py-1 text-[11px] font-bold text-indigo-800">
                   送り状のラベルPDFを開く
                 </a>
-                <a href={`/api/awb/label/${instructionId}?download=1`} download className="inline-flex items-center gap-1 rounded border border-indigo-300 bg-indigo-50 px-2 py-1 text-[11px] font-bold text-indigo-800">
-                  ダウンロード
-                </a>
+                <AwbDownloadButton url={`/api/awb/label/${instructionId}?download=1`} fileName={`AWB_${done.awbCarrier || ''}_${done.awbNo}_${instructionId}.pdf`} label="ダウンロード" />
               </span>
             )}
           </div>

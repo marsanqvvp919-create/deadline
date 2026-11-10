@@ -7841,7 +7841,7 @@ app.get('/api/warehouse/invoice/:id', async (req, res) => {
 app.get('/api/warehouse/awb-label/:id', async (req, res) => {
   const w = await warehouseFromRequest(req);
   if (!w) return res.status(401).json({ error: 'login_required' });
-  await sendAwbLabel(inv().instructions.find((x) => x.id === req.params.id && x.warehouse === w), res);
+  await sendAwbLabel(inv().instructions.find((x) => x.id === req.params.id && x.warehouse === w), res, req.query.download === '1');
 });
 // 出荷指示の出荷完了（倉庫の担当者）
 app.post('/api/warehouse/instructions/:id/ship', async (req, res) => {
