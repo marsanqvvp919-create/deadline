@@ -158,7 +158,7 @@ function tooManyFailures(key: string) {
 const recordFailure = (key: string) => loginFailures.set(key, [...(loginFailures.get(key) || []), Date.now()]);
 
 app.use(async (req, res, next) => {
-  if (!req.path.startsWith('/api/') || req.path.startsWith('/api/auth/') || req.path.startsWith('/api/portal/') || req.path.startsWith('/api/warehouse/')) return next();
+  if (!req.path.startsWith('/api/') || req.path.startsWith('/api/auth/') || req.path.startsWith('/api/portal/') || req.path.startsWith('/api/warehouse/') || req.path.startsWith('/api/sales-os/')) return next();
   try {
     if (await isStaffRequest(req)) return next();
   } catch (e: any) {
@@ -2046,6 +2046,54 @@ function slimForClient() {
   slimCache = { key, orders, shipments };
   return slimCache;
 }
+
+// ----------------------------------------------------------------------
+// 営業行動OS（別のアプリ）向け：見積と購入履歴の明細を渡す窓口
+// 楽楽販売へは問い合わせず、ここが取り込み済みのデータを返すだけ（API回数を使わない）。
+// 合言葉（SALES_OS_KEY）をヘッダー x-sales-os-key で受け取ったときだけ返す
+//   ?clinicIds=111,222  … その顧客の伝票（見積も受注も）
+//   ?quotes=1           … 全顧客の見積の伝票だけ
+// ----------------------------------------------------------------------
+const salesOsKeyOk = (req: express.Request) => {
+  const want = process.env.SALES_OS_KEY || '';
+  const got = String(req.headers['x-sales-os-key'] || '');
+  if (!want || !got) return false;
+  const h = (v: string) => crypto.createHash('sha256').update(v).digest();
+  return crypto.timingSafeEqual(h(want), h(got));
+};
+app.get('/api/sales-os/orders', (req, res) => {
+  if (!process.env.SALES_OS_KEY) return res.status(503).json({ error: 'SALES_OS_KEY が設定されていません' });
+  if (!salesOsKeyOk(req)) return res.status(401).json({ error: '合言葉が違います' });
+  const all: any[] = serverRakurakuStore.orders?.orders || [];
+  const ids = new Set(String(req.query.clinicIds || '').split(',').map((v) => v.trim()).filter(Boolean).slice(0, 300));
+  const quotesOnly = String(req.query.quotes || '') === '1';
+  if (!ids.size && !quotesOnly) return res.status(400).json({ error: 'clinicIds か quotes=1 を指定してください' });
+  const isQuote = (o: any) => String(o.status || '').includes('見積');
+  const orders = all
+    .filter((o) => (ids.size ? ids.has(String(o.clinicId || '').trim()) : true) && (quotesOnly ? isQuote(o) : true))
+    .map((o) => ({
+      orderId: o.orderId,
+      status: o.status || '',
+      quote: isQuote(o),
+      clinicId: String(o.clinicId || '').trim(),
+      customerName: o.customerName,
+      salesRep: o.salesRep,
+      orderDate: o.orderDate || null,
+      quoteDate: o.quoteDate || null,
+      quoteValidUntil: o.quoteValidUntil || null,
+      deliveredDate: o.deliveredDate || null,
+      totalAmount: o.totalAmount || 0,
+      lines: (o.lines || []).map((l: any) => ({
+        productId: l.productId,
+        productName: l.productName,
+        quantity: l.quantity,
+        unitPrice: l.unitPrice,
+        lineAmount: l.lineAmount,
+        shippedDate: l.shippedDate || null,
+      })),
+    }));
+  res.json({ ok: true, syncedAt: serverRakurakuStore.lastSuccessTime || null, count: orders.length, orders });
+});
 
 app.get('/api/rakuraku/all-data', async (_req, res) => {
   const currentIp = await getOutboundIp();
