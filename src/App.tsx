@@ -1364,6 +1364,7 @@ export default function App() {
         order={selectedOrder}
         selectedLineKey={selectedLineKey}
         alerts={deliveryData.alerts}
+        shipments={shipments}
         isOpen={isDrawerOpen}
         onClose={() => setIsDrawerOpen(false)}
         onOpenClinicStatus={handleOpenClinicStatus}
