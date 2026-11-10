@@ -4988,10 +4988,10 @@ let realInventory: InventoryStore = {
 };
 let inventoryLoadPromise: Promise<void> | null = null;
 let inboundPoRefreshRequested = false;
-// 仕入先の画面に新しい発注が早く出るように、発注管理は30分ごとに読む（次の楽楽販売の同期のときに一緒に取る）
+// 入荷予定・仕入先の画面に当日中の変更が出るように、発注管理は15分ごとに読む（次の楽楽販売の同期のときに一緒に取る）
 setInterval(() => {
   inboundPoRefreshRequested = true;
-}, 30 * 60 * 1000);
+}, 15 * 60 * 1000);
 
 function loadInventory() {
   if (!inventoryLoadPromise) {

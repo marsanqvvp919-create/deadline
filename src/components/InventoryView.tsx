@@ -123,6 +123,7 @@ interface Instruction {
 interface Move {
   id: string;
   at: string;
+  productId?: string;
   warehouse: WarehouseId;
   productName: string;
   delta: number;
@@ -517,7 +518,20 @@ function IncomingList({ warehouse, inbound, onOpen }: { warehouse: WarehouseId; 
   );
 }
 
-function StockTable({ warehouse, rows, onSaved, products, inbound, onOpenInbound }: { warehouse: WarehouseId; rows: StockRow[]; onSaved: () => void; products: { productId: string; productName: string }[]; inbound?: Inbound[]; onOpenInbound?: () => void }) {
+/** 今日（日本時間）この倉庫に入荷した数：商品ID（なければ商品名）ごと */
+const jstDay = (iso: string) => new Date(new Date(iso).getTime() + 9 * 3600000).toISOString().slice(0, 10);
+function todayInbound(moves: Move[], warehouse: WarehouseId): Map<string, number> {
+  const today = jstDay(new Date().toISOString());
+  const m = new Map<string, number>();
+  for (const mv of moves) {
+    if (mv.warehouse !== warehouse || mv.type !== 'inbound' || mv.delta <= 0 || jstDay(mv.at) !== today) continue;
+    const k = mv.productId || `name:${mv.productName}`;
+    m.set(k, (m.get(k) || 0) + mv.delta);
+  }
+  return m;
+}
+
+function StockTable({ warehouse, rows, onSaved, products, inbound, onOpenInbound, todayIn }: { warehouse: WarehouseId; rows: StockRow[]; onSaved: () => void; products: { productId: string; productName: string }[]; inbound?: Inbound[]; onOpenInbound?: () => void; todayIn?: Map<string, number> }) {
   const [q, setQ] = useState('');
   const [edit, setEdit] = useState<{ key: string; productId: string; productName: string; qty: string } | null>(null);
   const [error, setError] = useState('');
@@ -607,7 +621,19 @@ function StockTable({ warehouse, rows, onSaved, products, inbound, onOpenInbound
             {shown.map((r) => (
               <tr key={r.key} className={r.qty <= 0 ? 'text-slate-400' : ''}>
                 <td className="px-3 py-1.5 font-semibold">{r.productName}</td>
-                <td className="px-1.5 py-1.5 text-right font-mono font-bold">{r.qty}</td>
+                <td className="px-1.5 py-1.5 text-right font-mono font-bold">
+                  {(() => {
+                    const added = todayIn?.get(r.productId || `name:${r.productName}`) || todayIn?.get(`name:${r.productName}`);
+                    return added ? (
+                      <span title={`今日 ${added} 入荷`} className="inline-flex flex-col items-end">
+                        <span className="rounded bg-emerald-500 px-1.5 text-white">{r.qty}</span>
+                        <span className="whitespace-nowrap text-[10px] font-bold text-emerald-700">今日+{added}</span>
+                      </span>
+                    ) : (
+                      r.qty
+                    );
+                  })()}
+                </td>
                 <td className="px-1.5 py-1.5 text-right font-mono text-amber-700">{r.reserved || ''}</td>
                 <td className="px-1.5 py-1.5 text-right font-mono text-emerald-700">{r.available}</td>
                 <td className="px-2 py-1.5 text-right">
@@ -1110,7 +1136,7 @@ function VendorAccessPanel() {
     <div className="space-y-3">
       <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700 space-y-1">
         <div className="font-bold text-slate-900">流れ</div>
-        <div>① 楽楽販売の発注管理で「発注済み」にする → 30分以内にその仕入先の画面に出ます</div>
+        <div>① 楽楽販売の発注管理で「発注済み」にする → 15〜30分ほどでその仕入先の画面に出ます</div>
         <div>② 仕入先が発送したら「発送済み」を押す（追跡番号は任意）→ 入荷予定が「仕入先が発送済み」に変わります</div>
         <div>③ 倉庫の担当者が受け取って数を確認し「承認」→ 倉庫の在庫に入ります</div>
         <div className="text-slate-500">仕入先の画面には、お客様名・金額は出ません。楽楽販売には書き込みません。</div>
@@ -2259,9 +2285,34 @@ export function InventoryView({ orders, onNavigate }: { orders: Order[]; onNavig
           {importOpen && <ImportPanel products={products} onDone={load} onClose={() => setImportOpen(false)} />}
           {(wh === 'all' || wh === 'domestic') && <StockSourcePanel sourceId="japan-sheet" title="国内在庫のスプレッドシート" products={products} onSynced={load} />}
           {(wh === 'all' || wh === 'korea') && <StockSourcePanel sourceId="korea-site" title="韓国倉庫サイト" products={products} onSynced={load} />}
+          {!isInventoryDemo() && (
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50/60 px-3 py-2 text-xs">
+              <span className="font-bold text-slate-800">入荷予定は楽楽販売の発注管理から自動で取り込みます（15分ごと・倉庫が入荷を確定すると消えます）</span>
+              <span className="text-slate-500">最終取り込み {fmt(data.poSyncedAt)}</span>
+              <button
+                disabled={refreshing}
+                onClick={async () => {
+                  setRefreshing(true);
+                  setError('');
+                  try {
+                    await api('/api/inventory/refresh-po', { method: 'POST' });
+                    load();
+                  } catch (e: any) {
+                    setError(e.message);
+                  } finally {
+                    setRefreshing(false);
+                  }
+                }}
+                className="ml-auto inline-flex items-center gap-1 rounded-lg bg-indigo-600 text-white px-3 py-1.5 font-bold disabled:opacity-50"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+                {refreshing ? '楽楽から取り込み中…' : '今すぐ楽楽から取り込む'}
+              </button>
+            </div>
+          )}
           <div className={`grid gap-3 ${wh === 'all' ? 'xl:grid-cols-3' : ''}`}>
             {WH_IDS.filter((w) => wh === 'all' || w === wh).map((w) => (
-              <StockTable key={w} warehouse={w} rows={data.stock[w] || []} onSaved={load} products={products} inbound={data.inbound} onOpenInbound={() => setTab('inbound')} />
+              <StockTable key={w} warehouse={w} rows={data.stock[w] || []} onSaved={load} products={products} inbound={data.inbound} onOpenInbound={() => setTab('inbound')} todayIn={todayInbound(data.moves, w)} />
             ))}
           </div>
         </div>

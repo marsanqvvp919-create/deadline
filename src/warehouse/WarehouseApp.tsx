@@ -68,6 +68,7 @@ interface Instruction {
 interface Move {
   id: string;
   at: string;
+  productId?: string;
   productName: string;
   delta: number;
   type: string;
@@ -665,6 +666,17 @@ function Dashboard({ slug, onLogout }: { slug: string; onLogout: () => void }) {
   useEffect(load, [load]);
 
   const pending = useMemo(() => (data?.inbound || []).filter((r) => !r.received), [data]);
+  // 今日（日本時間）入荷した数：在庫の数字に色を付ける
+  const todayIn = useMemo(() => {
+    const day = (iso: string) => new Date(new Date(iso).getTime() + 9 * 3600000).toISOString().slice(0, 10);
+    const today = day(new Date().toISOString());
+    const m = new Map<string, number>();
+    (data?.moves || []).forEach((mv) => {
+      if (mv.type !== 'inbound' || mv.delta <= 0 || day(mv.at) !== today) return;
+      m.set(mv.productName, (m.get(mv.productName) || 0) + mv.delta);
+    });
+    return m;
+  }, [data]);
   const stock = (data?.stock || []).filter((s) => !q.trim() || s.productName.toLowerCase().includes(q.trim().toLowerCase()));
 
   const doOutbound = async () => {
@@ -797,7 +809,16 @@ function Dashboard({ slug, onLogout }: { slug: string; onLogout: () => void }) {
                 {stock.map((s) => (
                   <tr key={s.key} className={s.qty <= 0 ? 'text-slate-400' : ''}>
                     <td className="px-3 py-2 font-semibold">{s.productName}</td>
-                    <td className="px-3 py-2 text-right font-mono font-bold">{s.qty}</td>
+                    <td className="px-3 py-2 text-right font-mono font-bold">
+                      {todayIn.get(s.productName) ? (
+                        <span className="inline-flex flex-col items-end">
+                          <span className="rounded bg-emerald-500 px-1.5 text-white">{s.qty}</span>
+                          <span className="whitespace-nowrap text-[10px] font-bold text-emerald-700" title="今日入荷 / Received today">今日 +{todayIn.get(s.productName)}</span>
+                        </span>
+                      ) : (
+                        s.qty
+                      )}
+                    </td>
                     <td className="px-3 py-2 text-right font-mono text-amber-700">{s.reserved || ''}</td>
                     <td className="px-3 py-2 text-right">
                       {s.available > 0 && (
