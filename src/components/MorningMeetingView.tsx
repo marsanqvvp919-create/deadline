@@ -1,3 +1,4 @@
+import { forecastDelays } from '../utils/delayForecast';
 import React, { useEffect, useMemo, useState } from 'react';
 import { ArrowDown, ArrowUp, Copy, ExternalLink, Minus } from 'lucide-react';
 import { Order, ShipmentItem, ViewTab } from '../types';
@@ -100,6 +101,11 @@ export const MorningMeetingView: React.FC<{
   }, [shipments]);
 
   const orderById = useMemo(() => new Map(orders.map((o) => [o.orderId, o])), [orders]);
+  // 遅れそう（予測）：まだ納期前だが、仕入先のいつもの日数だと間に合わない明細の受注数
+  const forecast = useMemo(() => {
+    const rows = forecastDelays(orders).rows.filter((r) => r.risk === 'high');
+    return { lines: rows.length, orders: new Set(rows.map((r) => r.order.orderId)).size };
+  }, [orders]);
 
   // 伝票の配送状況と対応メモ（対応メモはご注文管理にあればそれ、なければ出荷管理の新しいものから）
   const shipInfo = (orderId: string) => {
@@ -323,6 +329,16 @@ export const MorningMeetingView: React.FC<{
   return (
     <div className="space-y-4">
       <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-3">
+        {forecast.lines > 0 && (
+          <button
+            type="button"
+            onClick={() => onNavigateToTab('delay_forecast')}
+            className="float-right ml-3 inline-flex items-center gap-1.5 rounded-lg border border-orange-300 bg-orange-50 px-3 py-1.5 text-xs font-bold text-orange-800 hover:bg-orange-100"
+            title="まだ納期前だが、仕入先のいつもの日数だと間に合わない明細"
+          >
+            納期前でも遅れそう：{forecast.orders}件の受注（{forecast.lines}明細） →
+          </button>
+        )}
         {carrierLoaded && (
           <p className="text-sm text-slate-800" title="納期超過＋配送の問題。同じ伝票は1件として数えます（左のメニューの数字と同じ）">
             要対応 <b className="font-mono text-lg text-rose-700">{attention.total}</b>件

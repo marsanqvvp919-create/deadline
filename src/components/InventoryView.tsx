@@ -1624,15 +1624,18 @@ function WarehouseOverview({ data, onPick }: { data: InventoryData; onPick: (w: 
               </span>
               <span className="text-[11px] text-indigo-700 font-bold">この倉庫を見る →</span>
             </button>
-            <div className="grid grid-cols-3 gap-1.5">
+            {/* 在庫は2つだけ大きく、ほかは0でないものだけ1行で */}
+            <div className="grid grid-cols-2 gap-1.5">
               {kpi('在庫（品目）', stock.filter((s2) => s2.qty > 0).length)}
-              {kpi('在庫（点）', stock.reduce((n, s2) => n + s2.qty, 0))}
-              {kpi('引当済（点）', stock.reduce((n, s2) => n + s2.reserved, 0))}
-              {kpi('入荷待ち', pending.length)}
-              {kpi('承認待ち', waiting.length, waiting.length > 0)}
-              {kpi('出荷待ち', openSi.length, openSi.length > 0)}
+              {kpi('在庫（点）', stock.reduce((n, s2) => n + s2.qty, 0).toLocaleString('ja-JP'))}
             </div>
-            <div className="space-y-1">
+            <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-slate-600">
+              {stock.some((s2) => s2.reserved > 0) && <span>引当済 <b className="font-mono">{stock.reduce((n, s2) => n + s2.reserved, 0)}</b>点</span>}
+              {pending.length > 0 && <span>入荷待ち <b className="font-mono">{pending.length}</b>件</span>}
+              {waiting.length > 0 && <span className="text-amber-700 font-bold">承認待ち {waiting.length}件</span>}
+              {openSi.length > 0 && <span className="text-amber-700 font-bold">出荷待ち {openSi.length}件</span>}
+            </div>
+            {waiting.length > 0 && <div className="space-y-1">
               <div className="text-[11px] font-bold text-slate-600">承認待ちの入荷</div>
               {waiting.length === 0 ? (
                 <div className="text-[11px] text-slate-400">ありません</div>
@@ -1646,8 +1649,8 @@ function WarehouseOverview({ data, onPick }: { data: InventoryData; onPick: (w: 
                   </div>
                 ))
               )}
-            </div>
-            <div className="space-y-1">
+            </div>}
+            {openSi.length > 0 && <div className="space-y-1">
               <div className="text-[11px] font-bold text-slate-600">出荷待ちの出荷指示</div>
               {openSi.length === 0 ? (
                 <div className="text-[11px] text-slate-400">ありません</div>
@@ -1663,9 +1666,9 @@ function WarehouseOverview({ data, onPick }: { data: InventoryData; onPick: (w: 
                   </div>
                 ))
               )}
-            </div>
-            <div className="space-y-1">
-              <div className="text-[11px] font-bold text-slate-600">最近の入出庫</div>
+            </div>}
+            <details className="space-y-1">
+              <summary className="cursor-pointer text-[11px] font-bold text-slate-600">最近の入出庫</summary>
               {moves.length === 0 ? (
                 <div className="text-[11px] text-slate-400">まだありません</div>
               ) : (
@@ -1678,7 +1681,7 @@ function WarehouseOverview({ data, onPick }: { data: InventoryData; onPick: (w: 
                   </div>
                 ))
               )}
-            </div>
+            </details>
           </div>
         );
       })}
@@ -1860,16 +1863,23 @@ export function InventoryView({ orders, onNavigate }: { orders: Order[]; onNavig
     <div className="space-y-4">
       <DemoBar onChange={load} />
       <SampleStockBar data={data} onChange={load} />
-      <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-3">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h1 className="text-xl font-bold text-slate-900 flex items-center gap-2">
-              <Boxes className="w-6 h-6 text-indigo-600" />
-              入荷・在庫・引当（国内・韓国・シンガポール）
-            </h1>
-            <p className="text-xs text-slate-500 mt-1">
-              楽楽販売の発注（発注済み）から入荷予定を作ります。入荷先・配送方法・追跡番号・数量はここで入れ、倉庫の担当者が実数を入れて承認すると在庫に加わります。楽楽販売には書き込みません。
-            </p>
+      <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-2">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          {/* 要対応の件数（0件のものは出さない） */}
+          <div className="flex flex-wrap items-center gap-2">
+            {([
+              ['追跡番号待ち', counts.noTracking, 'border-amber-200 bg-amber-50 text-amber-800'],
+              ['倉庫の承認待ち（到着・キック・持込）', counts.waiting, 'border-violet-200 bg-violet-50 text-violet-800'],
+              ['入荷数の不足', counts.shortage, 'border-rose-200 bg-rose-50 text-rose-800'],
+            ] as const)
+              .filter(([, v]) => v > 0)
+              .map(([label, v, cls]) => (
+                <span key={label} className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-bold ${cls}`}>
+                  {label}
+                  <span className="font-mono text-sm">{v}</span>
+                </span>
+              ))}
+            {counts.noTracking + counts.waiting + counts.shortage === 0 && <span className="text-xs font-bold text-emerald-700">入荷で対応が必要なものはありません</span>}
           </div>
           <div className={`flex flex-wrap items-center gap-2 text-xs ${isInventoryDemo() ? 'hidden' : ''}`}>
             <span className="text-slate-500">発注の取り込み {fmt(data.poSyncedAt)}</span>
@@ -1894,7 +1904,9 @@ export function InventoryView({ orders, onNavigate }: { orders: Order[]; onNavig
             </button>
           </div>
         </div>
-        <div className={`flex flex-wrap items-center gap-2 text-xs ${isInventoryDemo() ? 'hidden' : ''}`}>
+        <details className={`text-xs ${isInventoryDemo() ? 'hidden' : ''}`}>
+          <summary className="cursor-pointer text-slate-500">取り込みの設定</summary>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
           <span className="text-slate-500">入荷予定にする発注日</span>
           <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="rounded border border-slate-300 px-2 py-0.5" />
           <span className="text-slate-500">以降</span>
@@ -1906,22 +1918,9 @@ export function InventoryView({ orders, onNavigate }: { orders: Order[]; onNavig
               保存（次の取り込みから反映）
             </button>
           )}
-        </div>
+          </div>
+        </details>
         {error && <ErrorNote message={error} compact />}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-          <div className="flex items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5">
-            <div className="text-[11px] text-amber-800 font-semibold truncate">追跡番号待ち</div>
-            <div className="text-xl font-black text-amber-700 font-mono">{counts.noTracking}</div>
-          </div>
-          <div className="flex items-center justify-between gap-2 rounded-lg border border-violet-200 bg-violet-50 px-3 py-1.5">
-            <div className="text-[11px] text-violet-800 font-semibold truncate">倉庫の承認待ち（到着・キック・持込）</div>
-            <div className="text-xl font-black text-violet-700 font-mono">{counts.waiting}</div>
-          </div>
-          <div className="flex items-center justify-between gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5">
-            <div className="text-[11px] text-rose-800 font-semibold truncate">入荷数の不足</div>
-            <div className="text-xl font-black text-rose-700 font-mono">{counts.shortage}</div>
-          </div>
-        </div>
       </div>
 
       <WarehouseTabs value={wh} onChange={setWh} counts={whCounts} />

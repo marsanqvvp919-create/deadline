@@ -844,7 +844,7 @@ export default function App() {
     {
       id: 'inventory_management',
       group: 'shipping',
-      label: '入荷・在庫（韓国・SG）',
+      label: '入荷・在庫',
       icon: Building,
       badge: null,
     },
