@@ -4593,7 +4593,12 @@ interface InboundLine {
   poQty: number; // 楽楽販売の発注数
   qty: number; // 入荷予定数（社内で直せる）
   qtyEdited?: boolean;
-  receivedQty?: number; // 倉庫で承認した実数
+  receivedQty?: number; // 倉庫で承認した実数（在庫に入れた数＝届いた数−不良）
+  // 検品（倉庫の担当者が入れる。確定まで途中保存できる）
+  arrivedQty?: number; // 届いた数
+  damagedQty?: number; // 不良・破損の数（在庫に入れない）
+  inspect?: 'ok' | 'ng'; // 検品の結果
+  inspectNote?: string;
 }
 interface InboundRec {
   poId: string;
@@ -5192,7 +5197,19 @@ function inboundView(rec: InboundRec, forWarehouse = false) {
     supplierArea: rec.supplierArea,
     orderId: rec.orderId,
     ...(forWarehouse ? {} : { clinicName: rec.clinicName, rakurakuStatus: rec.rakurakuStatus, excluded: !!rec.excluded, cancelled: !!rec.cancelled, warehouseEdited: !!rec.warehouseEdited }),
-    lines: rec.lines.map((l) => ({ key: l.key, productId: l.productId, productName: l.productName, poQty: l.poQty, qty: l.qty, qtyEdited: !!l.qtyEdited, receivedQty: l.receivedQty ?? null })),
+    lines: rec.lines.map((l) => ({
+      key: l.key,
+      productId: l.productId,
+      productName: l.productName,
+      poQty: l.poQty,
+      qty: l.qty,
+      qtyEdited: !!l.qtyEdited,
+      receivedQty: l.receivedQty ?? null,
+      arrivedQty: l.arrivedQty ?? null,
+      damagedQty: l.damagedQty ?? null,
+      inspect: l.inspect || null,
+      inspectNote: l.inspectNote || '',
+    })),
     warehouse: rec.warehouse,
     method: rec.method,
     trackingNos: rec.trackingNos,
@@ -5839,16 +5856,41 @@ app.post('/api/inventory/warehouse/:w', async (req, res) => {
 });
 
 /** 入荷の承認（倉庫の担当者、国内倉庫は社内スタッフ）。届いた実数を在庫に加える。エラーがあれば文言を返す */
-function receiveInbound(rec: InboundRec, lines: any, memo: any, by: StockMove['by']): string | null {
-  const given = new Map<string, number>((Array.isArray(lines) ? lines : []).map((l: any) => [String(l.key), Math.round(Number(l.receivedQty))]));
+/** 検品の入力を明細に入れる（途中保存と確定で共通）。エラーがあれば文言を返す */
+function applyInspection(rec: InboundRec, lines: any): string | null {
+  for (const g of Array.isArray(lines) ? lines : []) {
+    const l = rec.lines.find((x) => x.key === String(g?.key));
+    if (!l) continue;
+    const num = (v: any) => (v === '' || v === null || v === undefined ? undefined : Math.round(Number(v)));
+    const arrived = num(g.arrivedQty);
+    const damaged = num(g.damagedQty);
+    if (arrived !== undefined && (!Number.isFinite(arrived) || arrived < 0)) return `「${l.productName}」の届いた数は0以上にしてください / Arrived qty must be 0 or more`;
+    if (damaged !== undefined && (!Number.isFinite(damaged) || damaged < 0)) return `「${l.productName}」の不良数は0以上にしてください / Damaged qty must be 0 or more`;
+    if (arrived !== undefined && damaged !== undefined && damaged > arrived) return `「${l.productName}」の不良数が届いた数より多いです / Damaged is more than arrived`;
+    if ('arrivedQty' in g) l.arrivedQty = arrived;
+    if ('damagedQty' in g) l.damagedQty = damaged;
+    if ('inspect' in g) l.inspect = g.inspect === 'ok' || g.inspect === 'ng' ? g.inspect : undefined;
+    if ('inspectNote' in g) l.inspectNote = String(g.inspectNote || '').slice(0, 300);
+  }
+  return null;
+}
+/** 入荷の確定（倉庫の担当者、国内倉庫は社内スタッフ）。在庫に入れる数を加える。エラーがあれば文言を返す
+ *  検品つき（届いた数・不良数）なら 在庫に入れる数＝届いた数−不良。従来どおり receivedQty だけでも受け付ける */
+function receiveInbound(rec: InboundRec, lines: any, memo: any, by: StockMove['by'], requireInspection = false): string | null {
+  const list = Array.isArray(lines) ? lines : [];
+  const insErr = applyInspection(rec, list);
+  if (insErr) return insErr;
+  const given = new Map<string, number>(list.filter((l: any) => l && 'receivedQty' in l).map((l: any) => [String(l.key), Math.round(Number(l.receivedQty))]));
   for (const l of rec.lines) {
+    if (l.arrivedQty !== undefined) given.set(l.key, l.arrivedQty - (l.damagedQty || 0));
     const q = given.get(l.key);
     if (q === undefined || !Number.isFinite(q) || q < 0) return `「${l.productName}」の入荷数を入れてください / Enter the received quantity`;
+    if (requireInspection && !l.inspect) return `「${l.productName}」の検品が終わっていません / Please inspect every item`;
   }
   let shortage = false;
   for (const l of rec.lines) {
     l.receivedQty = given.get(l.key)!;
-    if (l.receivedQty < l.qty) shortage = true;
+    if (l.receivedQty < l.qty || (l.damagedQty || 0) > 0 || l.inspect === 'ng') shortage = true;
     if (l.receivedQty > 0) addStock(rec.warehouse, l.productId, l.productName, l.receivedQty, 'inbound', by, rec.poId, rec.supplierName);
   }
   rec.received = true;
@@ -8118,10 +8160,23 @@ app.post('/api/warehouse/inbound/:poId/receive', async (req, res) => {
   const rec = inv().inbound[req.params.poId];
   if (!rec || rec.warehouse !== w || rec.excluded || rec.cancelled) return res.status(404).json({ error: '入荷予定が見つかりません / Not found' });
   if (rec.received) return res.status(400).json({ error: 'すでに承認済みです / Already received' });
-  const err = receiveInbound(rec, req.body?.lines, req.body?.memo, 'warehouse');
+  const err = receiveInbound(rec, req.body?.lines, req.body?.memo, 'warehouse', true);
   if (err) return res.status(400).json({ error: err });
   await saveInventory();
   res.json({ inbound: inboundView(rec, true), stock: stockList(w) });
+});
+// 検品の途中保存（届いた数・不良数・OK/NG・メモ）。在庫はまだ変えない
+app.post('/api/warehouse/inbound/:poId/inspect', async (req, res) => {
+  const w = await warehouseFromRequest(req);
+  if (!w) return res.status(401).json({ error: 'login_required' });
+  const rec = inv().inbound[req.params.poId];
+  if (!rec || rec.warehouse !== w || rec.excluded || rec.cancelled) return res.status(404).json({ error: '入荷予定が見つかりません / Not found' });
+  if (rec.received) return res.status(400).json({ error: 'すでに確定済みです / Already received' });
+  const err = applyInspection(rec, req.body?.lines);
+  if (err) return res.status(400).json({ error: err });
+  rec.updatedAt = new Date().toISOString();
+  await saveInventory();
+  res.json({ inbound: inboundView(rec, true) });
 });
 // 発行済みインボイス（倉庫の担当者が印刷して荷物に入れる）
 app.get('/api/warehouse/invoice/:id', async (req, res) => {

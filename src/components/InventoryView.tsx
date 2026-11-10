@@ -29,6 +29,10 @@ interface InboundLine {
   qty: number;
   qtyEdited: boolean;
   receivedQty: number | null;
+  arrivedQty?: number | null;
+  damagedQty?: number | null;
+  inspect?: 'ok' | 'ng' | null;
+  inspectNote?: string;
 }
 interface Inbound {
   poId: string;
@@ -346,6 +350,19 @@ function InboundCard({ rec, onSaved }: { rec: Inbound; onSaved: () => void }) {
           ))}
         </tbody>
       </table>
+      {rec.lines.some((l) => l.inspect === 'ng' || (l.damagedQty || 0) > 0 || l.inspectNote) && (
+        <div className="rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-[11px] text-rose-800 space-y-0.5">
+          <div className="font-bold">倉庫の検品</div>
+          {rec.lines
+            .filter((l) => l.inspect === 'ng' || (l.damagedQty || 0) > 0 || l.inspectNote)
+            .map((l) => (
+              <div key={l.key}>
+                {l.productName}：{l.inspect === 'ng' ? 'NG' : 'OK'}・届いた {l.arrivedQty ?? '—'}・不良 {l.damagedQty || 0}
+                {l.inspectNote && `・${l.inspectNote}`}
+              </div>
+            ))}
+        </div>
+      )}
       {qtyDirty && !locked && (
         <button disabled={busy} onClick={() => save({ lines: rec.lines.map((l) => ({ key: l.key, qty: Number(qty[l.key]) })) })} className="rounded-md bg-slate-900 text-white px-3 py-1 text-xs font-bold">
           数量を保存
