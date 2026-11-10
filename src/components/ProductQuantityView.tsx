@@ -338,44 +338,57 @@ export function ProductQuantityView({
               </button>
             )}
           </div>
-          <div className="divide-y divide-slate-100">
+          {/* 大きな分類：横に並べる */}
+          <div className="flex flex-wrap gap-2">
             {genreGroups.map((grp) => {
               const names = grp.items.map((g) => g.genre);
               const allOn = names.every((g) => picked.has(g));
               const someOn = !allOn && names.some((g) => picked.has(g));
               return (
-                <div key={grp.label} className="flex flex-wrap items-center gap-1.5 py-1.5">
-                  <button
-                    onClick={() => toggleGenres(names)}
-                    title="この分類をまとめて選ぶ"
-                    className={`w-52 shrink-0 text-left rounded-lg border px-2.5 py-1.5 transition ${allOn ? 'border-slate-900 bg-slate-900 text-white' : someOn ? 'border-slate-500 bg-slate-100' : 'border-slate-200 bg-white hover:bg-slate-50'}`}
-                  >
-                    <div className="text-[13px] font-bold">{grp.label}</div>
-                    <div className={`text-[11px] font-mono whitespace-nowrap ${allOn ? "text-slate-300" : "text-slate-500"}`}>
-                      未発送 {n(grp.unshipped)}・売 {n(grp.sold)}
-                    </div>
-                  </button>
-                  {grp.items.length > 1
-                    ? grp.items.map((g) => {
-                        const on = picked.has(g.genre);
-                        return (
-                          <button
-                            key={g.genre}
-                            onClick={() => toggleGenres([g.genre])}
-                            className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[13px] transition ${on ? 'border-indigo-700 bg-indigo-700 text-white' : 'border-slate-200 bg-white hover:bg-slate-50 text-slate-700'}`}
-                          >
-                            {on && <span aria-hidden>✓</span>}
-                            <span className="font-semibold">{g.genre}</span>
-                            <span className={`text-[11px] ${on ? 'text-indigo-200' : 'text-slate-400'}`}>{g.count}</span>
-                            {g.unordered > 0 && <span className={`text-[11px] font-mono ${on ? 'text-amber-200' : 'text-amber-600'}`}>未発注{n(g.unordered)}</span>}
-                          </button>
-                        );
-                      })
-                    : <span className="text-[11px] text-slate-400">{grp.items[0].count}製剤{grp.items[0].unordered > 0 ? `・未発注 ${n(grp.items[0].unordered)}` : ''}</span>}
-                </div>
+                <button
+                  key={grp.label}
+                  onClick={() => toggleGenres(names)}
+                  className={`text-left rounded-xl border px-3 py-2 transition ${allOn ? 'border-slate-900 bg-slate-900 text-white' : someOn ? 'border-slate-500 bg-slate-100' : 'border-slate-200 bg-white hover:bg-slate-50'}`}
+                >
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-[13px] font-bold">{grp.label}</span>
+                    <span className={`text-[11px] ${allOn ? 'text-slate-300' : 'text-slate-400'}`}>{grp.items.reduce((t, g) => t + g.count, 0)}製剤</span>
+                  </div>
+                  <div className="mt-1 flex gap-3 text-[11px] font-mono whitespace-nowrap">
+                    <span className={allOn ? 'text-rose-300' : 'text-rose-600'}>未発送 {n(grp.unshipped)}</span>
+                    <span className={allOn ? 'text-emerald-300' : 'text-emerald-700'}>売 {n(grp.sold)}</span>
+                  </div>
+                </button>
               );
             })}
           </div>
+
+          {/* 選んだ分類の中のジャンル：1つずつ外したり足したりできる */}
+          {genreGroups.some((grp) => grp.items.length > 1 && grp.items.some((g) => picked.has(g.genre))) && (
+            <div className="mt-3 rounded-xl bg-slate-50 border border-slate-200 px-3 py-2">
+              <div className="text-[11px] font-bold text-slate-500 mb-1.5">選んだ分類の中のジャンル（押すと外す・足す）</div>
+              <div className="flex flex-wrap gap-1.5">
+                {genreGroups
+                  .filter((grp) => grp.items.length > 1 && grp.items.some((g) => picked.has(g.genre)))
+                  .flatMap((grp) => grp.items)
+                  .map((g) => {
+                    const on = picked.has(g.genre);
+                    return (
+                      <button
+                        key={g.genre}
+                        onClick={() => toggleGenres([g.genre])}
+                        className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[13px] transition ${on ? 'border-indigo-700 bg-indigo-700 text-white' : 'border-slate-300 bg-white hover:bg-slate-50 text-slate-500'}`}
+                      >
+                        {on && <span aria-hidden>✓</span>}
+                        <span className="font-semibold">{g.genre}</span>
+                        <span className={`text-[11px] ${on ? 'text-indigo-200' : 'text-slate-400'}`}>{g.count}</span>
+                        {g.unordered > 0 && <span className={`text-[11px] font-mono ${on ? 'text-amber-200' : 'text-amber-600'}`}>未発注{n(g.unordered)}</span>}
+                      </button>
+                    );
+                  })}
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="overflow-x-auto">
