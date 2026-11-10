@@ -461,7 +461,63 @@ function DomesticReceive({ rec, onSaved }: { rec: Inbound; onSaved: () => void }
   );
 }
 
-function StockTable({ warehouse, rows, onSaved, products }: { warehouse: WarehouseId; rows: StockRow[]; onSaved: () => void; products: { productId: string; productName: string }[] }) {
+/** この倉庫に向かっている発注（直近の発注から）：仕入先・商品・数量を短く */
+function IncomingList({ warehouse, inbound, onOpen }: { warehouse: WarehouseId; inbound: Inbound[]; onOpen: () => void }) {
+  const [all, setAll] = useState(false);
+  const list = inbound
+    .filter((r) => r.warehouse === warehouse && !r.received && !r.cancelled && !r.excluded)
+    .sort((a, b) => (b.poDate || '').localeCompare(a.poDate || '') || b.poId.localeCompare(a.poId));
+  const shown = all ? list : list.slice(0, 5);
+  const qty = list.reduce((n, r) => n + r.lines.reduce((m, l) => m + l.qty, 0), 0);
+  const tag = (r: Inbound) =>
+    ['arrived', 'kick', 'handcarry'].includes(r.state)
+      ? { t: '到着', c: 'bg-violet-100 text-violet-800' }
+      : ['tracking', 'in_transit', 'vendor_shipped'].includes(r.state)
+        ? { t: '発送済', c: 'bg-sky-100 text-sky-800' }
+        : { t: '未発送', c: 'bg-slate-100 text-slate-600' };
+  return (
+    <div className="border-b border-slate-100 bg-indigo-50/40 px-3 py-2">
+      <div className="flex items-center justify-between gap-2 mb-1">
+        <div className="text-xs font-bold text-slate-800">
+          入荷予定（直近の発注）<span className="ml-1 font-normal text-slate-500">{list.length}件・{qty}点</span>
+        </div>
+        <button onClick={onOpen} className="text-[11px] font-bold text-indigo-700 hover:underline">
+          入荷予定を開く
+        </button>
+      </div>
+      {list.length === 0 ? (
+        <div className="text-[11px] text-slate-400 py-1">この倉庫への入荷予定はありません</div>
+      ) : (
+        <div className="space-y-1">
+          {shown.map((r) => {
+            const tg = tag(r);
+            const total = r.lines.reduce((m, l) => m + l.qty, 0);
+            return (
+              <div key={r.poId} className="rounded-lg bg-white border border-slate-200 px-2 py-1.5">
+                <div className="flex items-center gap-1.5">
+                  <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold ${tg.c}`}>{tg.t}</span>
+                  <span className="truncate text-xs font-bold text-slate-900">{r.supplierName}</span>
+                  <span className="ml-auto shrink-0 text-[11px] text-slate-500">{(r.poDate || '').slice(5)}</span>
+                  <span className="shrink-0 font-mono text-xs font-bold text-slate-900">{total}点</span>
+                </div>
+                <div className="mt-0.5 truncate text-[11px] text-slate-600" title={r.lines.map((l) => `${l.productName} ×${l.qty}`).join('、')}>
+                  {r.lines.map((l) => `${l.productName} ×${l.qty}`).join('、')}
+                </div>
+              </div>
+            );
+          })}
+          {list.length > 5 && (
+            <button onClick={() => setAll(!all)} className="text-[11px] font-bold text-indigo-700 hover:underline">
+              {all ? '5件だけ表示' : `ほか${list.length - 5}件を表示`}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StockTable({ warehouse, rows, onSaved, products, inbound, onOpenInbound }: { warehouse: WarehouseId; rows: StockRow[]; onSaved: () => void; products: { productId: string; productName: string }[]; inbound?: Inbound[]; onOpenInbound?: () => void }) {
   const [q, setQ] = useState('');
   const [edit, setEdit] = useState<{ key: string; productId: string; productName: string; qty: string } | null>(null);
   const [error, setError] = useState('');
@@ -528,15 +584,16 @@ function StockTable({ warehouse, rows, onSaved, products }: { warehouse: Warehou
           {error && <span className="text-rose-600">{error}</span>}
         </div>
       )}
+      {inbound && <IncomingList warehouse={warehouse} inbound={inbound} onOpen={onOpenInbound || (() => {})} />}
       <div className="max-h-[480px] overflow-auto">
         <table className="w-full text-xs">
           <thead className="bg-slate-50 text-slate-500 sticky top-0">
             <tr>
               <th className="text-left px-3 py-2 font-semibold">商品</th>
-              <th className="text-right px-3 py-2 font-semibold w-16">在庫</th>
-              <th className="text-right px-3 py-2 font-semibold w-16">引当済</th>
-              <th className="text-right px-3 py-2 font-semibold w-16">引当可</th>
-              <th className="w-16" />
+              <th className="text-right px-1.5 py-2 font-semibold w-12">在庫</th>
+              <th className="text-right px-1.5 py-2 font-semibold w-12">引当済</th>
+              <th className="text-right px-1.5 py-2 font-semibold w-12">引当可</th>
+              <th className="w-10" />
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -550,11 +607,11 @@ function StockTable({ warehouse, rows, onSaved, products }: { warehouse: Warehou
             {shown.map((r) => (
               <tr key={r.key} className={r.qty <= 0 ? 'text-slate-400' : ''}>
                 <td className="px-3 py-1.5 font-semibold">{r.productName}</td>
-                <td className="px-3 py-1.5 text-right font-mono font-bold">{r.qty}</td>
-                <td className="px-3 py-1.5 text-right font-mono text-amber-700">{r.reserved || ''}</td>
-                <td className="px-3 py-1.5 text-right font-mono text-emerald-700">{r.available}</td>
-                <td className="px-3 py-1.5 text-right">
-                  <button onClick={() => setEdit({ key: r.key, productId: r.productId, productName: r.productName, qty: String(r.qty) })} className="text-indigo-700 font-bold hover:underline">
+                <td className="px-1.5 py-1.5 text-right font-mono font-bold">{r.qty}</td>
+                <td className="px-1.5 py-1.5 text-right font-mono text-amber-700">{r.reserved || ''}</td>
+                <td className="px-1.5 py-1.5 text-right font-mono text-emerald-700">{r.available}</td>
+                <td className="px-2 py-1.5 text-right">
+                  <button onClick={() => setEdit({ key: r.key, productId: r.productId, productName: r.productName, qty: String(r.qty) })} className="whitespace-nowrap text-indigo-700 font-bold hover:underline">
                     修正
                   </button>
                 </td>
@@ -2204,7 +2261,7 @@ export function InventoryView({ orders, onNavigate }: { orders: Order[]; onNavig
           {(wh === 'all' || wh === 'korea') && <StockSourcePanel sourceId="korea-site" title="韓国倉庫サイト" products={products} onSynced={load} />}
           <div className={`grid gap-3 ${wh === 'all' ? 'xl:grid-cols-3' : ''}`}>
             {WH_IDS.filter((w) => wh === 'all' || w === wh).map((w) => (
-              <StockTable key={w} warehouse={w} rows={data.stock[w] || []} onSaved={load} products={products} />
+              <StockTable key={w} warehouse={w} rows={data.stock[w] || []} onSaved={load} products={products} inbound={data.inbound} onOpenInbound={() => setTab('inbound')} />
             ))}
           </div>
         </div>
