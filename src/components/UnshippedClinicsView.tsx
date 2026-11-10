@@ -454,14 +454,8 @@ ${linesDetail}
       )}
 
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200/80 pb-5">
-        <div className="space-y-1.5">
-          <div className="flex items-center gap-3 flex-wrap">
-            <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-indigo-100 text-indigo-800 border border-indigo-200">
-              現在発注あり・出荷未完了
-            </span>
-          </div>
-        </div>
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div />
 
         {/* Global Action Buttons */}
         <div className="flex items-center gap-2.5 flex-wrap">
@@ -482,139 +476,7 @@ ${linesDetail}
         </div>
       </div>
 
-      {/* KPI Summary Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Card 1: 未出荷クリニック総数 */}
-        <div
-          onClick={() => setActiveFilter('all')}
-          className={`p-4 rounded-2xl border transition-all cursor-pointer shadow-2xs ${
-            activeFilter === 'all'
-              ? 'bg-indigo-50/70 border-indigo-400 ring-2 ring-indigo-300'
-              : 'bg-white border-slate-200 hover:border-indigo-300'
-          }`}
-        >
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-indigo-900 flex items-center gap-1.5">
-              <Building2 className="w-4 h-4 text-indigo-600" />
-              未出荷クリニック数
-            </span>
-            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-100 text-indigo-800">
-              全体
-            </span>
-          </div>
-          <div className="mt-2.5 flex items-baseline gap-2">
-            <span className="text-2xl sm:text-3xl font-extrabold text-indigo-950 font-mono">
-              {stats.totalClinics}
-            </span>
-            <span className="text-xs font-semibold text-indigo-700">施設</span>
-          </div>
-          <div className="mt-2 pt-2 border-t border-indigo-100 text-[11px] text-indigo-800 flex items-center justify-between">
-            <span>発注残点数:</span>
-            <b className="font-mono">{stats.totalLines}明細 ({stats.totalQty}点)</b>
-          </div>
-        </div>
-
-        {/* Card 2: 納期遅延クリニック */}
-        <div
-          onClick={() => setActiveFilter('has_overdue')}
-          className={`p-4 rounded-2xl border transition-all cursor-pointer shadow-2xs ${
-            activeFilter === 'has_overdue'
-              ? 'bg-rose-50 border-rose-400 ring-2 ring-rose-300'
-              : 'bg-white border-slate-200 hover:border-rose-300'
-          }`}
-        >
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-rose-900 flex items-center gap-1.5">
-              <AlertTriangle className="w-4 h-4 text-rose-600" />
-              納期遅延クリニック
-            </span>
-            {stats.overdueClinicsCount > 0 && (
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-600 text-white animate-pulse">
-                要対応
-              </span>
-            )}
-          </div>
-          <div className="mt-2.5 flex items-baseline gap-2">
-            <span className="text-2xl sm:text-3xl font-extrabold text-rose-700 font-mono">
-              {stats.overdueClinicsCount}
-            </span>
-            <span className="text-xs font-semibold text-rose-800">施設 (最長納期超過)</span>
-          </div>
-          <div className="mt-2 pt-2 border-t border-rose-200/60 text-[11px] text-rose-700 flex items-center justify-between">
-            <span>うち7日以上大幅遅延:</span>
-            <b className="font-mono text-rose-900">{stats.severeClinicsCount} 施設</b>
-          </div>
-        </div>
-
-        {/* Card 3: 未発注を含むクリニック */}
-        <div
-          onClick={() => setActiveFilter('has_unordered')}
-          className={`p-4 rounded-2xl border transition-all cursor-pointer shadow-2xs ${
-            activeFilter === 'has_unordered'
-              ? 'bg-amber-50 border-amber-400 ring-2 ring-amber-300'
-              : 'bg-white border-slate-200 hover:border-amber-300'
-          }`}
-        >
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-amber-900 flex items-center gap-1.5">
-              <Package className="w-4 h-4 text-amber-600" />
-              未発注品あり
-            </span>
-            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">
-              仕入先手配前
-            </span>
-          </div>
-          <div className="mt-2.5 flex items-baseline gap-2">
-            <span className="text-2xl sm:text-3xl font-extrabold text-amber-900 font-mono">
-              {stats.unorderedClinicsCount}
-            </span>
-            <span className="text-xs font-semibold text-amber-800">施設</span>
-          </div>
-          <div className="mt-2 pt-2 border-t border-amber-200/60 text-[11px] text-amber-800 flex items-center justify-between">
-            <span>発注管理へ連携可能:</span>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                if (onNavigateToTab) onNavigateToTab('procurement');
-              }}
-              className="text-amber-700 hover:underline font-bold flex items-center gap-1"
-            >
-              <span>発注画面へ</span>
-              <ArrowRight className="w-3 h-3" />
-            </button>
-          </div>
-        </div>
-
-        {/* Card 4: 入荷待ちのみのクリニック */}
-        <div
-          onClick={() => setActiveFilter('waiting_arrival')}
-          className={`p-4 rounded-2xl border transition-all cursor-pointer shadow-2xs ${
-            activeFilter === 'waiting_arrival'
-              ? 'bg-blue-50 border-blue-400 ring-2 ring-blue-300'
-              : 'bg-white border-slate-200 hover:border-blue-300'
-          }`}
-        >
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-blue-900 flex items-center gap-1.5">
-              <Truck className="w-4 h-4 text-blue-600" />
-              発注済・入荷待ち
-            </span>
-            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800">
-              仕入先対応中
-            </span>
-          </div>
-          <div className="mt-2.5 flex items-baseline gap-2">
-            <span className="text-2xl sm:text-3xl font-extrabold text-blue-900 font-mono">
-              {stats.waitingOnlyClinicsCount}
-            </span>
-            <span className="text-xs font-semibold text-blue-700">施設 (全品発注済)</span>
-          </div>
-          <p className="mt-2 pt-2 border-t border-blue-100 text-[11px] text-blue-600 truncate">
-            メーカーからの入荷待ち・納品検品待ち
-          </p>
-        </div>
-      </div>
-
+      {/* 件数は下の絞り込みボタンに出ているので、カードは出さない */}
       {/* Filter and Search Bar */}
       <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs space-y-3.5">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
