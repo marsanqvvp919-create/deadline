@@ -225,9 +225,14 @@ export function AwbDialog({ instructionId, onClose, onDone, embedded }: { instru
               送り状 {done.awbCarrier || ''} {done.awbNo} を発行しました
             </div>
             {done.awbLabel && (
-              <a href={`/api/awb/label/${instructionId}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded border border-indigo-300 bg-indigo-50 px-2 py-1 text-[11px] font-bold text-indigo-800">
-                送り状のラベルPDF
-              </a>
+              <span className="inline-flex gap-1.5">
+                <a href={`/api/awb/label/${instructionId}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded border border-indigo-300 bg-indigo-50 px-2 py-1 text-[11px] font-bold text-indigo-800">
+                  送り状のラベルPDFを開く
+                </a>
+                <a href={`/api/awb/label/${instructionId}?download=1`} download className="inline-flex items-center gap-1 rounded border border-indigo-300 bg-indigo-50 px-2 py-1 text-[11px] font-bold text-indigo-800">
+                  ダウンロード
+                </a>
+              </span>
             )}
           </div>
         )}

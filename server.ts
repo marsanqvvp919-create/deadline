@@ -7721,16 +7721,18 @@ app.post('/api/awb/manual/:siId', async (req, res) => {
   await saveInventory();
   res.json({ instruction: instructionView(si) });
 });
-async function sendAwbLabel(si: ShipInstruction | undefined, res: express.Response) {
+async function sendAwbLabel(si: ShipInstruction | undefined, res: express.Response, download = false) {
   if (!si?.awbLabel || !CACHE_BUCKET) return res.status(404).json({ error: 'ラベルがありません / No label' });
   const [buf] = await new Storage().bucket(CACHE_BUCKET).file(awbLabelObject(si.id)).download();
   res.setHeader('Content-Type', 'application/pdf');
-  res.setHeader('Content-Disposition', `inline; filename="${si.awbNo || si.id}_label.pdf"`);
+  // ?download=1 なら保存（ファイル名：AWB_運送会社_番号_出荷指示.pdf）、無ければブラウザで開く
+  const fname = `AWB_${si.awbCarrier || ''}_${si.awbNo || ''}_${si.id}.pdf`.replace(/[^\w.-]+/g, '_');
+  res.setHeader('Content-Disposition', `${download ? 'attachment' : 'inline'}; filename="${fname}"`);
   res.send(buf);
 }
 app.get('/api/awb/label/:siId', async (req, res) => {
   await loadInventory();
-  await sendAwbLabel(inv().instructions.find((x) => x.id === req.params.siId), res);
+  await sendAwbLabel(inv().instructions.find((x) => x.id === req.params.siId), res, req.query.download === '1');
 });
 
 // 手元の動作確認用：発注管理のCSVを渡して入荷予定に取り込む（本番では使えない）

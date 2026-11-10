@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { demoHeaders, isInventoryDemo, setInventoryDemo } from '../utils/demo';
-import { Boxes, CheckCircle2, Copy, Check, ExternalLink, KeyRound, PackageCheck, RefreshCw, Search, Truck, Upload, X, Ban, RotateCcw, History, Warehouse, ClipboardList, Send } from 'lucide-react';
+import { Boxes, CheckCircle2, Copy, Check, ExternalLink, KeyRound, PackageCheck, RefreshCw, Search, Truck, Upload, Download, X, Ban, RotateCcw, History, Warehouse, ClipboardList, Send } from 'lucide-react';
 import { PasswordChooser, passwordOk } from './ClinicPortalAccess';
 import { Order } from '../types';
 import { InvoicePdfButtons } from '../invoice/InvoiceDialog';
@@ -1059,9 +1059,15 @@ function InstructionBoard({ instructions, onSaved }: { instructions: Instruction
                         </div>
                       )}
                       {i.awbLabel && (
-                        <a href={`/api/awb/label/${i.id}`} target="_blank" rel="noreferrer" className="block text-indigo-700 font-bold">
-                          送り状のラベルPDF
-                        </a>
+                        <div className="space-y-1">
+                          <div className="text-[10px] text-slate-500">送り状（AWB）{i.awbNo}</div>
+                          <a href={`/api/awb/label/${i.id}`} target="_blank" rel="noreferrer" className="block text-indigo-700 font-bold">
+                            ラベルPDFを開く
+                          </a>
+                          <a href={`/api/awb/label/${i.id}?download=1`} download className="block text-indigo-700 font-bold">
+                            ラベルPDFをダウンロード
+                          </a>
+                        </div>
                       )}
                       {i.status === 'open' && intl && i.invoiceNo && i.awbNo && (
                         <button onClick={() => setShip({ id: i.id, carrier: i.awbCarrier || '', tracking: i.awbNo || '' })} className="block text-left text-slate-700">
@@ -1103,6 +1109,17 @@ function InstructionBoard({ instructions, onSaved }: { instructions: Instruction
                 {intl
                   ? chip(i.awbNo ? 'done' : i.invoiceNo ? 'action' : 'na', '送り状（AWB）', i.awbNo ? <span className="font-mono">{`${i.awbCarrier || ''} ${i.awbNo}`}</span> : i.invoiceNo ? '未作成' : 'インボイスの後')
                   : chip('na', '送り状（AWB）', '国内のため不要')}
+                {intl && i.awbLabel && (
+                  <a
+                    href={`/api/awb/label/${i.id}?download=1`}
+                    download
+                    title="DHL・FedExで発行した送り状（AWB）のラベルPDFを保存します"
+                    className="col-span-2 sm:col-span-5 sm:order-last inline-flex w-fit items-center gap-1 rounded-lg border border-indigo-300 bg-indigo-50 px-2.5 py-1 text-[11px] font-bold text-indigo-800 hover:bg-indigo-100"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    送り状（AWB）のPDFをダウンロード
+                  </a>
+                )}
                 {chip(
                   i.status === 'shipped' ? 'done' : !intl || (i.invoiceNo && i.awbNo) ? (intl ? 'waiting' : 'action') : 'na',
                   '出荷',
