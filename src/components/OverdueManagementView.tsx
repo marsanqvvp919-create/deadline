@@ -70,7 +70,7 @@ interface OverdueManagementViewProps {
   onRetry?: () => void;
 }
 
-// 納期間近として拾う日数（10日先まで。5日以内は楽楽販売「②注意」と同じ）
+// 納期間近として拾う日数（10日先まで）
 const NEAR_DAYS_WIDE = 10;
 
 export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
@@ -83,10 +83,8 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
   lastSuccessTime = null,
   onRetry,
 }) => {
-  // Scope: 'overdue' (納期超過のみ - isLineDelayed統一) | 'approaching' (納期間近（5日以内） - 別指標として分離)
+  // Scope: 'overdue' (納期超過のみ - isLineDelayed統一) | 'approaching' (納期間近（10日以内） - 別指標として分離)
   const [activeScope, setActiveScope] = useUrlState<'overdue' | 'approaching'>('scope', 'overdue');
-  // 納期間近は10日先まで拾い、「5日以内」「10日以内」で絞り込む
-  const [nearWindow, setNearWindow] = useUrlState<'10' | '5'>('near', '10');
 
   // View mode: 'orders' (伝票・明細別) | 'clinics' (クリニック別)
   const [viewMode, setViewMode] = useUrlState<'orders' | 'clinics'>('view', 'orders');
@@ -165,14 +163,13 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
     setClinicNote(clinicName, note);
   };
 
-  // 1. Calculate all overdue orders (isLineDelayed統一) and approaching orders (5日以内分離)
-  const { currentOrders, currentClinics, delayCounts, approachingCounts, approaching5Counts, kpis } = useMemo(() => {
+  // 1. Calculate all overdue orders (isLineDelayed統一) and approaching orders (10日以内・分離)
+  const { currentOrders, currentClinics, delayCounts, approachingCounts, kpis } = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
     const delayCounts = getDelayCounts(orders);
     const approachingCounts = getApproachingCounts(orders, undefined, NEAR_DAYS_WIDE);
-    const approaching5Counts = getApproachingCounts(orders);
 
     const overdueList: OverdueOrderInfo[] = [];
     const approachingList: OverdueOrderInfo[] = [];
@@ -246,7 +243,7 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
         cln.totalOverdueQty += totalOverdueQty;
       }
 
-      // 2. 納期間近明細（5日以内・納期超過とは合算しない）
+      // 2. 納期間近明細（10日以内・納期超過とは合算しない）
       const approachingLines = ord.lines.filter((l) => isLineApproaching(l, ord, undefined, NEAR_DAYS_WIDE));
       if (approachingLines.length > 0 && !orderIsDelayed) {
         let minDaysRemaining = 999;
@@ -357,7 +354,6 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
       currentClinics: activeClinicsList,
       delayCounts,
       approachingCounts,
-      approaching5Counts,
       kpis: {
         totalOrders,
         totalLines,
@@ -380,8 +376,6 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
       // 営業担当
       if (selectedRep !== 'all' && item.salesRep !== selectedRep) return false;
 
-      // 納期間近：5日以内だけに絞る
-      if (activeScope === 'approaching' && nearWindow === '5' && item.maxDaysOver < -5) return false;
       // 超過日数 / 納期間近フィルター
       if (selectedDaysFilter === 'overdue' && item.maxDaysOver <= 0) return false;
       if (selectedDaysFilter === 'nearDue' && (item.maxDaysOver > 0 || item.maxDaysOver < -10)) return false;
@@ -410,7 +404,7 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
 
       return true;
     });
-  }, [currentOrders, selectedRep, selectedDaysFilter, selectedCauseFilter, selectedStatusFilter, searchQuery, activeScope, nearWindow]);
+  }, [currentOrders, selectedRep, selectedDaysFilter, selectedCauseFilter, selectedStatusFilter, searchQuery, activeScope]);
 
   // Filtered list of clinics
   const filteredOverdueClinics = useMemo(() => {
@@ -418,8 +412,6 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
       // 営業担当
       if (selectedRep !== 'all' && clinic.salesRep !== selectedRep) return false;
 
-      // 納期間近：5日以内の伝票があるクリニックだけ
-      if (activeScope === 'approaching' && nearWindow === '5' && !clinic.orders.some((o) => o.maxDaysOver >= -5)) return false;
       // 超過日数
       if (selectedDaysFilter === '30' && clinic.maxDaysOver < 30) return false;
       if (selectedDaysFilter === '14' && clinic.maxDaysOver < 14) return false;
@@ -439,7 +431,7 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
 
       return true;
     });
-  }, [currentClinics, selectedRep, selectedDaysFilter, searchQuery, activeScope, nearWindow]);
+  }, [currentClinics, selectedRep, selectedDaysFilter, searchQuery, activeScope]);
 
   // List of sales reps for dropdown
   const repList = useMemo(() => {
@@ -662,23 +654,6 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
                     <span>納期間近・10日以内（{formatDelayString(approachingCounts)}）</span>
                   </button>
                 </div>
-                {activeScope === 'approaching' && (
-                  <div className="flex items-center gap-1.5 p-1 bg-amber-50 border border-amber-200 rounded-xl">
-                    {([
-                      ['10', `10日以内（${formatDelayString(approachingCounts)}）`],
-                      ['5', `5日以内（${formatDelayString(approaching5Counts)}）`],
-                    ] as const).map(([k, label]) => (
-                      <button
-                        key={k}
-                        type="button"
-                        onClick={() => setNearWindow(k)}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-bold ${nearWindow === k ? 'bg-amber-600 text-white' : 'text-amber-800 hover:bg-amber-100'}`}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                )}
           </div>
           {/* Action buttons */}
           <div className="flex items-center gap-2 flex-wrap">
@@ -900,7 +875,7 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
                       lastSuccessTime={lastSuccessTime}
                       onRetry={onRetry}
                       colSpan={8}
-                      emptyMessage={activeScope === 'overdue' ? '納期超過している伝票はありません' : `納期間近（${nearWindow}日以内）の伝票はありません`}
+                      emptyMessage={activeScope === 'overdue' ? '納期超過している伝票はありません' : `納期間近（${NEAR_DAYS_WIDE}日以内）の伝票はありません`}
                     />
                   ) : (
                     filteredOverdueOrders.map((item, idx) => {
