@@ -214,92 +214,43 @@ export const CoolMissingView: React.FC<CoolMissingViewProps> = ({
 
   return (
     <div className="space-y-6 animate-in fade-in duration-150">
-      {/* Header Banner */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="flex items-start gap-4">
-            <div>
-              <div className="flex items-center gap-2.5 flex-wrap">
-                <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-200 font-mono">
-                  漏れ件数: {coolMissingShipments.length} 件
-                </span>
-              </div>
-              {/* ユーザー指定の1行説明文 */}
-              <p className="text-xs text-amber-800 mt-2 font-medium bg-amber-50 border border-amber-200 px-3 py-1.5 rounded-xl">
-                ※ 漏れ件数（{coolMissingShipments.length}件）：出荷管理データのうち、クール申請・委任状・伝票のいずれかが「未」となっている出荷の件数です。更新は楽楽販売にて行ってください。
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <a
-              href={rakurakuUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="px-3.5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm"
-            >
-              <ExternalLink className="w-4 h-4" /> 楽楽販売で開く
-            </a>
-            <button
-              onClick={handleExportCsv}
-              className="px-3.5 py-2.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm"
-            >
-              <Download className="w-4 h-4" /> CSV出力
-            </button>
-          </div>
-        </div>
-
-        {/* KPIs (実データに基づく内訳) */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-6 mt-6 border-t border-slate-100">
-          <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
-            <span className="text-xs text-amber-700 block mb-1">クール申請「未」</span>
-            <span className="text-2xl font-extrabold font-mono text-amber-600">{coolAppMissingCount}</span>
-            <span className="text-[10px] text-slate-500 block mt-0.5">航空会社クール申請未手配</span>
-          </div>
-
-          <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
-            <span className="text-xs text-rose-700 block mb-1">通関委任状「未」</span>
-            <span className="text-2xl font-extrabold font-mono text-rose-600">{poaMissingCount}</span>
-            <span className="text-[10px] text-slate-500 block mt-0.5">通関委任状未受領</span>
-          </div>
-
-          <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
-            <span className="text-xs text-amber-800 block mb-1">伝票ステータス「未」</span>
-            <span className="text-2xl font-extrabold font-mono text-amber-700">{slipMissingCount}</span>
-            <span className="text-[10px] text-slate-500 block mt-0.5">出荷伝票未作成</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Search Bar */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs flex items-center justify-between gap-3">
-        <div className="relative w-full sm:w-80">
+      {/* 件数はタブに出ているので、ここは内訳・検索・出力だけを1段にまとめる */}
+      <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs flex flex-wrap items-center gap-3">
+        <div className="relative w-full sm:w-72">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
           <input autoComplete="off"
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="出荷ID、受注ID、クリニック名、出荷番号で検索..."
+            placeholder="出荷ID・受注ID・クリニック名で探す"
             className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-amber-500 font-medium"
           />
         </div>
-        <span className="text-xs font-mono text-slate-500">
-          該当: {coolMissingShipments.length} 件
-        </span>
+        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-600" title="クール申請・委任状・伝票のどれかが「未」の出荷です。直すのは楽楽販売で行います">
+          <span>クール申請が未 <b className="font-mono text-amber-700">{coolAppMissingCount}</b></span>
+          <span>委任状が未 <b className="font-mono text-rose-600">{poaMissingCount}</b></span>
+          <span>伝票が未 <b className="font-mono text-amber-700">{slipMissingCount}</b></span>
+        </div>
+        <div className="flex items-center gap-2 ml-auto">
+          <a
+            href={rakurakuUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="px-3 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5"
+          >
+            <ExternalLink className="w-4 h-4" /> 楽楽販売で開く
+          </a>
+          <button
+            onClick={handleExportCsv}
+            className="px-3 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+          >
+            <Download className="w-4 h-4" /> CSV
+          </button>
+        </div>
       </div>
 
       {/* Main Table */}
       <div className="bg-white border border-slate-200 rounded-2xl shadow-xs overflow-hidden">
-        <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
-          <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-            <Thermometer className="w-4 h-4 text-amber-600" />
-            クール手配漏れ 実レコード一覧 ({coolMissingShipments.length} 件)
-          </h2>
-          <span className="text-xs font-mono text-slate-400">
-            全 {shipments.length} 件中
-          </span>
-        </div>
-
         <div className="data-table-wrap overflow-x-auto">
           <table className="tbl-ship w-full text-left border-collapse text-xs">
             <thead>

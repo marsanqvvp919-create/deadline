@@ -244,26 +244,9 @@ export const CustomsManagementView: React.FC<CustomsManagementViewProps> = ({
 
   return (
     <div className="space-y-6 animate-in fade-in duration-150">
-      {/* Header Banner */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="flex items-start gap-4">
-            <div>
-              <div className="flex items-center gap-2.5 flex-wrap">
-                <span className="text-xs font-bold px-3 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200 font-mono">
-                  楽楽販売 出荷管理
-                </span>
-                <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-700 border border-emerald-400/30 font-mono">
-                  総レコード: {totalCount} 件
-                </span>
-              </div>
-              <p className="text-xs text-slate-300 mt-2 leading-relaxed max-w-3xl">
-                出荷管理の実レコードに基づき、出荷元倉庫、到着空港（KIX/NRT/NGO）、輸入確認、クール申請・委任状・伝票、PHA番号、倉庫インボイス番号、現在地、出荷番号を表示します。
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
+      {/* クール手配漏れ・通関NGの件数はタブに出ているので、ここは出力ボタンだけ */}
+      <div className="flex justify-end">
+        <div className="flex items-center gap-2">
             <a
               href={rakurakuUrl}
               target="_blank"
@@ -279,33 +262,6 @@ export const CustomsManagementView: React.FC<CustomsManagementViewProps> = ({
               <Download className="w-4 h-4" /> CSV出力
             </button>
           </div>
-        </div>
-
-        {/* KPI Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-6 mt-6 border-t border-slate-800">
-          <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
-            <span className="text-xs text-slate-500 block mb-1">出荷管理 総件数</span>
-            <span className="text-2xl font-extrabold font-mono text-slate-900">{totalCount}</span>
-            <span className="text-[10px] text-slate-500 block mt-0.5">実レコード件数</span>
-          </div>
-
-          <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl">
-            <span className="text-xs text-amber-700 block mb-1">クール手配漏れ</span>
-            <span className="text-2xl font-extrabold font-mono text-amber-600">{coolMissingTotal}</span>
-            <span className="text-[10px] text-slate-500 block mt-0.5">クール申請・委任状・伝票のいずれかが未</span>
-          </div>
-
-          <div
-            className={`bg-slate-50 border border-slate-200 p-3.5 rounded-2xl ${onOpenCustomsNg ? 'cursor-pointer hover:bg-slate-100' : ''}`}
-            onClick={onOpenCustomsNg}
-          >
-            <span className="text-xs text-rose-700 block mb-1">通関NG・通関保留</span>
-            <span className="text-2xl font-extrabold font-mono text-rose-600">{customsTabCount ?? customsNgTotal}</span>
-            <span className="text-[10px] text-slate-500 block mt-0.5">
-              関東通関不可（NRT）{customsNgTotal}件・配送会社の通関保留{Math.max(0, (customsTabCount ?? customsNgTotal) - customsNgTotal)}件
-            </span>
-          </div>
-        </div>
       </div>
 
       {/* Filter and Search Bar */}
@@ -372,14 +328,11 @@ export const CustomsManagementView: React.FC<CustomsManagementViewProps> = ({
 
       {/* Main Table */}
       <div className="bg-white border border-slate-200 rounded-2xl shadow-xs overflow-hidden">
-        <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+        <div className="px-4 py-3 border-b border-slate-100">
           <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
             <Plane className="w-4 h-4 text-blue-600" />
-            通関・出荷管理 実レコード一覧 ({filteredShipments.length} 件)
+            出荷 {filteredShipments.length}件<span className="text-xs font-normal text-slate-400">（全{shipments.length}件）</span>
           </h2>
-          <span className="text-xs font-mono text-slate-400">
-            全 {shipments.length} 件中
-          </span>
         </div>
 
         <div className="data-table-wrap overflow-x-auto">

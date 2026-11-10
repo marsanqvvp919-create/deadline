@@ -420,14 +420,8 @@ export const ArrivalTrackingView: React.FC<{
   };
 
   return (
-    <div className="space-y-5">
-      <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-4">
-        <div>
-          <h2 className="text-lg font-bold text-slate-900">到着トラッキング</h2>
-          <p className="text-xs text-slate-500 mt-1">
-            楽楽販売の出荷管理から、出荷ごとに今どの段階かを表示します。対象は出荷待ちと、出荷から{ACTIVE_DAYS}日以内でまだ配達完了していない出荷、直近{RECENT_DELIVERED_DAYS}日に配達完了した出荷です。
-          </p>
-        </div>
+    <div className="space-y-4">
+      <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs space-y-3">
         {/* 最初は要対応だけ。「すべて」で全件を絞り込み・ページ分けで見る */}
         <div className="flex flex-wrap items-center gap-2">
           <div className="inline-flex rounded-xl border border-slate-200 p-0.5 bg-slate-50">
@@ -450,7 +444,7 @@ export const ArrivalTrackingView: React.FC<{
             ['mismatch', '配送業者の登録違い', issueCounts.mismatch, '追跡番号の形と楽楽販売の「配送業者」が違う（照会は番号の形で行っています）'],
             ['bad', '追跡番号の誤りの可能性', issueCounts.bad, 'DHL・FedEx のどちらにも該当がない'],
             ['scope', 'API対象外', issueCounts.scope, '国内配送（12桁で7・8始まりでない番号）・国際郵便・番号なしなど'],
-          ] as const).map(([k, label, n, hint]) => (
+          ] as const).filter(([k, , n]) => n > 0 || issueFilter === k).map(([k, label, n, hint]) => (
             <button
               key={k}
               type="button"
@@ -466,8 +460,8 @@ export const ArrivalTrackingView: React.FC<{
         </div>
 
         {/* 今の状況ごとの件数（全件で数える。押すと絞り込み） */}
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-          {NOW_ORDER.map((k) => {
+        <div className="flex flex-wrap gap-1.5">
+          {NOW_ORDER.filter((k) => counts[k] > 0 || stageFilter === k).map((k) => {
             const st = NOW_STATUS[k];
             const active = stageFilter === k;
             return (
@@ -476,14 +470,11 @@ export const ArrivalTrackingView: React.FC<{
                 type="button"
                 title={st.hint}
                 onClick={() => setStageFilter(active ? 'all' : k)}
-                className={`text-left p-2.5 rounded-xl border transition ${active ? `${st.color} border-transparent` : `${st.soft}`} ${counts[k] === 0 && !active ? 'opacity-50' : ''}`}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border transition ${active ? `${st.color} border-transparent` : `${st.soft}`}`}
               >
-                <span className="text-[11px] font-bold flex items-center gap-1">
-                  <st.Icon className="w-3.5 h-3.5" />
-                  {st.label}
-                </span>
-                <span className="text-2xl font-bold font-mono">{counts[k]}</span>
-                <span className="text-[10px] ml-1 opacity-80">件</span>
+                <st.Icon className="w-3.5 h-3.5" />
+                <span className="text-xs font-bold">{st.label}</span>
+                <span className="text-sm font-bold font-mono">{counts[k]}</span>
               </button>
             );
           })}
