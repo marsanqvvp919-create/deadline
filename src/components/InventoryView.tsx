@@ -52,6 +52,10 @@ interface Inbound {
   receivedAt: string | null;
   receivedMemo: string;
   shortage: boolean;
+  vendorShippedAt?: string | null;
+  vendorShippedBy?: 'vendor' | 'staff' | 'rakuraku' | null;
+  vendorCarrier?: string;
+  vendorMemo?: string;
   updatedAt?: string;
 }
 interface StockRow {
@@ -138,6 +142,7 @@ const fmt = (iso: string | null) => (iso ? new Date(iso).toLocaleString('ja-JP',
 // 入荷の状態の色（全画面共通の色のルール）。国内倉庫の到着・キック・持込は社内で承認するので「あなたの作業待ち」
 const STATE_TONE: Record<string, 'urgent' | 'action' | 'waiting' | 'done' | 'na'> = {
   no_tracking: 'action',
+  vendor_shipped: 'waiting',
   tracking: 'waiting',
   in_transit: 'waiting',
   arrived: 'waiting',
@@ -153,6 +158,8 @@ const stateTone = (r: { state: string; warehouse: string }) => (r.warehouse === 
 const inboundNext = (r: { state: string; warehouse: string; received: boolean }) =>
   r.state === 'no_tracking'
     ? '次にやること：下に追跡番号を入れる（キック・持込なら配送方法を選ぶ）'
+    : r.state === 'vendor_shipped'
+      ? r.warehouse === 'domestic' ? '仕入先が発送しました。届いたら「国内倉庫に届いた」で数を確認して承認' : '仕入先が発送しました。倉庫の担当者が受け取って承認するのを待っています'
     : r.warehouse === 'domestic' && ['arrived', 'kick', 'handcarry'].includes(r.state)
       ? '次にやること：届いたら「国内倉庫に届いた」で数を確認して承認'
       : ['arrived', 'kick', 'handcarry'].includes(r.state)
@@ -207,6 +214,13 @@ function InboundCard({ rec, onSaved }: { rec: Inbound; onSaved: () => void }) {
           <div className="text-[11px] text-slate-500">
             受注 {rec.orderId || '—'} {rec.clinicName}
           </div>
+          {rec.vendorShippedAt && (
+            <div className="text-[11px] text-slate-600 mt-0.5">
+              仕入先の発送 {fmt(rec.vendorShippedAt)}（{rec.vendorShippedBy === 'vendor' ? '仕入先が押した' : rec.vendorShippedBy === 'rakuraku' ? '楽楽販売で出荷済み' : '社内で入力'}）
+              {rec.vendorCarrier && `・${rec.vendorCarrier}`}
+              {rec.vendorMemo && `・${rec.vendorMemo}`}
+            </div>
+          )}
           {inboundNext(rec) && <div className={`mt-1 inline-block rounded px-2 py-0.5 text-[11px] font-bold ${TONE[stateTone(rec) === 'action' ? 'action' : stateTone(rec) === 'urgent' ? 'urgent' : 'waiting']}`}>{inboundNext(rec)}</div>}
         </div>
         <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -234,6 +248,12 @@ function InboundCard({ rec, onSaved }: { rec: Inbound; onSaved: () => void }) {
             <details className="relative">
             <summary title="そのほかの操作" className="list-none cursor-pointer rounded-md border border-slate-200 px-2 py-1 text-slate-500 hover:bg-slate-50">…</summary>
             <div className="absolute right-0 z-20 mt-1 w-64 rounded-lg border border-slate-200 bg-white p-2 shadow-lg space-y-1.5 text-[11px]">
+              {!rec.received && !rec.cancelled && (
+                <button disabled={busy} onClick={() => save({ vendorShipped: !rec.vendorShippedAt })} className="flex items-center gap-1 text-slate-700">
+                  <Truck className="w-3.5 h-3.5" />
+                  {rec.vendorShippedAt ? '「仕入先が発送済み」を外す' : '仕入先が発送済みにする（代わりに入力）'}
+                </button>
+              )}
               {!rec.received && !rec.cancelled && (
                 <button
                   disabled={busy}
@@ -954,6 +974,141 @@ function WarehouseAccessPanel({ data, onSaved }: { data: InventoryData; onSaved:
           )}
         </div>
       ))}
+    </div>
+  );
+}
+
+interface VendorRow {
+  supplierId: string;
+  supplierName: string;
+  supplierArea: string;
+  toShip: number;
+  shipped: number;
+  received: number;
+  slug: string | null;
+  disabled: boolean;
+  lastLoginAt: string | null;
+}
+/** 仕入先の画面：仕入先ごとにURLとパスワードを発行する。仕入先は自分あての発注を見て「発送済み」を押す */
+function VendorAccessPanel() {
+  const [rows, setRows] = useState<VendorRow[] | null>(null);
+  const [issued, setIssued] = useState<{ name: string; slug: string; password: string } | null>(null);
+  const [changing, setChanging] = useState<string | null>(null);
+  const [mode, setMode] = useState<'auto' | 'manual'>('auto');
+  const [pw, setPw] = useState('');
+  const [error, setError] = useState('');
+  const url = (slug: string) => `${PUBLIC_ORIGIN}/vendor/${slug}`;
+  const load = useCallback(() => {
+    api('/api/inventory/vendors')
+      .then((j) => setRows(j.vendors))
+      .catch((e) => setError(e.message));
+  }, []);
+  useEffect(load, [load]);
+  const issue = async (v: VendorRow) => {
+    setError('');
+    try {
+      const j = await api(`/api/inventory/vendor/${encodeURIComponent(v.supplierId)}/password`, { method: 'POST', body: JSON.stringify(mode === 'manual' ? { password: pw.trim() } : {}) });
+      setIssued({ name: v.supplierName, slug: j.slug, password: j.password });
+      setChanging(null);
+      setPw('');
+      load();
+    } catch (e: any) {
+      setError(e.message);
+    }
+  };
+  return (
+    <div className="space-y-3">
+      <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700 space-y-1">
+        <div className="font-bold text-slate-900">流れ</div>
+        <div>① 楽楽販売の発注管理で「発注済み」にする → 30分以内にその仕入先の画面に出ます</div>
+        <div>② 仕入先が発送したら「発送済み」を押す（追跡番号は任意）→ 入荷予定が「仕入先が発送済み」に変わります</div>
+        <div>③ 倉庫の担当者が受け取って数を確認し「承認」→ 倉庫の在庫に入ります</div>
+        <div className="text-slate-500">仕入先の画面には、お客様名・金額は出ません。楽楽販売には書き込みません。</div>
+      </div>
+      {error && <ErrorNote message={error} compact />}
+      {issued && (
+        <div className="rounded-xl border-2 border-emerald-500 bg-emerald-50 p-3 space-y-2 text-xs">
+          <div className="font-bold text-emerald-800">{issued.name} のURLとパスワード（パスワードはこの画面でしか表示されません）</div>
+          <div className="flex flex-wrap items-center gap-2 bg-white rounded border border-emerald-200 px-2 py-1.5">
+            <code className="flex-1 break-all">{url(issued.slug)}</code>
+            <CopyBtn text={url(issued.slug)} label="URLをコピー" />
+          </div>
+          <div className="flex flex-wrap items-center gap-2 bg-white rounded border border-emerald-200 px-2 py-1.5">
+            <code className="flex-1 font-bold">{issued.password}</code>
+            <CopyBtn text={issued.password} label="パスワードをコピー" />
+          </div>
+        </div>
+      )}
+      {!rows ? (
+        <div className="text-xs text-slate-400">読み込み中…</div>
+      ) : (
+        <div className="rounded-xl border border-slate-200 bg-white overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-xs text-slate-600 border-b border-slate-200">
+                <th className="text-left px-3 py-2">仕入先</th>
+                <th className="text-right px-3 py-2">発送待ち</th>
+                <th className="text-right px-3 py-2">発送済み・未入荷</th>
+                <th className="text-left px-3 py-2">画面</th>
+                <th className="px-3 py-2"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((v) => (
+                <React.Fragment key={v.supplierId}>
+                  <tr className="border-b border-slate-100">
+                    <td className="px-3 py-2">
+                      <div className="font-bold text-slate-900">{v.supplierName}</div>
+                      <div className="text-[11px] text-slate-500">{v.supplierArea}</div>
+                    </td>
+                    <td className={`px-3 py-2 text-right font-mono font-bold ${v.toShip ? 'text-amber-700' : 'text-slate-300'}`}>{v.toShip}</td>
+                    <td className={`px-3 py-2 text-right font-mono font-bold ${v.shipped ? 'text-indigo-700' : 'text-slate-300'}`}>{v.shipped}</td>
+                    <td className="px-3 py-2 text-xs text-slate-500">{v.slug ? `発行済み・最終ログイン ${fmt(v.lastLoginAt)}${v.disabled ? '・停止中' : ''}` : 'まだ発行していません'}</td>
+                    <td className="px-3 py-2">
+                      <div className="flex flex-wrap justify-end gap-1.5">
+                        {v.slug && <CopyBtn text={url(v.slug)} label="URLをコピー" />}
+                        {v.slug && (
+                          <a href={url(v.slug)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-bold text-slate-700 hover:bg-slate-50">
+                            <ExternalLink className="w-3.5 h-3.5" />
+                            開く
+                          </a>
+                        )}
+                        <button onClick={() => setChanging(changing === v.supplierId ? null : v.supplierId)} className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-bold text-slate-700 hover:bg-slate-50">
+                          <KeyRound className="w-3.5 h-3.5" />
+                          {v.slug ? 'パスワードを変更' : '発行する'}
+                        </button>
+                        {v.slug && (
+                          <button
+                            onClick={async () => {
+                              await api(`/api/inventory/vendor/${encodeURIComponent(v.supplierId)}`, { method: 'POST', body: JSON.stringify({ disabled: !v.disabled }) }).catch((e) => setError(e.message));
+                              load();
+                            }}
+                            className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-bold text-slate-700 hover:bg-slate-50"
+                          >
+                            {v.disabled ? <RotateCcw className="w-3.5 h-3.5" /> : <Ban className="w-3.5 h-3.5" />}
+                            {v.disabled ? '再開' : '一時停止'}
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                  {changing === v.supplierId && (
+                    <tr className="border-b border-slate-100 bg-slate-50">
+                      <td colSpan={5} className="px-3 py-3 space-y-2">
+                        <PasswordChooser mode={mode} value={pw} onMode={setMode} onValue={setPw} />
+                        {v.slug && <div className="text-[11px] text-slate-500">変更すると今のパスワードは使えなくなり、ログイン中の仕入先もログアウトされます。</div>}
+                        <button disabled={!passwordOk(mode, pw)} onClick={() => issue(v)} className="rounded-md bg-slate-900 text-white px-3 py-1.5 text-xs font-bold disabled:opacity-40">
+                          {v.slug ? '変更する' : 'URLとパスワードを発行する'}
+                        </button>
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
@@ -1783,7 +1938,7 @@ export function ShippingInstructionsPage({ onNavigate }: { onNavigate?: (tab: st
 export function InventoryView({ orders, onNavigate }: { orders: Order[]; onNavigate?: (tab: string) => void }) {
   const [data, setData] = useState<InventoryData | null>(null);
   const [error, setError] = useState('');
-  const [tab, setTab] = useState<'inbound' | 'stock' | 'moves' | 'access'>('stock');
+  const [tab, setTab] = useState<'inbound' | 'stock' | 'moves' | 'access' | 'vendors'>('stock');
   const [wh, setWh] = useState<'all' | WarehouseId>('all');
   const [stateFilter, setStateFilter] = useState<'open' | 'waiting' | 'received' | 'shortage' | 'closed' | 'all'>('open');
   const [q, setQ] = useState('');
@@ -1937,6 +2092,7 @@ export function InventoryView({ orders, onNavigate }: { orders: Order[]; onNavig
             ['stock', '在庫', PackageCheck],
             ['inbound', '入荷予定', Truck],
             ['moves', '入出庫の履歴', History],
+            ['vendors', '仕入先の画面', Truck],
             ['access', '倉庫の担当者画面', KeyRound],
           ] as const
         ).map(([id, label, Icon]) => (
@@ -2051,6 +2207,7 @@ export function InventoryView({ orders, onNavigate }: { orders: Order[]; onNavig
       )}
 
       {tab === 'access' && <WarehouseAccessPanel data={data} onSaved={load} />}
+      {tab === 'vendors' && <VendorAccessPanel />}
       <div className="text-[11px] text-slate-400 flex items-center gap-1">
         <CheckCircle2 className="w-3 h-3" />
         入荷予定の追跡番号は、出荷の追跡と同じく配送会社のデータで自動確認します（到着すると「倉庫に到着・承認待ち」）。

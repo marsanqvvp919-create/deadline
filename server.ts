@@ -111,7 +111,7 @@ function getSessionSecret(): Promise<string> {
   return sessionSecretPromise;
 }
 
-type Session = { t: 'staff' } | { t: 'portal'; g: string; v: number } | { t: 'warehouse'; w: string; v: number };
+type Session = { t: 'staff' } | { t: 'portal'; g: string; v: number } | { t: 'warehouse'; w: string; v: number } | { t: 'vendor'; s: string; v: number };
 async function signSession(s: Session, days: number): Promise<string> {
   const body = Buffer.from(JSON.stringify({ ...s, exp: Date.now() + days * 86400000 })).toString('base64url');
   const sig = crypto.createHmac('sha256', await getSessionSecret()).update(body).digest('base64url');
@@ -158,7 +158,7 @@ function tooManyFailures(key: string) {
 const recordFailure = (key: string) => loginFailures.set(key, [...(loginFailures.get(key) || []), Date.now()]);
 
 app.use(async (req, res, next) => {
-  if (!req.path.startsWith('/api/') || req.path.startsWith('/api/auth/') || req.path.startsWith('/api/portal/') || req.path.startsWith('/api/warehouse/') || req.path.startsWith('/api/sales-os/')) return next();
+  if (!req.path.startsWith('/api/') || req.path.startsWith('/api/auth/') || req.path.startsWith('/api/portal/') || req.path.startsWith('/api/warehouse/') || req.path.startsWith('/api/vendor/') || req.path.startsWith('/api/sales-os/')) return next();
   try {
     if (await isStaffRequest(req)) return next();
   } catch (e: any) {
@@ -4616,6 +4616,11 @@ interface InboundRec {
   receivedAt?: string;
   receivedMemo?: string;
   shortage?: boolean;
+  /** 仕入先が発送した（仕入先の画面で押した／社内で代わりに押した／楽楽販売の発注ステータスが「出荷済み」） */
+  vendorShippedAt?: string;
+  vendorShippedBy?: 'vendor' | 'staff' | 'rakuraku';
+  vendorCarrier?: string;
+  vendorMemo?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -4696,6 +4701,8 @@ interface InventoryStore {
   // 動作確認用に実データへ入れた仮の在庫（あとでまとめて消す）
   sampleSeed?: { at: string; items: { warehouse: WarehouseId; productId: string; productName: string; qty: number }[] } | null;
   access: Partial<Record<WarehouseId, WarehouseAccess>>;
+  /** 仕入先の画面のURLとパスワード（仕入先IDごと） */
+  vendorAccess?: Record<string, WarehouseAccess & { supplierName: string }>;
   poSyncedAt?: string;
 }
 // --- サンプル表示（入荷・在庫・引当・出荷指示・インボイス・AWBの流れを、実データと切り離したサンプルで試す）
@@ -4959,6 +4966,7 @@ app.post('/api/inventory/demo-reset', (_req, res) => {
 
 const INVENTORY_OBJECT = 'inventory.json';
 const WAREHOUSE_COOKIE = 'nk_wh';
+const VENDOR_COOKIE = 'nk_vd';
 let realInventory: InventoryStore = {
   settings: { startDate: '2026/10/24' },
   inbound: {},
@@ -4971,6 +4979,10 @@ let realInventory: InventoryStore = {
 };
 let inventoryLoadPromise: Promise<void> | null = null;
 let inboundPoRefreshRequested = false;
+// 仕入先の画面に新しい発注が早く出るように、発注管理は30分ごとに読む（次の楽楽販売の同期のときに一緒に取る）
+setInterval(() => {
+  inboundPoRefreshRequested = true;
+}, 30 * 60 * 1000);
 
 function loadInventory() {
   if (!inventoryLoadPromise) {
@@ -4990,6 +5002,7 @@ function loadInventory() {
           productLinks: j?.productLinks || {},
           sampleSeed: j?.sampleSeed || null,
           access: j?.access || {},
+          vendorAccess: j?.vendorAccess || {},
           poSyncedAt: j?.poSyncedAt,
         };
       } catch (e: any) {
@@ -5069,7 +5082,9 @@ async function mergePurchaseOrdersIntoInbound(pos: ReturnType<typeof transformCs
   const ordersById = new Map(invOrders().map((o) => [o.orderId, o]));
   for (const po of pos) {
     seen.add(po.poId);
-    const ordered = /発注済/.test(po.status);
+    // 「発注済み」から入荷予定を作る。「出荷済み」は仕入先が発送したもの（取消ではない）
+    const ordered = /発注済|出荷済/.test(po.status);
+    const vendorShipped = /出荷済/.test(po.status);
     const existing = inv().inbound[po.poId];
     if (!existing) {
       if (!ordered || STOCK_SUPPLIER_IDS.has(po.supplierId) || po.lines.length === 0) continue;
@@ -5090,6 +5105,7 @@ async function mergePurchaseOrdersIntoInbound(pos: ReturnType<typeof transformCs
         method: '',
         trackingNos: [],
         memo: '',
+        ...(vendorShipped ? { vendorShippedAt: now, vendorShippedBy: 'rakuraku' as const } : {}),
         createdAt: now,
         updatedAt: now,
       };
@@ -5098,6 +5114,10 @@ async function mergePurchaseOrdersIntoInbound(pos: ReturnType<typeof transformCs
     existing.rakurakuStatus = po.status;
     if (existing.received) continue;
     existing.cancelled = !ordered;
+    if (vendorShipped && !existing.vendorShippedAt) {
+      existing.vendorShippedAt = now;
+      existing.vendorShippedBy = 'rakuraku';
+    }
     // 発注の明細が楽楽販売で変わったら、社内で直していない数量だけ追従する
     po.lines.forEach((l, i) => {
       const cur = existing.lines.find((x) => x.productId === l.productId && x.productName === l.productName) || existing.lines[i];
@@ -5129,7 +5149,7 @@ function inboundState(rec: InboundRec): { code: string; label: string; tracking:
   if (rec.received) return { code: rec.shortage ? 'shortage' : 'received', label: rec.shortage ? '入荷済み（不足あり）' : '入荷済み', tracking };
   if (rec.method === 'kick') return { code: 'kick', label: 'キック（追跡なし）・受取待ち', tracking };
   if (rec.method === 'handcarry') return { code: 'handcarry', label: '直接持込・受取待ち', tracking };
-  if (rec.trackingNos.length === 0) return { code: 'no_tracking', label: '追跡番号待ち', tracking };
+  if (rec.trackingNos.length === 0) return rec.vendorShippedAt ? { code: 'vendor_shipped', label: '仕入先が発送済み・到着待ち', tracking } : { code: 'no_tracking', label: '追跡番号待ち', tracking };
   if (tracking.some((t: any) => t.status === 'delivered')) return { code: 'arrived', label: '倉庫に到着・承認待ち', tracking };
   if (tracking.some((t: any) => t.status === 'in_transit' || t.status === 'exception')) return { code: 'in_transit', label: '配送中', tracking };
   return { code: 'tracking', label: '追跡中', tracking };
@@ -5180,6 +5200,10 @@ function inboundView(rec: InboundRec, forWarehouse = false) {
     receivedAt: rec.receivedAt || null,
     receivedMemo: rec.receivedMemo || '',
     shortage: !!rec.shortage,
+    vendorShippedAt: rec.vendorShippedAt || null,
+    vendorShippedBy: rec.vendorShippedBy || null,
+    vendorCarrier: rec.vendorCarrier || '',
+    vendorMemo: rec.vendorMemo || '',
     updatedAt: rec.updatedAt,
   };
 }
@@ -5238,6 +5262,16 @@ app.post('/api/inventory/inbound/:poId', async (req, res) => {
     rec.warehouseEdited = true;
   }
   if (['', 'tracking', 'kick', 'handcarry'].includes(b.method)) rec.method = b.method;
+  // 社内で「仕入先が発送した」を代わりに付ける・外す
+  if (typeof b.vendorShipped === 'boolean' && !rec.received) {
+    if (b.vendorShipped && !rec.vendorShippedAt) {
+      rec.vendorShippedAt = new Date().toISOString();
+      rec.vendorShippedBy = 'staff';
+    } else if (!b.vendorShipped) {
+      delete rec.vendorShippedAt;
+      delete rec.vendorShippedBy;
+    }
+  }
   let newDigits: string[] = [];
   if (Array.isArray(b.trackingNos) || typeof b.trackingNos === 'string') {
     const list = (Array.isArray(b.trackingNos) ? b.trackingNos.join('、') : b.trackingNos)
@@ -7826,6 +7860,167 @@ if (process.env.NODE_ENV !== 'production') {
     res.json({ ok: true });
   });
 }
+
+// --- 仕入先の画面（/vendor/:slug）
+// 楽楽販売の発注管理で「発注済み」になった発注を、その仕入先だけに見せる。仕入先は発送したら「発送済み」を押す（追跡番号は任意）。
+// お客様名・金額は見せない。楽楽販売には書き込まない
+const vendorAccessMap = () => (inv().vendorAccess ||= {});
+const vendorBySlug = (slug: string): string | null =>
+  Object.entries(vendorAccessMap()).find(([, a]) => a.slug === slug && !a.disabled)?.[0] || null;
+async function vendorFromRequest(req: express.Request): Promise<string | null> {
+  const s = await readSession(readCookie(req, VENDOR_COOKIE));
+  if (!s || s.t !== 'vendor') return null;
+  await loadInventory();
+  const a = vendorAccessMap()[s.s];
+  if (!a || a.disabled || a.pwVersion !== s.v) return null;
+  const slug = String(req.query.slug || req.body?.slug || '');
+  if (slug && a.slug !== slug) return null;
+  return s.s;
+}
+const VENDOR_SHOW_DAYS = 60;
+function vendorPoView(rec: InboundRec) {
+  return {
+    poId: rec.poId,
+    poDate: rec.poDate,
+    shipTo: WAREHOUSES[rec.warehouse],
+    shipToEn: ({ domestic: 'Japan warehouse', korea: 'Korea warehouse', singapore: 'Singapore warehouse' } as Record<WarehouseId, string>)[rec.warehouse],
+    lines: rec.lines.map((l) => ({ key: l.key, productName: l.productName, qty: l.qty })),
+    shipped: !!rec.vendorShippedAt,
+    shippedAt: rec.vendorShippedAt || null,
+    shippedBy: rec.vendorShippedBy || null,
+    carrier: rec.vendorCarrier || '',
+    trackingNos: rec.trackingNos,
+    memo: rec.vendorMemo || '',
+    received: !!rec.received,
+    receivedAt: rec.receivedAt || null,
+  };
+}
+const vendorPos = (supplierId: string) =>
+  Object.values(inv().inbound)
+    .filter((r) => r.supplierId === supplierId && !r.excluded && !r.cancelled)
+    .filter((r) => !r.vendorShippedAt || Date.now() - new Date(r.vendorShippedAt).getTime() < VENDOR_SHOW_DAYS * 86400000)
+    .sort((a, b) => (b.poDate || '').localeCompare(a.poDate || '') || b.poId.localeCompare(a.poId));
+
+// 社内：仕入先ごとの発注数と、画面のURLの発行状況
+app.get('/api/inventory/vendors', async (_req, res) => {
+  await loadInventory();
+  const m = new Map<string, { supplierId: string; supplierName: string; supplierArea: string; toShip: number; shipped: number; received: number }>();
+  for (const r of Object.values(inv().inbound)) {
+    if (!r.supplierId || r.excluded || r.cancelled) continue;
+    const v = m.get(r.supplierId) || { supplierId: r.supplierId, supplierName: r.supplierName, supplierArea: r.supplierArea, toShip: 0, shipped: 0, received: 0 };
+    if (r.received) v.received++;
+    else if (r.vendorShippedAt) v.shipped++;
+    else v.toShip++;
+    m.set(r.supplierId, v);
+  }
+  for (const [id, a] of Object.entries(vendorAccessMap())) if (!m.has(id)) m.set(id, { supplierId: id, supplierName: a.supplierName, supplierArea: '', toShip: 0, shipped: 0, received: 0 });
+  const vendors = Array.from(m.values())
+    .map((v) => {
+      const a = vendorAccessMap()[v.supplierId];
+      return { ...v, slug: a?.slug || null, disabled: !!a?.disabled, lastLoginAt: a?.lastLoginAt || null };
+    })
+    .sort((a, b) => b.toShip - a.toShip || a.supplierName.localeCompare(b.supplierName));
+  res.json({ vendors });
+});
+app.post('/api/inventory/vendor/:supplierId/password', async (req, res) => {
+  await loadInventory();
+  const id = req.params.supplierId;
+  const name = supplierById(id)?.supplierName || Object.values(inv().inbound).find((r) => r.supplierId === id)?.supplierName || vendorAccessMap()[id]?.supplierName;
+  if (!name) return res.status(404).json({ error: '仕入先が見つかりません' });
+  const { password, error } = portalPasswordFromBody(req.body);
+  if (!password) return res.status(400).json({ error });
+  const cur = vendorAccessMap()[id];
+  const salt = crypto.randomBytes(16).toString('hex');
+  vendorAccessMap()[id] = {
+    supplierName: name,
+    slug: cur?.slug || randomFrom('abcdefghijkmnpqrstuvwxyz23456789', 16),
+    salt,
+    hash: hashPassword(password, salt),
+    pwVersion: (cur?.pwVersion || 0) + 1,
+    disabled: cur?.disabled,
+    lastLoginAt: cur?.lastLoginAt,
+  };
+  await saveInventory();
+  res.json({ slug: vendorAccessMap()[id].slug, password });
+});
+app.post('/api/inventory/vendor/:supplierId', async (req, res) => {
+  await loadInventory();
+  const a = vendorAccessMap()[req.params.supplierId];
+  if (!a) return res.status(404).json({ error: 'まだ発行していません' });
+  if (typeof req.body?.disabled === 'boolean') a.disabled = req.body.disabled;
+  await saveInventory();
+  res.json({ ok: true });
+});
+
+// 仕入先
+app.get('/api/vendor/info/:slug', async (req, res) => {
+  await loadInventory();
+  const id = vendorBySlug(req.params.slug);
+  if (!id) return res.status(404).json({ error: 'This URL is not available. Please contact us. / このURLは使えません' });
+  res.json({ name: vendorAccessMap()[id].supplierName });
+});
+app.post('/api/vendor/login', async (req, res) => {
+  await loadInventory();
+  const key = clientKey(req, 'vendor');
+  if (tooManyFailures(key)) return res.status(429).json({ error: 'Too many attempts. Please wait 10 minutes. / 10分ほど待ってからお試しください' });
+  const id = vendorBySlug(String(req.body?.slug || ''));
+  const a = id ? vendorAccessMap()[id] : null;
+  const password = String(req.body?.password || '');
+  if (!id || !a || !password || !safeEqualHex(hashPassword(password, a.salt), a.hash)) {
+    recordFailure(key);
+    return res.status(401).json({ error: 'Incorrect password / パスワードが違います' });
+  }
+  a.lastLoginAt = new Date().toISOString();
+  saveInventory().catch(() => {});
+  setCookie(res, VENDOR_COOKIE, await signSession({ t: 'vendor', s: id, v: a.pwVersion }, PORTAL_SESSION_DAYS), PORTAL_SESSION_DAYS);
+  res.json({ ok: true, name: a.supplierName });
+});
+app.post('/api/vendor/logout', (_req, res) => {
+  clearCookie(res, VENDOR_COOKIE);
+  res.json({ ok: true });
+});
+app.get('/api/vendor/data', async (req, res) => {
+  const id = await vendorFromRequest(req);
+  if (!id) return res.status(401).json({ error: 'login_required' });
+  res.json({ name: vendorAccessMap()[id].supplierName, pos: vendorPos(id).map(vendorPoView), syncedAt: inv().poSyncedAt || null });
+});
+app.post('/api/vendor/po/:poId/ship', async (req, res) => {
+  const id = await vendorFromRequest(req);
+  if (!id) return res.status(401).json({ error: 'login_required' });
+  const rec = inv().inbound[req.params.poId];
+  if (!rec || rec.supplierId !== id || rec.excluded || rec.cancelled) return res.status(404).json({ error: 'Not found / 見つかりません' });
+  if (rec.received) return res.status(400).json({ error: 'Already received by the warehouse / 倉庫で受け取り済みです' });
+  const list = String(req.body?.trackingNos || '')
+    .split(/[、,\s\n]+/)
+    .map((x) => x.trim())
+    .filter(Boolean)
+    .slice(0, 20);
+  if (list.length) {
+    rec.trackingNos = Array.from(new Set([...rec.trackingNos, ...list]));
+    rec.method = 'tracking';
+  }
+  rec.vendorCarrier = String(req.body?.carrier || '').slice(0, 40);
+  rec.vendorMemo = String(req.body?.memo || '').slice(0, 500);
+  rec.vendorShippedAt = new Date().toISOString();
+  rec.vendorShippedBy = 'vendor';
+  rec.updatedAt = rec.vendorShippedAt;
+  await saveInventory();
+  res.json({ po: vendorPoView(rec) });
+});
+// 押し間違えたとき：倉庫で受け取る前なら「未発送」に戻せる（入れた追跡番号はそのまま）
+app.post('/api/vendor/po/:poId/unship', async (req, res) => {
+  const id = await vendorFromRequest(req);
+  if (!id) return res.status(401).json({ error: 'login_required' });
+  const rec = inv().inbound[req.params.poId];
+  if (!rec || rec.supplierId !== id) return res.status(404).json({ error: 'Not found / 見つかりません' });
+  if (rec.received) return res.status(400).json({ error: 'Already received by the warehouse / 倉庫で受け取り済みです' });
+  if (rec.vendorShippedBy === 'rakuraku') return res.status(400).json({ error: 'Please contact us to change this. / 変更はお問い合わせください' });
+  delete rec.vendorShippedAt;
+  delete rec.vendorShippedBy;
+  rec.updatedAt = new Date().toISOString();
+  await saveInventory();
+  res.json({ po: vendorPoView(rec) });
+});
 
 // --- 倉庫の担当者の画面（/warehouse/:slug）
 const warehouseBySlug = (slug: string): WarehouseId | null =>

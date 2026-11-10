@@ -75,6 +75,7 @@ interface Data {
 
 const STATE_EN: Record<string, string> = {
   no_tracking: 'Awaiting tracking no.',
+  vendor_shipped: 'Shipped by supplier – awaiting arrival',
   tracking: 'Tracking',
   in_transit: 'In transit',
   arrived: 'Arrived – please confirm',
