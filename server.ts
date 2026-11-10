@@ -8160,7 +8160,8 @@ app.post('/api/warehouse/inbound/:poId/receive', async (req, res) => {
   const rec = inv().inbound[req.params.poId];
   if (!rec || rec.warehouse !== w || rec.excluded || rec.cancelled) return res.status(404).json({ error: '入荷予定が見つかりません / Not found' });
   if (rec.received) return res.status(400).json({ error: 'すでに承認済みです / Already received' });
-  const err = receiveInbound(rec, req.body?.lines, req.body?.memo, 'warehouse', true);
+  // 検品の入力は新しい画面で必須にしている（開いたままの古い画面からも承認できるよう、サーバーでは求めない）
+  const err = receiveInbound(rec, req.body?.lines, req.body?.memo, 'warehouse');
   if (err) return res.status(400).json({ error: err });
   await saveInventory();
   res.json({ inbound: inboundView(rec, true), stock: stockList(w) });
