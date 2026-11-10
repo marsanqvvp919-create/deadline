@@ -4621,6 +4621,10 @@ interface InboundRec {
   vendorShippedBy?: 'vendor' | 'staff' | 'rakuraku';
   vendorCarrier?: string;
   vendorMemo?: string;
+  /** 仕入先に数量の修正を許可した（社内で許可したときだけ。発送まで有効） */
+  vendorQtyAllowed?: boolean;
+  /** 仕入先が直した数量の記録 */
+  vendorQtyChanges?: { key: string; productName: string; from: number; to: number; at: string }[];
   createdAt: string;
   updatedAt: string;
 }
@@ -5204,6 +5208,8 @@ function inboundView(rec: InboundRec, forWarehouse = false) {
     vendorShippedBy: rec.vendorShippedBy || null,
     vendorCarrier: rec.vendorCarrier || '',
     vendorMemo: rec.vendorMemo || '',
+    vendorQtyAllowed: !!rec.vendorQtyAllowed,
+    vendorQtyChanges: rec.vendorQtyChanges || [],
     updatedAt: rec.updatedAt,
   };
 }
@@ -5263,6 +5269,8 @@ app.post('/api/inventory/inbound/:poId', async (req, res) => {
   }
   if (['', 'tracking', 'kick', 'handcarry'].includes(b.method)) rec.method = b.method;
   // 社内で「仕入先が発送した」を代わりに付ける・外す
+  // 仕入先に数量の修正を許可する・やめる
+  if (typeof b.vendorQtyAllowed === 'boolean') rec.vendorQtyAllowed = b.vendorQtyAllowed;
   if (typeof b.vendorShipped === 'boolean' && !rec.received) {
     if (b.vendorShipped && !rec.vendorShippedAt) {
       rec.vendorShippedAt = new Date().toISOString();
@@ -7884,7 +7892,9 @@ function vendorPoView(rec: InboundRec) {
     poDate: rec.poDate,
     shipTo: WAREHOUSES[rec.warehouse],
     shipToEn: ({ domestic: 'Japan warehouse', korea: 'Korea warehouse', singapore: 'Singapore warehouse' } as Record<WarehouseId, string>)[rec.warehouse],
-    lines: rec.lines.map((l) => ({ key: l.key, productName: l.productName, qty: l.qty })),
+    lines: rec.lines.map((l) => ({ key: l.key, productName: l.productName, qty: l.qty, poQty: l.poQty })),
+    qtyEditable: !!rec.vendorQtyAllowed && !rec.vendorShippedAt && !rec.received,
+    qtyChanges: (rec.vendorQtyChanges || []).map((c) => ({ productName: c.productName, from: c.from, to: c.to })),
     shipped: !!rec.vendorShippedAt,
     shippedAt: rec.vendorShippedAt || null,
     shippedBy: rec.vendorShippedBy || null,
@@ -7990,6 +8000,23 @@ app.post('/api/vendor/po/:poId/ship', async (req, res) => {
   const rec = inv().inbound[req.params.poId];
   if (!rec || rec.supplierId !== id || rec.excluded || rec.cancelled) return res.status(404).json({ error: 'Not found / 見つかりません' });
   if (rec.received) return res.status(400).json({ error: 'Already received by the warehouse / 倉庫で受け取り済みです' });
+  // 数量の修正は、社内で許可した発注だけ
+  const given = Array.isArray(req.body?.lines) ? req.body.lines : [];
+  const changes: { line: InboundLine; to: number }[] = [];
+  for (const g of given) {
+    const line = rec.lines.find((l) => l.key === String(g?.key));
+    const to = Math.round(Number(g?.qty));
+    if (!line || !Number.isFinite(to) || to === line.qty) continue;
+    if (to < 0) return res.status(400).json({ error: 'Quantity must be 0 or more / 数量は0以上にしてください' });
+    changes.push({ line, to });
+  }
+  if (changes.length && !rec.vendorQtyAllowed) return res.status(403).json({ error: 'Changing quantities is not allowed. Please contact us. / 数量の変更は許可されていません' });
+  const at = new Date().toISOString();
+  for (const c of changes) {
+    (rec.vendorQtyChanges ||= []).push({ key: c.line.key, productName: c.line.productName, from: c.line.qty, to: c.to, at });
+    c.line.qty = c.to;
+    c.line.qtyEdited = c.line.qty !== c.line.poQty;
+  }
   const list = String(req.body?.trackingNos || '')
     .split(/[、,\s\n]+/)
     .map((x) => x.trim())

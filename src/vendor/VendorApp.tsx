@@ -11,7 +11,9 @@ interface Po {
   poDate: string;
   shipTo: string;
   shipToEn: string;
-  lines: { key: string; productName: string; qty: number }[];
+  lines: { key: string; productName: string; qty: number; poQty?: number }[];
+  qtyEditable?: boolean;
+  qtyChanges?: { productName: string; from: number; to: number }[];
   shipped: boolean;
   shippedAt: string | null;
   shippedBy: 'vendor' | 'staff' | 'rakuraku' | null;
@@ -53,7 +55,7 @@ const demoPo = (poId: string, poDate: string, lines: [string, number][], shipped
 });
 let demoPos: Po[] = [
   demoPo('TEST-0003', daysAgo(0), [['PROFHILO H+L 2ml', 10], ['PROFHILO Structura', 5]]),
-  demoPo('TEST-0002', daysAgo(1), [['JALUPRO YOUNG EYE', 20]]),
+  demoPo('TEST-0002', daysAgo(1), [['JALUPRO YOUNG EYE', 20]], { qtyEditable: true }),
   demoPo('TEST-0001', daysAgo(5), [['PLURYAL SILK', 30]], { shipped: true, shippedAt: new Date(Date.now() - 2 * 86400000).toISOString(), shippedBy: 'vendor', carrier: 'DHL', trackingNos: ['1234567890'] }),
 ];
 function demoApi(path: string, body: any) {
@@ -64,9 +66,13 @@ function demoApi(path: string, body: any) {
   if (m) {
     demoPos = demoPos.map((p) => {
       if (p.poId !== m[1]) return p;
-      if (m[2] === 'unship') return { ...p, shipped: false, shippedAt: null, shippedBy: null };
+      if (m[2] === 'unship') return { ...p, shipped: false, shippedAt: null, shippedBy: null, qtyEditable: (p.qtyChanges || []).length > 0 || p.poId === 'TEST-0002' };
       const nos = String(body?.trackingNos || '').split(/[、,\s\n]+/).map((x) => x.trim()).filter(Boolean);
-      return { ...p, shipped: true, shippedAt: new Date().toISOString(), shippedBy: 'vendor', carrier: body?.carrier || '', memo: body?.memo || '', trackingNos: [...p.trackingNos, ...nos] };
+      const qty = new Map<string, number>((body?.lines || []).map((l: any) => [String(l.key), Number(l.qty)]));
+      if (!p.qtyEditable && p.lines.some((l) => qty.has(l.key) && qty.get(l.key) !== l.qty)) throw new Error('Changing quantities is not allowed. Please contact us. / 数量の変更は許可されていません');
+      const qtyChanges = p.lines.filter((l) => qty.has(l.key) && qty.get(l.key) !== l.qty).map((l) => ({ productName: l.productName, from: l.qty, to: qty.get(l.key)! }));
+      const lines = p.lines.map((l) => (qty.has(l.key) ? { ...l, qty: qty.get(l.key)! } : l));
+      return { ...p, lines, qtyChanges: [...(p.qtyChanges || []), ...qtyChanges], qtyEditable: false, shipped: true, shippedAt: new Date().toISOString(), shippedBy: 'vendor', carrier: body?.carrier || '', memo: body?.memo || '', trackingNos: [...p.trackingNos, ...nos] };
     });
     return { ok: true };
   }
@@ -149,8 +155,11 @@ function PoCard({ po, slug, onDone }: { po: Po; slug: string; onDone: () => void
   const [tracking, setTracking] = useState('');
   const [carrier, setCarrier] = useState('');
   const [memo, setMemo] = useState('');
+  const [qty, setQty] = useState<Record<string, string>>(Object.fromEntries(po.lines.map((l) => [l.key, String(l.qty)])));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const changed = po.lines.filter((l) => String(l.qty) !== qty[l.key]);
+  const badQty = changed.some((l) => !/^\d+$/.test(qty[l.key] ?? ''));
   const run = async (path: string, body: object) => {
     setBusy(true);
     setError('');
@@ -167,13 +176,18 @@ function PoCard({ po, slug, onDone }: { po: Po; slug: string; onDone: () => void
     if (
       !(await askConfirm({
         title: `Mark ${po.poId} as shipped?`,
-        body: tracking.trim() ? `Tracking: ${tracking.trim()}` : 'No tracking number entered. You can still mark it as shipped. / 追跡番号なしで発送済みにします',
+        body: [
+          changed.length ? `Quantity changed / 数量の変更: ${changed.map((l) => `${l.productName} ${l.qty}→${qty[l.key]}`).join(', ')}` : '',
+          tracking.trim() ? `Tracking: ${tracking.trim()}` : 'No tracking number entered. You can still mark it as shipped. / 追跡番号なしで発送済みにします',
+        ]
+          .filter(Boolean)
+          .join('\n'),
         okLabel: 'Shipped / 発送済みにする',
         cancelLabel: 'Cancel / やめる',
       }))
     )
       return;
-    run(`/api/vendor/po/${po.poId}/ship`, { trackingNos: tracking, carrier, memo });
+    run(`/api/vendor/po/${po.poId}/ship`, { trackingNos: tracking, carrier, memo, ...(po.qtyEditable ? { lines: po.lines.map((l) => ({ key: l.key, qty: Number(qty[l.key]) })) } : {}) });
   };
   const status = po.received
     ? { label: 'Received by warehouse / 倉庫で受け取り済み', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' }
@@ -205,11 +219,33 @@ function PoCard({ po, slug, onDone }: { po: Po; slug: string; onDone: () => void
           {po.lines.map((l) => (
             <tr key={l.key} className="border-b border-slate-50">
               <td className="py-1.5 font-semibold text-slate-800">{l.productName}</td>
-              <td className="py-1.5 text-right font-mono text-base font-bold">{l.qty}</td>
+              <td className="py-1.5 text-right">
+                {po.qtyEditable && !po.shipped ? (
+                  <input
+                    type="number"
+                    min={0}
+                    value={qty[l.key] ?? ''}
+                    onChange={(e) => setQty({ ...qty, [l.key]: e.target.value })}
+                    className={`w-24 rounded-lg border-2 px-2 py-1 text-right font-mono text-base font-bold ${String(l.qty) !== qty[l.key] ? 'border-amber-400 bg-amber-50' : 'border-slate-300'}`}
+                  />
+                ) : (
+                  <span className="font-mono text-base font-bold">{l.qty}</span>
+                )}
+              </td>
             </tr>
           ))}
         </tbody>
       </table>
+      {po.qtyEditable && !po.shipped && (
+        <div className="rounded-lg bg-sky-50 border border-sky-200 px-3 py-2 text-xs text-sky-900">
+          You may change the quantity for this order if you cannot ship the full amount. / この発注は数量を変更できます（全数を送れない場合など）
+        </div>
+      )}
+      {(po.qtyChanges || []).length > 0 && (
+        <div className="text-xs font-bold text-amber-700">
+          Quantity changed / 数量の変更: {po.qtyChanges!.map((c) => `${c.productName} ${c.from}→${c.to}`).join(', ')}
+        </div>
+      )}
       {po.shipped ? (
         <div className="space-y-1 text-xs text-slate-600">
           <div>
@@ -240,7 +276,8 @@ function PoCard({ po, slug, onDone }: { po: Po; slug: string; onDone: () => void
           </div>
           <input value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="Note (optional, e.g. partial shipment) / メモ（任意）" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
           {error && <ErrorNote message={error} compact />}
-          <button disabled={busy} onClick={ship} className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 text-white px-5 py-2.5 text-base font-bold disabled:opacity-50">
+          {badQty && <ErrorNote message="Enter a quantity of 0 or more / 数量は0以上の数字で入れてください" compact />}
+          <button disabled={busy || badQty} onClick={ship} className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 text-white px-5 py-2.5 text-base font-bold disabled:opacity-50">
             <CheckCircle2 className="w-5 h-5" />
             Shipped / 発送済みにする
           </button>

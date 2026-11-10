@@ -56,6 +56,8 @@ interface Inbound {
   vendorShippedBy?: 'vendor' | 'staff' | 'rakuraku' | null;
   vendorCarrier?: string;
   vendorMemo?: string;
+  vendorQtyAllowed?: boolean;
+  vendorQtyChanges?: { key: string; productName: string; from: number; to: number; at: string }[];
   updatedAt?: string;
 }
 interface StockRow {
@@ -221,6 +223,14 @@ function InboundCard({ rec, onSaved }: { rec: Inbound; onSaved: () => void }) {
               {rec.vendorMemo && `・${rec.vendorMemo}`}
             </div>
           )}
+          {rec.vendorQtyAllowed && !rec.vendorShippedAt && !rec.received && (
+            <div className="mt-0.5 inline-block rounded bg-sky-50 border border-sky-200 px-2 py-0.5 text-[11px] font-bold text-sky-800">仕入先に数量の修正を許可中</div>
+          )}
+          {(rec.vendorQtyChanges || []).length > 0 && (
+            <div className="mt-0.5 text-[11px] font-bold text-amber-700">
+              仕入先が数量を修正：{rec.vendorQtyChanges!.map((c) => `${c.productName} ${c.from}→${c.to}`).join('、')}
+            </div>
+          )}
           {inboundNext(rec) && <div className={`mt-1 inline-block rounded px-2 py-0.5 text-[11px] font-bold ${TONE[stateTone(rec) === 'action' ? 'action' : stateTone(rec) === 'urgent' ? 'urgent' : 'waiting']}`}>{inboundNext(rec)}</div>}
         </div>
         <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -248,6 +258,12 @@ function InboundCard({ rec, onSaved }: { rec: Inbound; onSaved: () => void }) {
             <details className="relative">
             <summary title="そのほかの操作" className="list-none cursor-pointer rounded-md border border-slate-200 px-2 py-1 text-slate-500 hover:bg-slate-50">…</summary>
             <div className="absolute right-0 z-20 mt-1 w-64 rounded-lg border border-slate-200 bg-white p-2 shadow-lg space-y-1.5 text-[11px]">
+              {!rec.received && !rec.cancelled && !rec.vendorShippedAt && (
+                <button disabled={busy} onClick={() => save({ vendorQtyAllowed: !rec.vendorQtyAllowed })} className="flex items-center gap-1 text-slate-700">
+                  <KeyRound className="w-3.5 h-3.5" />
+                  {rec.vendorQtyAllowed ? '仕入先の数量修正の許可をやめる' : '仕入先に数量の修正を許可する'}
+                </button>
+              )}
               {!rec.received && !rec.cancelled && (
                 <button disabled={busy} onClick={() => save({ vendorShipped: !rec.vendorShippedAt })} className="flex items-center gap-1 text-slate-700">
                   <Truck className="w-3.5 h-3.5" />
