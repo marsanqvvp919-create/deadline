@@ -192,7 +192,6 @@ export type ViewTab =
   | 'bulk_deliveries'
   | 'portal_admin'
   | 'product_quantity'
-  | 'delay_forecast'
   | 'morning_meeting';
 
 export interface WarehouseStockRecord {
