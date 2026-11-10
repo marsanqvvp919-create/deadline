@@ -2053,6 +2053,7 @@ function slimForClient() {
 // 合言葉（SALES_OS_KEY）をヘッダー x-sales-os-key で受け取ったときだけ返す
 //   ?clinicIds=111,222  … その顧客の伝票（見積も受注も）
 //   ?quotes=1           … 全顧客の見積の伝票だけ
+//   ?product=商品名      … その商品を買った伝票（キャンペーンの購入済の判定に使う）
 // ----------------------------------------------------------------------
 const salesOsKeyOk = (req: express.Request) => {
   const want = process.env.SALES_OS_KEY || '';
@@ -2067,10 +2068,15 @@ app.get('/api/sales-os/orders', (req, res) => {
   const all: any[] = serverRakurakuStore.orders?.orders || [];
   const ids = new Set(String(req.query.clinicIds || '').split(',').map((v) => v.trim()).filter(Boolean).slice(0, 300));
   const quotesOnly = String(req.query.quotes || '') === '1';
-  if (!ids.size && !quotesOnly) return res.status(400).json({ error: 'clinicIds か quotes=1 を指定してください' });
+  // ?product=Neocella … その商品を買った伝票（見積・キャンセルを除く）。明細はその商品の行だけ
+  const product = String(req.query.product || '').normalize('NFKC').trim().toLowerCase();
+  if (!ids.size && !quotesOnly && !product) return res.status(400).json({ error: 'clinicIds か quotes=1 か product を指定してください' });
   const isQuote = (o: any) => String(o.status || '').includes('見積');
+  const hasProduct = (l: any) => String(l.productName || '').normalize('NFKC').toLowerCase().includes(product);
   const orders = all
     .filter((o) => (ids.size ? ids.has(String(o.clinicId || '').trim()) : true) && (quotesOnly ? isQuote(o) : true))
+    .filter((o) => !product || (!isQuote(o) && !String(o.status || '').includes('キャンセル') && (o.lines || []).some(hasProduct)))
+    .map((o) => (product ? { ...o, lines: (o.lines || []).filter(hasProduct) } : o))
     .map((o) => ({
       orderId: o.orderId,
       status: o.status || '',
