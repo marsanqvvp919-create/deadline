@@ -460,7 +460,7 @@ export const ArrivalTrackingView: React.FC<{
         </div>
 
         {/* 今の状況ごとの件数（全件で数える。押すと絞り込み） */}
-        <div className="flex flex-wrap gap-1.5">
+        <div className="flex flex-wrap gap-2">
           {NOW_ORDER.filter((k) => counts[k] > 0 || stageFilter === k).map((k) => {
             const st = NOW_STATUS[k];
             const active = stageFilter === k;
@@ -470,11 +470,11 @@ export const ArrivalTrackingView: React.FC<{
                 type="button"
                 title={st.hint}
                 onClick={() => setStageFilter(active ? 'all' : k)}
-                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border transition ${active ? `${st.color} border-transparent` : `${st.soft}`}`}
+                className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border-2 transition ${active ? `${st.color} border-transparent` : `${st.soft}`}`}
               >
-                <st.Icon className="w-3.5 h-3.5" />
-                <span className="text-xs font-bold">{st.label}</span>
-                <span className="text-sm font-bold font-mono">{counts[k]}</span>
+                <st.Icon className="w-5 h-5" />
+                <span className="text-[15px] font-bold">{st.label}</span>
+                <span className="text-xl font-bold font-mono">{counts[k]}</span>
               </button>
             );
           })}
