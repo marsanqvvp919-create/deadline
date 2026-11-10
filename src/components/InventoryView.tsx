@@ -1025,6 +1025,15 @@ function VendorAccessPanel() {
         <div>③ 倉庫の担当者が受け取って数を確認し「承認」→ 倉庫の在庫に入ります</div>
         <div className="text-slate-500">仕入先の画面には、お客様名・金額は出ません。楽楽販売には書き込みません。</div>
       </div>
+      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs">
+        <span className="font-bold text-amber-900">テスト用の仕入先画面</span>
+        <span className="text-amber-800">サンプルの発注で「発送済み」を押す練習ができます（実データには影響しません・ログイン不要）</span>
+        <a href={url('demo')} target="_blank" rel="noreferrer" className="ml-auto inline-flex items-center gap-1 rounded-md border border-amber-400 bg-white px-2 py-1 font-bold text-amber-900 hover:bg-amber-100">
+          <ExternalLink className="w-3.5 h-3.5" />
+          テスト画面を開く
+        </a>
+        <CopyBtn text={url('demo')} label="URLをコピー" />
+      </div>
       {error && <ErrorNote message={error} compact />}
       {issued && (
         <div className="rounded-xl border-2 border-emerald-500 bg-emerald-50 p-3 space-y-2 text-xs">

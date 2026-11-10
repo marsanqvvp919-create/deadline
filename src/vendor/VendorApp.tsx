@@ -29,7 +29,53 @@ interface Data {
 
 const fmt = (iso: string | null) => (iso ? new Date(iso).toLocaleString('en-GB', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—');
 
+// /vendor/demo はテスト用のサンプル（ログインなし・サーバーに保存しない・実データに影響しない）
+const DEMO_SLUG = 'demo';
+const daysAgo = (n: number) => {
+  const d = new Date(Date.now() - n * 86400000);
+  return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
+};
+const demoPo = (poId: string, poDate: string, lines: [string, number][], shipped?: Partial<Po>): Po => ({
+  poId,
+  poDate,
+  shipTo: 'シンガポール倉庫',
+  shipToEn: 'Singapore warehouse',
+  lines: lines.map(([productName, qty], i) => ({ key: String(i + 1), productName, qty })),
+  shipped: false,
+  shippedAt: null,
+  shippedBy: null,
+  carrier: '',
+  trackingNos: [],
+  memo: '',
+  received: false,
+  receivedAt: null,
+  ...shipped,
+});
+let demoPos: Po[] = [
+  demoPo('TEST-0003', daysAgo(0), [['PROFHILO H+L 2ml', 10], ['PROFHILO Structura', 5]]),
+  demoPo('TEST-0002', daysAgo(1), [['JALUPRO YOUNG EYE', 20]]),
+  demoPo('TEST-0001', daysAgo(5), [['PLURYAL SILK', 30]], { shipped: true, shippedAt: new Date(Date.now() - 2 * 86400000).toISOString(), shippedBy: 'vendor', carrier: 'DHL', trackingNos: ['1234567890'] }),
+];
+function demoApi(path: string, body: any) {
+  if (path.startsWith('/api/vendor/info/')) return { name: 'TEST SUPPLIER（テスト）' };
+  if (path.startsWith('/api/vendor/data')) return { name: 'TEST SUPPLIER（テスト）', pos: demoPos, syncedAt: null };
+  if (path === '/api/vendor/logout') return { ok: true };
+  const m = path.match(/^\/api\/vendor\/po\/([^/]+)\/(ship|unship)$/);
+  if (m) {
+    demoPos = demoPos.map((p) => {
+      if (p.poId !== m[1]) return p;
+      if (m[2] === 'unship') return { ...p, shipped: false, shippedAt: null, shippedBy: null };
+      const nos = String(body?.trackingNos || '').split(/[、,\s\n]+/).map((x) => x.trim()).filter(Boolean);
+      return { ...p, shipped: true, shippedAt: new Date().toISOString(), shippedBy: 'vendor', carrier: body?.carrier || '', memo: body?.memo || '', trackingNos: [...p.trackingNos, ...nos] };
+    });
+    return { ok: true };
+  }
+  return {};
+}
+let demoMode = false;
+
 async function api(path: string, init?: RequestInit) {
+  if (demoMode) return demoApi(path, init?.body ? JSON.parse(String(init.body)) : null);
   const r = await fetch(path, { ...init, headers: { 'Content-Type': 'application/json', ...(init?.headers || {}) } });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw Object.assign(new Error(j?.error || `Error (${r.status})`), { status: r.status });
@@ -205,6 +251,7 @@ function PoCard({ po, slug, onDone }: { po: Po; slug: string; onDone: () => void
 }
 
 export function VendorApp({ slug }: { slug: string }) {
+  demoMode = slug === DEMO_SLUG;
   const [data, setData] = useState<Data | null>(null);
   const [needLogin, setNeedLogin] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -274,6 +321,11 @@ export function VendorApp({ slug }: { slug: string }) {
         </div>
       </header>
       <main className="max-w-4xl mx-auto px-4 py-4 space-y-4">
+        {demoMode && (
+          <div className="rounded-xl border-2 border-amber-300 bg-amber-50 px-4 py-2.5 text-sm text-amber-900">
+            <b>テスト画面 / Test mode</b>：サンプルの発注です。押しても実際のデータ・在庫には影響しません。ページを開き直すと元に戻ります。
+          </div>
+        )}
         <div className="flex gap-2">
           {(
             [
