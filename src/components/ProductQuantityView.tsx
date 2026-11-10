@@ -5,6 +5,20 @@ import { exportToCsv, isShippingOrFee } from '../utils';
 import { isQuoteOrder } from '../utils/salesCalculations';
 import { getLocalProducts } from '../api';
 import { PRODUCT_GENRES } from '../data/productGenres';
+
+// ジャンルの大きな分類（画面でまとめて見せるため。楽楽のジャンルはそのまま）
+const GENRE_GROUPS: { label: string; genres: string[] }[] = [
+  { label: 'フィラー', genres: ['ヒアルロン酸', 'PDLLA/PLLA', 'CaHA・PCLフィラー', 'ヒアルロン酸溶解'] },
+  { label: 'スキンブースター', genres: ['スキンブースター'] },
+  { label: 'ボツリヌス', genres: ['ボツリヌストキシン製剤'] },
+  { label: '糸リフト', genres: ['Thread Lift', 'Shopping Lift'] },
+  { label: '痩身・脂肪溶解', genres: ['脂肪溶解注射', '痩身'] },
+  { label: '薬・注射・点滴', genres: ['内服薬', '外用薬', 'ホルモン剤', '点滴製剤', '注射薬（その他）', 'プラセンタ注射', '麻酔関連'] },
+  { label: 'スキンケア・ピーリング', genres: ['スキンケア・化粧品', 'ピーリング製剤'] },
+  { label: '器具・消耗品', genres: ['カニューレ', '機器・消耗品', '外科材料'] },
+  { label: 'その他', genres: [] },
+];
+const genreGroupOf = (genre: string) => GENRE_GROUPS.find((g) => g.genres.includes(genre))?.label || 'その他';
 import { ORIGIN_GROUPS, OriginGroup, originGroupOf, productOrigin } from '../data/productOrigins';
 
 // 製剤別の数量：製剤ごとに「まだ届けていない注文（未発注・手配済み）」「未発送」「これまでに売れた数」を並べる。
@@ -70,7 +84,15 @@ export function ProductQuantityView({
   const [sort, setSort] = useState<SortKey>('unshipped');
   const [onlyPending, setOnlyPending] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
-  const [genre, setGenre] = useState<string>('all');
+  // ジャンルは複数選べる（空＝すべて）
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const toggleGenres = (list: string[]) =>
+    setPicked((prev) => {
+      const next = new Set(prev);
+      const allOn = list.every((g) => next.has(g));
+      list.forEach((g) => (allOn ? next.delete(g) : next.add(g)));
+      return next;
+    });
   const [origin, setOrigin] = useState<OriginGroup | 'all'>('all');
 
   const productById = useMemo(() => new Map(getLocalProducts().map((p) => [p.productId, p])), [orders]);
@@ -163,8 +185,21 @@ export function ProductQuantityView({
     return Array.from(m.values()).sort((a, b) => Number(a.genre === NO_GENRE) - Number(b.genre === NO_GENRE) || b.sold - a.sold);
   }, [matched]);
 
+  const genreGroups = useMemo(() => {
+    const m = new Map<string, { label: string; order: number; items: typeof genres; unshipped: number; sold: number }>();
+    for (const g of genres) {
+      const label = genreGroupOf(g.genre);
+      const grp = m.get(label) || { label, order: GENRE_GROUPS.findIndex((x) => x.label === label), items: [], unshipped: 0, sold: 0 };
+      grp.items.push(g);
+      grp.unshipped += g.unshipped;
+      grp.sold += g.sold;
+      m.set(label, grp);
+    }
+    return Array.from(m.values()).sort((a, b) => a.order - b.order);
+  }, [genres]);
+
   const shown = useMemo(() => {
-    const list = matched.filter((r) => genre === 'all' || r.genre === genre);
+    const list = matched.filter((r) => picked.size === 0 || picked.has(r.genre));
     const by: Record<SortKey, (a: Row, b: Row) => number> = {
       unshipped: (a, b) => b.unshipped - a.unshipped || b.sold - a.sold,
       unordered: (a, b) => b.unordered - a.unordered || b.unshipped - a.unshipped,
@@ -172,7 +207,7 @@ export function ProductQuantityView({
       name: (a, b) => a.productName.localeCompare(b.productName, 'ja'),
     };
     return list.sort(by[sort]);
-  }, [matched, genre, sort]);
+  }, [matched, picked, sort]);
 
   const total = useMemo(
     () => shown.reduce((s, r) => ({ unordered: s.unordered + r.unordered, arranged: s.arranged + r.arranged, unshipped: s.unshipped + r.unshipped, sold: s.sold + r.sold }), { unordered: 0, arranged: 0, unshipped: 0, sold: 0 }),
@@ -184,7 +219,7 @@ export function ProductQuantityView({
     const today = ymd(new Date()).replace(/-/g, '');
     const parts = [
       origin !== 'all' ? ORIGIN_GROUPS.find((g) => g.id === origin)?.label : '',
-      genre !== 'all' ? genre : '',
+      picked.size ? Array.from(picked).join('・') : '',
       PERIODS.find((p) => p.id === period)!.label,
     ].filter(Boolean);
     exportToCsv(`製剤別の数量_${parts.join('_')}_${today}.csv`, [
@@ -275,7 +310,7 @@ export function ProductQuantityView({
                     key={g.id}
                     onClick={() => {
                       setOrigin(on && g.id !== 'all' ? 'all' : g.id);
-                      setGenre('all');
+                      setPicked(new Set());
                     }}
                     className={`text-left rounded-xl border px-3 py-2 transition ${on ? 'border-indigo-700 bg-indigo-700 text-white' : 'border-slate-200 bg-white hover:bg-slate-50'}`}
                   >
@@ -293,28 +328,51 @@ export function ProductQuantityView({
           </div>
         </div>
 
-        {/* ジャンル別：押すとそのジャンルの製剤だけを下に出す */}
+        {/* ジャンル：大きな分類ごとにまとめ、複数選べる */}
         <div className="px-4 py-3 border-b border-slate-200">
-          <div className="text-xs font-bold text-slate-700 mb-2">ジャンル別（押すと、そのジャンルの製剤だけを表示）</div>
-          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-2">
-            {[{ genre: 'all', count: matched.length, ...genres.reduce((t, g) => ({ unordered: t.unordered + g.unordered, unshipped: t.unshipped + g.unshipped, sold: t.sold + g.sold }), { unordered: 0, unshipped: 0, sold: 0 }) }, ...genres].map((g) => {
-              const on = genre === g.genre;
+          <div className="flex items-center gap-3 mb-2">
+            <span className="text-xs font-bold text-slate-700">ジャンル（いくつでも選べます）</span>
+            {picked.size > 0 && (
+              <button onClick={() => setPicked(new Set())} className="text-xs font-bold text-indigo-700 hover:underline">
+                選択を解除（{picked.size}件選択中）
+              </button>
+            )}
+          </div>
+          <div className="divide-y divide-slate-100">
+            {genreGroups.map((grp) => {
+              const names = grp.items.map((g) => g.genre);
+              const allOn = names.every((g) => picked.has(g));
+              const someOn = !allOn && names.some((g) => picked.has(g));
               return (
-                <button
-                  key={g.genre}
-                  onClick={() => setGenre(on && g.genre !== 'all' ? 'all' : g.genre)}
-                  className={`text-left rounded-xl border px-3 py-2 transition ${on ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 bg-white hover:bg-slate-50'}`}
-                >
-                  <div className="flex items-baseline justify-between gap-2">
-                    <span className="text-xs font-bold truncate">{g.genre === 'all' ? 'すべて' : g.genre}</span>
-                    <span className={`text-[11px] shrink-0 ${on ? 'text-slate-300' : 'text-slate-400'}`}>{g.count}製剤</span>
-                  </div>
-                  <div className="mt-1 flex gap-3 text-[11px] font-mono">
-                    <span className={on ? 'text-amber-300' : 'text-amber-600'}>未発注 {n(g.unordered)}</span>
-                    <span className={on ? 'text-rose-300' : 'text-rose-600'}>未発送 {n(g.unshipped)}</span>
-                    <span className={on ? 'text-emerald-300' : 'text-emerald-700'}>売 {n(g.sold)}</span>
-                  </div>
-                </button>
+                <div key={grp.label} className="flex flex-wrap items-center gap-1.5 py-1.5">
+                  <button
+                    onClick={() => toggleGenres(names)}
+                    title="この分類をまとめて選ぶ"
+                    className={`w-52 shrink-0 text-left rounded-lg border px-2.5 py-1.5 transition ${allOn ? 'border-slate-900 bg-slate-900 text-white' : someOn ? 'border-slate-500 bg-slate-100' : 'border-slate-200 bg-white hover:bg-slate-50'}`}
+                  >
+                    <div className="text-[13px] font-bold">{grp.label}</div>
+                    <div className={`text-[11px] font-mono whitespace-nowrap ${allOn ? "text-slate-300" : "text-slate-500"}`}>
+                      未発送 {n(grp.unshipped)}・売 {n(grp.sold)}
+                    </div>
+                  </button>
+                  {grp.items.length > 1
+                    ? grp.items.map((g) => {
+                        const on = picked.has(g.genre);
+                        return (
+                          <button
+                            key={g.genre}
+                            onClick={() => toggleGenres([g.genre])}
+                            className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[13px] transition ${on ? 'border-indigo-700 bg-indigo-700 text-white' : 'border-slate-200 bg-white hover:bg-slate-50 text-slate-700'}`}
+                          >
+                            {on && <span aria-hidden>✓</span>}
+                            <span className="font-semibold">{g.genre}</span>
+                            <span className={`text-[11px] ${on ? 'text-indigo-200' : 'text-slate-400'}`}>{g.count}</span>
+                            {g.unordered > 0 && <span className={`text-[11px] font-mono ${on ? 'text-amber-200' : 'text-amber-600'}`}>未発注{n(g.unordered)}</span>}
+                          </button>
+                        );
+                      })
+                    : <span className="text-[11px] text-slate-400">{grp.items[0].count}製剤{grp.items[0].unordered > 0 ? `・未発注 ${n(grp.items[0].unordered)}` : ''}</span>}
+                </div>
               );
             })}
           </div>
