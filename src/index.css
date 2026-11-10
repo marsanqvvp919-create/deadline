@@ -167,3 +167,101 @@ main span.rounded-md {
     -webkit-overflow-scrolling: touch;
   }
 }
+
+/* ======================================================================
+   見た目の統一（全画面共通）
+   画面ごとに少しずつ違っていた角の丸み・影・余白・色・文字の太さを、ここで1つにそろえる。
+   色の意味：藍＝操作ボタン・選択中／赤＝遅れ・急ぎ／黄＝あなたの作業待ち／青＝進行中／緑＝完了／灰＝対象外
+   ====================================================================== */
+:root {
+  --ui-primary: #4f46e5;       /* 藍（indigo-600）：押すボタン・選択中 */
+  --ui-primary-hover: #4338ca; /* indigo-700 */
+  --ui-primary-text: #4338ca;
+  --ui-radius-card: 0.75rem;   /* 箱の角 */
+  --ui-border: #e2e8f0;
+}
+
+/* 箱の角の丸みを1種類に */
+main .rounded-2xl,
+main .rounded-3xl {
+  border-radius: var(--ui-radius-card);
+}
+
+/* 影をなくして平らに（重なって出る小窓だけ影を残す） */
+main .shadow-xs,
+main .shadow-2xs,
+main .shadow-sm,
+main .shadow,
+main .shadow-md {
+  box-shadow: none;
+}
+
+/* 画面を開いたときのふわっと出る動きはなくす（毎回待たされる感じになるため） */
+main .animate-in {
+  animation: none !important;
+}
+
+/* 画面の縦の間隔を1種類に */
+main > div > .space-y-6 > :not(:last-child),
+main > .space-y-6 > :not(:last-child),
+main .space-y-6 > :not(:last-child) {
+  margin-bottom: 1rem;
+}
+main .space-y-6 > :not(:first-child) {
+  margin-top: 0;
+}
+
+/* 操作ボタン・リンクの色を藍1色に（青・紫などがばらばらだった） */
+main .bg-blue-600,
+main .bg-indigo-600,
+main .bg-violet-600 {
+  background-color: var(--ui-primary);
+}
+main .hover\:bg-blue-500:hover,
+main .hover\:bg-blue-700:hover,
+main .hover\:bg-indigo-700:hover,
+main .hover\:bg-indigo-500:hover {
+  background-color: var(--ui-primary-hover);
+}
+main a.text-blue-700,
+main button.text-blue-700,
+main .text-blue-700.hover\:underline {
+  color: var(--ui-primary-text);
+}
+
+/* 大きすぎる数字・太すぎる文字を控えめに */
+main .text-2xl {
+  font-size: 1.25rem;
+  line-height: 1.75rem;
+}
+main .font-black {
+  font-weight: 800;
+}
+main .font-extrabold {
+  font-weight: 700;
+}
+
+/* 表：見出しは同じ色・同じ大きさ、行の高さをそろえる */
+main thead th {
+  color: #475569;
+  font-weight: 700;
+  font-size: 11px;
+}
+main tbody td {
+  vertical-align: top;
+}
+
+/* 入力欄・プルダウンの角と枠をそろえる */
+main input[type='text'],
+main input[type='search'],
+main input[type='date'],
+main input:not([type]),
+main select {
+  border-radius: 0.5rem;
+}
+main input:focus,
+main select:focus,
+main textarea:focus {
+  outline: 2px solid #c7d2fe;
+  outline-offset: 0;
+}

@@ -703,12 +703,12 @@ export default function App() {
     { id: 'analysis', label: 'その他' },
     { id: 'admin', label: '管理' },
   ];
-  // グループごとの色（左メニューの見出し・選択中・アイコン、上部の帯と見出しで同じ色を使う）
+  // 左メニュー・上部の色。統一感のため、どのグループも同じ色（選択中は藍）にそろえる
   const GROUP_THEME: Record<string, { dot: string; label: string; icon: string; active: string; chip: string; bar: string }> = {
-    today: { dot: 'bg-rose-400', label: 'text-rose-300', icon: 'text-rose-300', active: 'bg-gradient-to-r from-rose-500 to-pink-500 border-rose-400', chip: 'bg-rose-50 text-rose-700 border-rose-200', bar: 'from-rose-500 via-pink-500 to-orange-400' },
-    shipping: { dot: 'bg-sky-400', label: 'text-sky-300', icon: 'text-sky-300', active: 'bg-gradient-to-r from-sky-500 to-indigo-500 border-sky-400', chip: 'bg-sky-50 text-sky-700 border-sky-200', bar: 'from-sky-500 via-indigo-500 to-violet-500' },
-    analysis: { dot: 'bg-emerald-400', label: 'text-emerald-300', icon: 'text-emerald-300', active: 'bg-gradient-to-r from-emerald-500 to-teal-500 border-emerald-400', chip: 'bg-emerald-50 text-emerald-700 border-emerald-200', bar: 'from-emerald-500 via-teal-500 to-cyan-500' },
-    admin: { dot: 'bg-violet-400', label: 'text-violet-300', icon: 'text-violet-300', active: 'bg-gradient-to-r from-violet-500 to-fuchsia-500 border-violet-400', chip: 'bg-violet-50 text-violet-700 border-violet-200', bar: 'from-violet-500 via-fuchsia-500 to-pink-500' },
+    today: { dot: 'bg-slate-500', label: 'text-slate-400', icon: 'text-slate-400', active: 'bg-indigo-600 border-indigo-500', chip: 'bg-slate-100 text-slate-600 border-slate-200', bar: 'from-indigo-500 to-indigo-500' },
+    shipping: { dot: 'bg-slate-500', label: 'text-slate-400', icon: 'text-slate-400', active: 'bg-indigo-600 border-indigo-500', chip: 'bg-slate-100 text-slate-600 border-slate-200', bar: 'from-indigo-500 to-indigo-500' },
+    analysis: { dot: 'bg-slate-500', label: 'text-slate-400', icon: 'text-slate-400', active: 'bg-indigo-600 border-indigo-500', chip: 'bg-slate-100 text-slate-600 border-slate-200', bar: 'from-indigo-500 to-indigo-500' },
+    admin: { dot: 'bg-slate-500', label: 'text-slate-400', icon: 'text-slate-400', active: 'bg-indigo-600 border-indigo-500', chip: 'bg-slate-100 text-slate-600 border-slate-200', bar: 'from-indigo-500 to-indigo-500' },
   };
   // 通関・輸入はクール手配漏れ・通関NGをタブで含む
   const CUSTOMS_TABS: ViewTab[] = ['customs_management', 'cool_missing', 'kanto_customs_ng'];
