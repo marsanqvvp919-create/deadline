@@ -1541,6 +1541,23 @@ export function AllocationPanel({ data, onSaved }: { data: InventoryData; onSave
 /** サンプル表示の切り替え（実データと切り離したサンプルで流れを試す） */
 function DemoBar({ onChange }: { onChange: () => void }) {
   const [on, setOn] = useState(isInventoryDemo());
+  // ふだんは目立たない小さなリンクだけ。サンプル表示中は、実データでないことが分かるよう帯で出す
+  if (!on)
+    return (
+      <div className="flex justify-end -mb-1">
+        <button
+          onClick={() => {
+            setInventoryDemo(true);
+            setOn(true);
+            onChange();
+          }}
+          title="実データとは別のサンプルで、入荷から出荷までの操作を試せます"
+          className="text-[11px] text-slate-400 hover:text-slate-700 underline underline-offset-2"
+        >
+          サンプルで練習する
+        </button>
+      </div>
+    );
   return (
     <div className={`flex flex-wrap items-center gap-2 rounded-xl border px-3 py-2 text-xs ${on ? 'border-fuchsia-300 bg-fuchsia-50 text-fuchsia-900' : 'border-slate-200 bg-white text-slate-600'}`}>
       <label className="inline-flex items-center gap-2 font-bold cursor-pointer">
@@ -1735,11 +1752,6 @@ export function ShippingInstructionsPage({ onNavigate }: { onNavigate?: (tab: st
     <div className="space-y-3">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-xl font-bold text-slate-900 flex items-center gap-2">
-            <ClipboardList className="w-6 h-6 text-indigo-600" />
-            引当・出荷指示
-          </h1>
-          <p className="text-xs text-slate-500 mt-1">在庫から引き当てた明細を倉庫ごとの出荷指示にし、インボイス・AWBの作成から出荷・配達まで追います。</p>
         </div>
         <div className="flex gap-2 text-xs">
           <button onClick={load} className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-semibold text-slate-700 hover:bg-slate-50">

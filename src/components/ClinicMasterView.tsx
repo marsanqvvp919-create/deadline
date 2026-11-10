@@ -339,18 +339,9 @@ export const ClinicMasterView: React.FC<ClinicMasterViewProps> = ({
       <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-4">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div className="flex items-start gap-3.5">
-            <div className="w-11 h-11 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-xs">
-              <Building2 className="w-6 h-6" />
-            </div>
             <div>
               <div className="flex items-center gap-2 flex-wrap">
-                <h1 className="text-xl font-bold text-slate-900 tracking-tight">
-                  クリニックマスタ管理（顧客マスタ）
-                </h1>
               </div>
-              <p className="text-xs text-slate-500 mt-1">
-                楽楽販売の顧客マスタです（閲覧のみ）。ご注文管理とクリニックIDでつなぎ、医院ごとの進行中の受注を表示します。
-              </p>
             </div>
           </div>
 

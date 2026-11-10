@@ -209,11 +209,6 @@ export function UnorderedView({
     <div className="space-y-3">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-xl font-bold text-slate-900 flex items-center gap-2">
-            <ShoppingCart className="w-6 h-6 text-amber-500" />
-            未発注
-          </h1>
-          <p className="text-xs text-slate-500 mt-1">まだ手配していない明細です（送料・手数料、在庫から引き当て済みの分は除く）。在庫があれば引き当て、無ければ楽楽販売で発注します。</p>
         </div>
         <div className="flex flex-wrap gap-2 text-xs">
           <button onClick={exportCsv} className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-semibold text-slate-700 hover:bg-slate-50">

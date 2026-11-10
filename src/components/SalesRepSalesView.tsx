@@ -211,21 +211,12 @@ export const SalesRepSalesView: React.FC<SalesRepSalesViewProps> = ({
       {/* Header & Month Selector */}
       <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex items-start gap-3.5">
-          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-indigo-600 to-blue-700 text-white flex items-center justify-center shrink-0 shadow-sm">
-            <Users className="w-6 h-6" />
-          </div>
           <div>
             <div className="flex items-center gap-2.5 flex-wrap">
-              <h1 className="text-xl font-bold text-slate-900 tracking-tight">
-                営業別売上管理・内訳分析
-              </h1>
               <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-indigo-100 text-indigo-800 border border-indigo-200 font-mono">
                 表示月: {selectedMonth}
               </span>
             </div>
-            <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-              各営業担当をクリックすると個別伝票の内訳が表示されます。また下部ではクリニックのランク別売上を集計しています。
-            </p>
           </div>
         </div>
 

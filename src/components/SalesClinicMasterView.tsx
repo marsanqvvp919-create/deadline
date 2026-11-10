@@ -155,14 +155,8 @@ export const SalesClinicMasterView: React.FC<SalesClinicMasterViewProps> = ({
       {/* Page Title & Filters */}
       <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex items-start gap-3.5">
-          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-indigo-600 to-purple-700 text-white flex items-center justify-center shrink-0 shadow-sm">
-            <Building2 className="w-6 h-6" />
-          </div>
           <div>
             <div className="flex items-center gap-2.5 flex-wrap">
-              <h1 className="text-xl font-bold text-slate-900 tracking-tight">
-                クリニックマスタ・ランク管理
-              </h1>
               <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-purple-100 text-purple-800 border border-purple-200 font-mono">
                 登録医院数: {clinicAggregateMap.length} 院
               </span>

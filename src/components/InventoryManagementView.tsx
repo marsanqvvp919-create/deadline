@@ -270,14 +270,8 @@ export const InventoryManagementView: React.FC<InventoryManagementViewProps> = (
       <div className="bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl text-white">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-start gap-4">
-            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shrink-0 shadow-lg">
-              <Building className="w-7 h-7 text-white" />
-            </div>
             <div className="min-w-0">
               <div className="flex items-center gap-2.5 flex-wrap">
-                <h1 className="text-xl font-bold tracking-tight">
-                  韓国・シンガポール倉庫 在庫管理
-                </h1>
                 <span className="text-xs font-bold px-3 py-1 rounded-full bg-blue-500/30 text-blue-200 border border-blue-400/30 font-mono">
                   韓国倉庫 (KR) & シンガポール倉庫 (SIN)
                 </span>

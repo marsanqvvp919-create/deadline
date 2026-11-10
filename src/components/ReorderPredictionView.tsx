@@ -103,21 +103,12 @@ export const ReorderPredictionView: React.FC<ReorderPredictionViewProps> = ({
       {/* Header */}
       <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex items-start gap-3.5">
-          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-emerald-600 to-teal-700 text-white flex items-center justify-center shrink-0 shadow-sm">
-            <RefreshCw className="w-6 h-6" />
-          </div>
           <div>
             <div className="flex items-center gap-2.5 flex-wrap">
-              <h1 className="text-xl font-bold text-slate-900 tracking-tight">
-                定期購入・リピート予測アナリティクス
-              </h1>
               <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200 font-mono">
                 自動サイクル検知
               </span>
             </div>
-            <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-              クリニックごとの前回発注からの経過日数と平均サイクルを分析し、そろそろ追加発注の可能性がある医院を自動検知してリマインドします。
-            </p>
           </div>
         </div>
       </div>

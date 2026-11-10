@@ -218,12 +218,8 @@ export const CoolMissingView: React.FC<CoolMissingViewProps> = ({
       <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-start gap-4">
-            <div className="w-14 h-14 rounded-2xl bg-amber-500 text-slate-900 flex items-center justify-center shrink-0 shadow-lg font-black">
-              <Thermometer className="w-8 h-8" />
-            </div>
             <div>
               <div className="flex items-center gap-2.5 flex-wrap">
-                <h1 className="text-xl font-bold tracking-tight">クール手配漏れ一覧</h1>
                 <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-200 font-mono">
                   漏れ件数: {coolMissingShipments.length} 件
                 </span>

@@ -63,21 +63,12 @@ export const RepRankingView: React.FC<RepRankingViewProps> = ({
       {/* Header */}
       <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex items-start gap-3.5">
-          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-amber-500 to-yellow-600 text-white flex items-center justify-center shrink-0 shadow-sm">
-            <Trophy className="w-6 h-6" />
-          </div>
           <div>
             <div className="flex items-center gap-2.5 flex-wrap">
-              <h1 className="text-xl font-bold text-slate-900 tracking-tight">
-                営業担当別パフォーマンスランキング & 表彰ボード
-              </h1>
               <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-200 font-mono">
                 {selectedMonth} 成果ランキング
               </span>
             </div>
-            <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-              当月の営業メンバーの売上実績および目標達成率をリアルタイムでランキング集計し、優秀者の表彰を行います。
-            </p>
           </div>
         </div>
       </div>

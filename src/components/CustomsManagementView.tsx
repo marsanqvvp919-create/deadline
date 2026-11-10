@@ -248,12 +248,8 @@ export const CustomsManagementView: React.FC<CustomsManagementViewProps> = ({
       <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-start gap-4">
-            <div className="w-14 h-14 rounded-2xl bg-blue-600 flex items-center justify-center shrink-0 shadow-lg">
-              <ShieldAlert className="w-7 h-7 text-white" />
-            </div>
             <div>
               <div className="flex items-center gap-2.5 flex-wrap">
-                <h1 className="text-xl font-bold tracking-tight">通関・輸入管理一覧</h1>
                 <span className="text-xs font-bold px-3 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200 font-mono">
                   楽楽販売 出荷管理
                 </span>

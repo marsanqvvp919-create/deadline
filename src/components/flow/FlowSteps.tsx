@@ -48,8 +48,8 @@ export function FlowSteps({ current, onNavigate, unordered }: { current?: FlowSt
     if (onNavigate) onNavigate(tab);
   };
   return (
-    <div className="rounded-xl border border-slate-200 bg-white px-2 py-2 overflow-x-auto">
-      <div className="flex items-stretch gap-1 min-w-max">
+    <div className="rounded-xl border border-slate-200 bg-white px-2 pt-2.5 pb-1.5 overflow-x-auto">
+      <div className="flex items-center gap-0.5 min-w-max">
         {STEPS.map((s, i) => {
           // 未発注は画面側で数えた数（左メニュー・未発注の画面と同じ）を優先する
           const n = s.id === 'unordered' && unordered !== undefined ? unordered : counts ? s.count(counts) : null;
@@ -59,19 +59,17 @@ export function FlowSteps({ current, onNavigate, unordered }: { current?: FlowSt
           return (
             <React.Fragment key={s.id}>
               <div className={`relative flex rounded-lg border transition ${here ? 'ring-2 ring-indigo-500 ring-offset-1' : ''} ${TONE[tone]}`}>
-                <button onClick={() => go(s.tab)} title={s.hint} className="flex flex-col items-start px-3 py-1.5 text-left w-24">
-                  <span className="text-[10px] font-bold opacity-80 whitespace-nowrap">
-                    {i + 1}. {s.label}
-                  </span>
-                  <span className="text-base font-black font-mono leading-tight">{n === null ? '…' : n === 0 ? '✓' : n}</span>
+                <button onClick={() => go(s.tab)} title={s.hint} className="flex items-baseline gap-1.5 px-2 py-1 text-left whitespace-nowrap">
+                  <span className="text-[11px] font-bold opacity-80">{s.label}</span>
+                  <span className="text-sm font-black font-mono leading-none">{n === null ? '…' : n === 0 ? '✓' : n}</span>
                 </button>
                 {leak > 0 && (
-                  <button onClick={() => go('leak_check')} title="目安の日数を過ぎて止まっているもの（今日の作業を開く）" className="absolute -top-2 -right-1.5 rounded-full bg-rose-600 px-1.5 text-[10px] font-black text-white shadow">
+                  <button onClick={() => go('leak_check')} title="目安の日数を過ぎて止まっているもの（今日の作業を開く）" className="absolute -top-2 -right-1.5 rounded-full bg-rose-600 px-1 text-[9px] font-black text-white shadow">
                     漏れ{leak}
                   </button>
                 )}
               </div>
-              {i < STEPS.length - 1 && <ChevronRight className="w-4 h-4 text-slate-300 self-center shrink-0" />}
+              {i < STEPS.length - 1 && <ChevronRight className="w-3 h-3 text-slate-300 shrink-0" />}
             </React.Fragment>
           );
         })}

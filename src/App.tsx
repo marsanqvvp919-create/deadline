@@ -716,7 +716,7 @@ export default function App() {
   // 今日の作業：漏れ・納期超過・やること・未照合を1つの画面にまとめ、中をタブで切り替える（上から順に片付ける）
   // 各画面の一番上に出す「この画面でやること」（1行）
   const PAGE_GUIDE: Partial<Record<ViewTab, string>> = {
-    leak_check: '目安の日数を過ぎても次に進んでいないものを片付けます。行を押すと、その作業をする画面へ移ります',
+    leak_check: '目安の日数を過ぎても次に進んでいないものを片付けます。上のタブの①から順に片付け、件数が ✓ になればその種類は終わりです',
     overdue: '最長納期を過ぎた受注を確認し、仕入先への督促やクリニックへの連絡をします',
     alerts: '楽楽販売の入力が抜けている受注・出荷を直します（直す場所は各行に書いてあります）',
     unmatched_sheets: '出荷シートにあるのに楽楽販売の出荷と結びつかない荷物を確認し、楽楽販売に登録します',
@@ -737,6 +737,11 @@ export default function App() {
     clinics: 'クリニックの情報と、送り先（英語名・住所・電話）を確認・修正します',
     portal_admin: 'お客様が見る管理画面のURLとパスワードを発行・管理します',
     product_quantity: '製剤ごとに、未発注・未発送の数と、これまでに売れた数を確認します',
+    sales_dashboard: '全社の月別売上（入金済・請求・受注ベース）と、当月の目標の達成状況を見ます',
+    sales_rep_sales: '営業担当ごとの売上を見ます。担当を押すと伝票の内訳が出ます',
+    sales_clinic_master: 'クリニックごとの売上とランクを確認・設定します',
+    reorder_prediction: '前回の注文からの日数と、いつもの注文の間隔から、そろそろ注文がありそうなクリニックを見ます',
+    rep_ranking: '当月の営業担当の売上と目標の達成率をランキングで見ます',
   };
   // 今日の作業の件数（左メニュー・右上・タブで同じ数を使う）
   const todayTotal = leakTotal + (sheetUnmatchedCount || 0);
@@ -1030,6 +1035,7 @@ export default function App() {
         <Navbar
           appName={APP_NAME}
           pageTitle={currentNav?.label || ''}
+          pageGuide={PAGE_GUIDE[activeTab]}
           search={<GlobalSearch orders={deliveryData.orders} shipments={shipments} onPick={(o) => handleOpenDetail(o)} />}
           groupLabel={currentGroup?.label || ''}
           groupChip={currentGroup ? GROUP_THEME[currentGroup.id].chip : ''}
@@ -1054,8 +1060,9 @@ export default function App() {
 
         {/* Main View Container */}
         <main className="flex-1 p-4 sm:p-5 max-w-[1920px] w-full mx-auto min-w-0">
-          {(currentGroup?.id === 'today' || currentGroup?.id === 'shipping') && activeTab !== 'shipping_calc' && (
-            <div className="mb-4">
+          {/* 流れのバーは、流れの中の画面（未発注・入荷・引当・配送）だけに出す */}
+          {FLOW_CURRENT[activeTab] && (
+            <div className="mb-3">
               <FlowSteps current={FLOW_CURRENT[activeTab]} unordered={paidUnorderedCount} onNavigate={(t) => setActiveTab(t as ViewTab)} />
             </div>
           )}
@@ -1080,14 +1087,7 @@ export default function App() {
                   </button>
                 ))}
               </div>
-              <p className="text-[11px] text-slate-500">①から順に片付けてください。件数が ✓ になれば、その種類の作業は終わりです。</p>
             </div>
-          )}
-          {PAGE_GUIDE[activeTab] && (
-            <p className="mb-3 flex items-start gap-1.5 text-xs text-slate-600">
-              <span className="shrink-0 rounded bg-slate-900 px-1.5 py-0.5 text-[10px] font-bold text-white">この画面でやること</span>
-              <span className="pt-px">{PAGE_GUIDE[activeTab]}</span>
-            </p>
           )}
           {staleInfo && (
             <div className="mb-4 px-4 py-2.5 rounded-xl border border-amber-300 bg-amber-50 text-amber-900 text-xs font-bold flex items-center gap-2">

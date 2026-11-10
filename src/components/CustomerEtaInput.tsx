@@ -124,3 +124,37 @@ export function CustomerPortalDisplayInput({ orderId }: { orderId: string }) {
     </div>
   );
 }
+
+const statusLabel = (v: string) => SHOWN_STATUSES.find(([k]) => k === v)?.[1] || '';
+
+/**
+ * お客様画面に出す内容（到着予定日・段階・お知らせ）を1つにまとめた欄。
+ * ふだんは今の設定を1行で見せ、「変える」を押したときだけ入力欄を開く（一覧の行を低く保つ）。
+ */
+export function CustomerDisplayCell({ orderId }: { orderId: string }) {
+  const { entry } = usePortalEta(orderId);
+  const [open, setOpen] = useState(false);
+  const parts = [
+    entry?.status ? statusLabel(entry.status) : '',
+    entry?.date ? `到着予定 ${entry.date.slice(5).replace('-', '/')}` : '',
+    entry?.memo ? 'お知らせあり' : '',
+  ].filter(Boolean);
+  return (
+    <div className="text-[11px] min-w-[150px]" onClick={(e) => e.stopPropagation()}>
+      <div className="flex items-center gap-1.5">
+        <span className={parts.length ? 'font-bold text-violet-800' : 'text-slate-400'} title={entry?.memo || undefined}>
+          {parts.length ? parts.join('・') : '自動'}
+        </span>
+        <button type="button" onClick={() => setOpen(!open)} className="text-indigo-600 hover:underline cursor-pointer shrink-0">
+          {open ? '閉じる' : '変える'}
+        </button>
+      </div>
+      {open && (
+        <div className="mt-1.5 space-y-1.5 rounded-lg border border-slate-200 bg-slate-50 p-2">
+          <CustomerEtaInput orderId={orderId} />
+          <CustomerPortalDisplayInput orderId={orderId} />
+        </div>
+      )}
+    </div>
+  );
+}

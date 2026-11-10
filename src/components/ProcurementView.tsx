@@ -488,16 +488,7 @@ ${linesText}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200/80 pb-5">
         <div className="space-y-1.5">
           <div className="flex items-center gap-3 flex-wrap">
-            <div className="w-9 h-9 rounded-xl bg-amber-500 text-white flex items-center justify-center shadow-xs">
-              <ShoppingCart className="w-5 h-5" />
-            </div>
-            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
-              発注管理（入金済み未発注）
-            </h1>
           </div>
-          <p className="text-xs sm:text-sm text-slate-500">
-            まだ仕入先に発注していない明細です（送料・手数料は除く）。仕入先ごとにまとめて、楽楽販売で発注登録します。
-          </p>
         </div>
 
         {/* Global Action Buttons */}

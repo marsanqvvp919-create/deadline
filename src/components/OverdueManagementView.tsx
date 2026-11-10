@@ -26,7 +26,7 @@ import {
   formatDelayString,
 } from '../utils/delayCalculation';
 import { TableEmptyState } from './TableEmptyState';
-import { CustomerEtaInput, CustomerPortalDisplayInput } from './CustomerEtaInput';
+import { CustomerDisplayCell } from './CustomerEtaInput';
 import { useSharedNotes } from '../utils/sharedNotes';
 import {
   AlertTriangle,
@@ -632,39 +632,10 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
   return (
     <div className="space-y-6 animate-in fade-in duration-150">
       
-      {/* Page Title & Intro Header */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-4">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          <div className="flex items-start gap-3.5">
-            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-rose-600 to-rose-700 text-white flex items-center justify-center shrink-0 shadow-sm">
-              <ShieldAlert className="w-6 h-6" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2.5 flex-wrap">
-                <h1 className="text-xl font-bold text-slate-900 tracking-tight">
-                  {activeScope === 'overdue' ? '最長納期超過 一覧' : `納期間近（${nearWindow}日以内） 一覧`}
-                </h1>
-                <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-200 font-mono">
-                  {activeScope === 'overdue'
-                    ? formatDelayString(delayCounts)
-                    : formatDelayString(nearWindow === '5' ? approaching5Counts : approachingCounts)}
-                </span>
-                <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200">
-                  影響クリニック: {kpis.totalClinics} 院
-                </span>
-                <span className="text-xs font-mono font-semibold bg-blue-50 text-blue-700 border border-blue-200 px-2.5 py-0.5 rounded-md">
-                  楽楽販売 ご注文管理(101248) リアルタイム照合
-                </span>
-              </div>
-              <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
-                {activeScope === 'overdue'
-                  ? '納品予定日が今日より前で未出荷の明細（納期超過）を厳密に抽出しています。仕入先への督促、顧客への遅延報告、対応履歴を一元管理します。'
-                  : '最長納品予定日が今日から10日以内で、まだ出荷していない明細です（5日以内は楽楽販売「②注意」とほぼ同じ）。納期超過に入っている伝票は二重に数えません。期限の近い順に並べています。'}
-              </p>
-
-              {/* ユーザー要件: 納期超過と納期間近（5日以内）を別指標として分けるタブ */}
-              <div className="flex flex-wrap items-center gap-2 mt-3 pt-2 border-t border-slate-100">
-                <span className="text-xs font-bold text-slate-500">指標切替:</span>
+      {/* 見出し・件数は上の切り替えボタンに出ているので、ここは切り替え・数字・出力だけ */}
+      <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs space-y-3">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2">
                 <div className="flex flex-wrap items-center gap-1.5 p-1 bg-slate-100 rounded-xl max-w-full">
                   <button
                     type="button"
@@ -708,10 +679,7 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
                     ))}
                   </div>
                 )}
-              </div>
-            </div>
           </div>
-
           {/* Action buttons */}
           <div className="flex items-center gap-2 flex-wrap">
             <button
@@ -734,65 +702,24 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
           </div>
         </div>
 
-        {activeScope === 'overdue' && staleOverdue.length > 0 && (
-          <p className="text-[11px] text-slate-500">
-            最長納品予定日から{STALE_OVERDUE_DAYS}日以上たった伝票と、未発注のまま受注から{STALE_OVERDUE_DAYS}日以上たった伝票の計{staleOverdue.length}件は、完了・立ち消えとみなして表示していません（楽楽販売の①超過には残っています。出荷済み・キャンセルにすると消えます）：
-            {staleOverdue.map((o) => `${o.orderId} ${o.customerName}`).join('、')}
-          </p>
-        )}
-
-        {/* Top KPI Cards Row */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 pt-3 border-t border-slate-100">
-          <div className="bg-rose-50/70 border border-rose-200/80 p-3 rounded-xl">
-            <span className="text-[11px] font-semibold text-rose-800 block">
-              {activeScope === 'overdue' ? '納期超過 伝票・明細数' : '納期間近 伝票・明細数'}
-            </span>
-            <div className="mt-1 flex items-baseline gap-1">
-              <span className="text-xl font-bold text-rose-700 font-mono">{kpis.totalOrders}件</span>
-              <span className="text-xs text-rose-600 font-medium">（{kpis.totalLines}明細）</span>
-            </div>
-          </div>
-
-          <div className="bg-amber-50/70 border border-amber-200/80 p-3 rounded-xl">
-            <span className="text-[11px] font-semibold text-amber-800 block">影響クリニック数</span>
-            <div className="mt-1 flex items-baseline gap-1.5">
-              <span className="text-2xl font-bold text-amber-700 font-mono">{kpis.totalClinics}</span>
-              <span className="text-[10px] text-amber-600 font-medium">医院</span>
-            </div>
-          </div>
-
-          <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl">
-            <span className="text-[11px] font-semibold text-slate-600 block">最大遅延日数</span>
-            <div className="mt-1 flex items-baseline gap-1.5">
-              <span className="text-2xl font-bold text-slate-900 font-mono">{kpis.worstDaysOver}</span>
-              <span className="text-[10px] text-slate-500 font-medium">日超過</span>
-            </div>
-          </div>
-
-          <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl">
-            <span className="text-[11px] font-semibold text-rose-700 block">未発注（受注済みのまま）</span>
-            <div className="mt-1 flex items-baseline gap-1.5">
-              <span className="text-2xl font-bold text-rose-600 font-mono">{kpis.unorderedCount}</span>
-              <span className="text-[10px] text-slate-500 font-medium">件</span>
-            </div>
-          </div>
-
-          <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl">
-            <span className="text-[11px] font-semibold text-blue-700 block">発注済み（入荷待ち）</span>
-            <div className="mt-1 flex items-baseline gap-1.5">
-              <span className="text-2xl font-bold text-blue-600 font-mono">{kpis.poDelayedCount}</span>
-              <span className="text-[10px] text-slate-500 font-medium">件</span>
-            </div>
-          </div>
-
-          <div className="bg-emerald-50/70 border border-emerald-200/80 p-3 rounded-xl">
-            <span className="text-[11px] font-semibold text-emerald-800 block">未対応件数</span>
-            <div className="mt-1 flex items-baseline gap-1.5">
-              <span className="text-2xl font-bold text-emerald-700 font-mono">{kpis.unhandledCount}</span>
-              <span className="text-[10px] text-emerald-600 font-medium">件要アクション</span>
-            </div>
-          </div>
+        {/* 数字は、切り替えボタンに出ていないものだけ（1行） */}
+        <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-slate-600">
+          <span>最大 <b className="font-mono text-slate-900">{kpis.worstDaysOver}</b> 日超過</span>
+          <span>影響クリニック <b className="font-mono text-slate-900">{kpis.totalClinics}</b> 院</span>
+          <span>未発注のまま <b className="font-mono text-rose-600">{kpis.unorderedCount}</b> 件</span>
+          <span>発注済み・入荷待ち <b className="font-mono text-blue-600">{kpis.poDelayedCount}</b> 件</span>
+          <span>未対応 <b className="font-mono text-amber-700">{kpis.unhandledCount}</b> 件</span>
         </div>
+
+        {activeScope === 'overdue' && staleOverdue.length > 0 && (
+          <details className="text-[11px] text-slate-500">
+            <summary className="cursor-pointer">古くて表示していない伝票 {staleOverdue.length}件</summary>
+            <p className="mt-1">
+              最長納品予定日から{STALE_OVERDUE_DAYS}日以上たった伝票と、未発注のまま受注から{STALE_OVERDUE_DAYS}日以上たった伝票は、完了・立ち消えとみなして表示していません（楽楽販売の①超過には残っています。出荷済み・キャンセルにすると消えます）：
+              {staleOverdue.map((o) => `${o.orderId} ${o.customerName}`).join('、')}
+            </p>
+          </details>
+        )}
       </div>
 
       {/* Navigation Tabs (Orders vs Clinics) & Filtering Bar */}
@@ -961,7 +888,7 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
                     <th className="py-3 px-4">原因 / ボトルネック</th>
                     <th className="py-3 px-4">未納品明細品目</th>
                     <th className="py-3 px-4">対応ステータス</th>
-                    <th className="py-3 px-4">お客様画面の表示</th>
+                    <th className="py-3 px-4">お客様画面</th>
                     <th className="py-3 px-4 text-right">アクション</th>
                   </tr>
                 </thead>
@@ -1101,7 +1028,6 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
                                 <option value="対応完了">対応完了</option>
                               </select>
 
-                              <CustomerEtaInput orderId={item.orderId} />
 
                               {item.followup.note && (
                                 <div
@@ -1117,7 +1043,7 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
 
                           {/* お客様画面の表示（段階・お知らせ）。担当営業はクリニック名の下に出す */}
                           <td className="py-3.5 px-4 align-top">
-                            <CustomerPortalDisplayInput orderId={item.orderId} />
+                            <CustomerDisplayCell orderId={item.orderId} />
                           </td>
 
                           {/* アクションボタン */}
@@ -1398,8 +1324,7 @@ export const OverdueManagementView: React.FC<OverdueManagementViewProps> = ({
                                 <option value="対応完了">対応完了</option>
                               </select>
 
-                              <CustomerEtaInput orderId={ordItem.orderId} />
-                              <CustomerPortalDisplayInput orderId={ordItem.orderId} />
+                              <CustomerDisplayCell orderId={ordItem.orderId} />
 
                               <button
                                 onClick={() => onSelectOrder(ordItem.order)}

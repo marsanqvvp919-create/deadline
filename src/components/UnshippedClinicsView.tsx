@@ -457,19 +457,10 @@ ${linesDetail}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200/80 pb-5">
         <div className="space-y-1.5">
           <div className="flex items-center gap-3 flex-wrap">
-            <div className="w-9 h-9 rounded-xl bg-indigo-600 text-white flex items-center justify-center shadow-xs">
-              <Building2 className="w-5 h-5" />
-            </div>
-            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
-              未出荷クリニック（発注残管理）
-            </h1>
             <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-indigo-100 text-indigo-800 border border-indigo-200">
               現在発注あり・出荷未完了
             </span>
           </div>
-          <p className="text-xs sm:text-sm text-slate-500">
-            現在注文があり、まだ全商品の出荷が完了していないクリニックの一覧です。納期遅延や未発注の滞留を防止し、確実な納品を管理します。
-          </p>
         </div>
 
         {/* Global Action Buttons */}

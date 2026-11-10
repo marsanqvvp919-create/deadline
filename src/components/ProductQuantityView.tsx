@@ -210,17 +210,6 @@ export function ProductQuantityView({
 
   return (
     <div className="space-y-4 pb-12">
-      <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs flex items-start gap-3.5">
-        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-emerald-600 to-teal-700 text-white flex items-center justify-center shrink-0 shadow-sm">
-          <Boxes className="w-6 h-6" />
-        </div>
-        <div>
-          <h1 className="text-xl font-bold text-slate-900 tracking-tight">製剤別の数量</h1>
-          <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-            製剤ごとに、まだ届けていない注文の数（未発注・手配済み）と、これまでに売れた数を見られます。行を押すと、どのクリニックの注文が残っているかが出ます。
-          </p>
-        </div>
-      </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {[

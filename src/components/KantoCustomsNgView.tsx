@@ -239,12 +239,8 @@ export const KantoCustomsNgView: React.FC<KantoCustomsNgViewProps> = ({
       <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-start gap-4">
-            <div className="w-14 h-14 rounded-2xl bg-rose-600 text-white flex items-center justify-center shrink-0 shadow-lg font-black">
-              <ShieldAlert className="w-8 h-8" />
-            </div>
             <div>
               <div className="flex items-center gap-2.5 flex-wrap">
-                <h1 className="text-xl font-bold tracking-tight">通関NG一覧</h1>
                 <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-200 font-mono">
                   通関NG: {kantoNgShipments.length} 件
                 </span>

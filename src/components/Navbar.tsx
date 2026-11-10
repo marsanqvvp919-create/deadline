@@ -1,14 +1,12 @@
 import React from 'react';
 import { PeriodFilter } from '../types';
 import { formatDateTime } from '../utils';
-import { ColorLegend } from './flow/ColorLegend';
-import { Glossary } from './flow/Glossary';
+import { HelpMenu } from './flow/HelpMenu';
 import {
   RefreshCw,
   SlidersHorizontal,
   Search,
   AlertTriangle,
-  Clock,
   Settings,
   XCircle,
   Bell,
@@ -18,6 +16,7 @@ import {
 interface NavbarProps {
   appName?: string;
   pageTitle?: string;
+  pageGuide?: string;
   /** 画面上部の検索窓 */
   search?: React.ReactNode;
   groupLabel?: string;
@@ -47,6 +46,7 @@ interface NavbarProps {
 export const Navbar: React.FC<NavbarProps> = ({
   appName = '',
   pageTitle = '',
+  pageGuide,
   search,
   groupLabel = '',
   groupChip = '',
@@ -250,29 +250,18 @@ export const Navbar: React.FC<NavbarProps> = ({
         {/* Right: Status, Alerts Badge, Refresh, Settings */}
         {search && <div className="order-last basis-full sm:order-none sm:basis-auto">{search}</div>}
         <div className="flex flex-wrap items-center justify-end gap-1.5 sm:gap-2.5 ml-auto">
-          <ColorLegend />
-          <Glossary />
-          {/* 今日の作業の件数（左メニューと同じ数） */}
+          <HelpMenu pageGuide={pageGuide} />
+          {/* 今日の作業の件数（パソコンでは左メニューに同じ数が出るので、スマホのときだけ出す） */}
           <button
             type="button"
             onClick={onNavigateToAlerts}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-rose-300 bg-rose-50 hover:bg-rose-100 active:bg-rose-200 text-rose-800 shadow-xs hover:shadow active:translate-y-px transition cursor-pointer font-bold"
+            className="lg:hidden flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-rose-300 bg-rose-50 hover:bg-rose-100 active:bg-rose-200 text-rose-800 shadow-xs hover:shadow active:translate-y-px transition cursor-pointer font-bold"
             title={`今日の作業（漏れ・楽楽販売の入力漏れ・楽楽販売と未照合）の合計 ${highSeverityCount}件`}
           >
             <Bell className="w-3.5 h-3.5 text-rose-600" />
             <span className="text-xs">今日の作業</span>
             <span className="text-xs font-mono">{highSeverityCount}件</span>
           </button>
-
-          {/* Generated At timestamp / 最終取得成功時刻（要件3） */}
-          <div className="hidden sm:flex items-center gap-1.5 text-[11px] font-mono font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200/80 px-2.5 py-1.5 rounded-lg border border-slate-300 shadow-2xs">
-            <Clock className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-            <span className="whitespace-nowrap">
-              {lastSuccessTime
-                ? `最終取得成功: ${formatDateTime(lastSuccessTime)}`
-                : `同期: ${formatDateTime(generatedAt)}`}
-            </span>
-          </div>
 
           {/* Manual Refresh button (前回の取得から1分以内は押せない制限: 要件2) */}
           <button
@@ -287,7 +276,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             title={
               cooldownRemainingSec > 0
                 ? `前回の取得から1分以内は再取得できません（残り${cooldownRemainingSec}秒）`
-                : '15分ごとに自動更新されます'
+                : `楽楽販売のデータ：${formatDateTime(lastSuccessTime || generatedAt)} 時点（15分ごとに自動更新）。押すと今すぐ読み込みます`
             }
           >
             <RefreshCw
@@ -299,8 +288,8 @@ export const Navbar: React.FC<NavbarProps> = ({
               {isRefreshing
                 ? '取得中...'
                 : cooldownRemainingSec > 0
-                ? `再読み込み (${cooldownRemainingSec}秒)`
-                : '再読み込み'}
+                ? `${cooldownRemainingSec}秒後に更新可`
+                : `${(formatDateTime(lastSuccessTime || generatedAt).slice(11, 16) || '—')} 更新`}
             </span>
           </button>
 
