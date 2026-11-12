@@ -11,6 +11,7 @@ interface Po {
   poDate: string;
   shipTo: string;
   shipToEn: string;
+  shipToAddress?: string;
   lines: { key: string; productName: string; qty: number; poQty?: number }[];
   qtyEditable?: boolean;
   qtyChanges?: { productName: string; from: number; to: number }[];
@@ -205,6 +206,7 @@ function PoCard({ po, slug, onDone }: { po: Po; slug: string; onDone: () => void
           <div className="text-xs text-slate-500">
             Ship to / 送り先 <b className="text-slate-700">{po.shipToEn}</b>（{po.shipTo}）
           </div>
+          {po.shipToAddress && <div className="text-xs text-slate-600">{po.shipToAddress}</div>}
         </div>
         <span className={`text-xs font-bold px-2.5 py-1 rounded-lg border ${status.cls}`}>{status.label}</span>
       </div>

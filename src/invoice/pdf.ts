@@ -52,7 +52,7 @@ export async function loadJapaneseFont(): Promise<boolean> {
 /**
  * Set current PDF font to JapaneseFont if loaded, otherwise fallback to helvetica
  */
-function setupFont(doc: jsPDF, fontStyle: 'normal' | 'bold' = 'normal') {
+export function setupFont(doc: jsPDF, fontStyle: 'normal' | 'bold' = 'normal') {
   if (japaneseFontBase64) {
     try {
       const fontList = (doc.getFontList ? doc.getFontList() : {}) as Record<string, string[]>;

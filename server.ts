@@ -4630,7 +4630,32 @@ interface InboundRec {
   vendorQtyAllowed?: boolean;
   /** 仕入先が直した数量の記録 */
   vendorQtyChanges?: { key: string; productName: string; from: number; to: number; at: string }[];
+  /** 行き先の決め方：仕入先マスタの既定・社内で選んだ・仕入先のエリアから推定（未確定） */
+  whSource?: 'master' | 'manual' | 'area';
+  /** クリニックへ直送（倉庫を通らない・在庫に入らない） */
+  direct?: boolean;
+  /** 発注書を仕入先に送った（LINE・WhatsApp・メールなど） */
+  sheetSentAt?: string;
+  sheetMethod?: string;
+  sheetNo?: string;
+  /** 楽楽販売の発注管理の仕入先（社内で仕入先を変えたときに違いを出す） */
+  rakurakuSupplierId?: string;
+  /** 社内で仕入先を変えたときの楽楽販売への反映 */
+  supplierSync?: { at: string; ok: boolean; message: string; from: string; to: string };
+  /** この発注の動き（誰が・いつ・何をしたか） */
+  history?: { at: string; by: 'staff' | 'vendor' | 'warehouse' | 'system'; text: string }[];
   createdAt: string;
+  updatedAt: string;
+}
+interface VendorMaster {
+  /** 発注の行き先の既定：韓国倉庫・シンガポール倉庫・国内倉庫・クリニックへ直送・未定 */
+  defaultDest: '' | WarehouseId | 'direct';
+  contactMethod: '' | 'LINE' | 'WhatsApp' | 'Email' | 'その他';
+  contactName: string;
+  contactId: string; // LINE ID・電話番号・メールアドレスなど
+  language: 'en' | 'ko' | 'ja';
+  leadDays: number | null; // 発注から発送までの目安（日）
+  note: string;
   updatedAt: string;
 }
 interface StockItem {
@@ -4699,7 +4724,15 @@ interface WarehouseAccess {
   lastLoginAt?: string;
 }
 interface InventoryStore {
-  settings: { startDate: string }; // この発注日以降の発注を入荷予定にする
+  settings: {
+    startDate: string; // この発注日以降の発注を入荷予定にする
+    /** 発注書に書く倉庫の送り先（倉庫ごと） */
+    shipTo?: Partial<Record<WarehouseId, { name: string; address: string; attn: string; phone: string }>>;
+    /** 楽楽販売の発注管理「仕入先ID」の項目ID（APIパラメータ情報で確認）。入れると、社内で仕入先を変えたときに楽楽販売へ書く */
+    rkPoSupplierItemId?: string;
+    /** 発注書の発行元（会社名・住所など） */
+    sheetFrom?: { company: string; address: string; contact: string };
+  };
   inbound: Record<string, InboundRec>;
   stock: Record<WarehouseId, Record<string, StockItem>>;
   moves: StockMove[];
@@ -4712,6 +4745,9 @@ interface InventoryStore {
   access: Partial<Record<WarehouseId, WarehouseAccess>>;
   /** 仕入先の画面のURLとパスワード（仕入先IDごと） */
   vendorAccess?: Record<string, WarehouseAccess & { supplierName: string }>;
+  /** 仕入先マスタ（このシステムだけの項目。仕入先ID・名前・エリアは楽楽販売の仕入先マスタ） */
+  vendorMaster?: Record<string, VendorMaster>;
+  sheetSeq?: number;
   poSyncedAt?: string;
 }
 // --- サンプル表示（入荷・在庫・引当・出荷指示・インボイス・AWBの流れを、実データと切り離したサンプルで試す）
@@ -5001,7 +5037,7 @@ function loadInventory() {
         const [buf] = await new Storage().bucket(CACHE_BUCKET).file(INVENTORY_OBJECT).download();
         const j = JSON.parse(buf.toString('utf-8'));
         realInventory = {
-          settings: { startDate: j?.settings?.startDate || realInventory.settings.startDate },
+          settings: { ...(j?.settings || {}), startDate: j?.settings?.startDate || realInventory.settings.startDate },
           inbound: j?.inbound || {},
           stock: { domestic: j?.stock?.domestic || {}, korea: j?.stock?.korea || {}, singapore: j?.stock?.singapore || {} },
           moves: Array.isArray(j?.moves) ? j.moves : [],
@@ -5012,6 +5048,8 @@ function loadInventory() {
           sampleSeed: j?.sampleSeed || null,
           access: j?.access || {},
           vendorAccess: j?.vendorAccess || {},
+          vendorMaster: j?.vendorMaster || {},
+          sheetSeq: Number(j?.sheetSeq) || 0,
           poSyncedAt: j?.poSyncedAt,
         };
       } catch (e: any) {
@@ -5082,6 +5120,30 @@ const supplierById = (id: string) => (serverRakurakuStore.suppliers || []).find(
 /** 仕入先のエリアから入荷先を決める（韓国→韓国倉庫、日本→国内倉庫、それ以外→シンガポール倉庫） */
 const warehouseForArea = (area: string): WarehouseId => (/韓国/.test(area || '') ? 'korea' : /日本|国内/.test(area || '') ? 'domestic' : 'singapore');
 
+const isDest = (v: any): v is WarehouseId | 'direct' => v === 'direct' || isWarehouseId(v);
+const vendorMasterOf = (supplierId: string): VendorMaster | null => (inv().vendorMaster || {})[supplierId] || null;
+function addHistory(rec: InboundRec, by: 'staff' | 'vendor' | 'warehouse' | 'system', text: string) {
+  (rec.history ||= []).push({ at: new Date().toISOString(), by, text });
+  if (rec.history.length > 60) rec.history = rec.history.slice(-60);
+}
+/** 仕入先マスタの既定（なければエリアから推定）で行き先を決める。社内で選んだものは変えない */
+function applyDefaultDest(rec: InboundRec) {
+  if (rec.received || rec.whSource === 'manual' || rec.warehouseEdited) return;
+  const m = vendorMasterOf(rec.supplierId);
+  if (m?.defaultDest === 'direct') {
+    rec.direct = true;
+    rec.whSource = 'master';
+  } else if (m?.defaultDest && isWarehouseId(m.defaultDest)) {
+    rec.direct = false;
+    rec.warehouse = m.defaultDest;
+    rec.whSource = 'master';
+  } else {
+    rec.direct = false;
+    rec.warehouse = warehouseForArea(supplierById(rec.supplierId)?.area || rec.supplierArea);
+    rec.whSource = 'area';
+  }
+}
+
 async function mergePurchaseOrdersIntoInbound(pos: ReturnType<typeof transformCsvToPurchaseOrders>) {
   await loadInventory();
   if (pos.length === 0) return;
@@ -5115,12 +5177,23 @@ async function mergePurchaseOrdersIntoInbound(pos: ReturnType<typeof transformCs
         trackingNos: [],
         memo: '',
         ...(vendorShipped ? { vendorShippedAt: now, vendorShippedBy: 'rakuraku' as const } : {}),
+        rakurakuSupplierId: po.supplierId,
+        history: [{ at: now, by: 'system', text: `楽楽販売の発注管理から取り込み（${po.status}）` }],
         createdAt: now,
         updatedAt: now,
       };
+      applyDefaultDest(inv().inbound[po.poId]);
       continue;
     }
+    if (existing.rakurakuStatus !== po.status) addHistory(existing, 'system', `楽楽販売のステータス：${existing.rakurakuStatus} → ${po.status}`);
     existing.rakurakuStatus = po.status;
+    existing.rakurakuSupplierId = po.supplierId;
+    // 楽楽販売で仕入先が変わったら（社内で変えて反映待ちのものを除く）追従する
+    if (po.supplierId && po.supplierId !== existing.supplierId && !(existing.supplierSync && !existing.supplierSync.ok && existing.supplierSync.to === existing.supplierId)) {
+      addHistory(existing, 'system', `楽楽販売で仕入先が変わりました：${existing.supplierName} → ${po.supplierName}`);
+      existing.supplierId = po.supplierId;
+      existing.supplierName = po.supplierName || supplierById(po.supplierId)?.supplierName || existing.supplierName;
+    }
     if (existing.received) continue;
     existing.cancelled = !ordered;
     if (vendorShipped && !existing.vendorShippedAt) {
@@ -5136,11 +5209,8 @@ async function mergePurchaseOrdersIntoInbound(pos: ReturnType<typeof transformCs
         if (!cur.qtyEdited) cur.qty = l.quantity;
       }
     });
-    if (!existing.warehouseEdited) {
-      const area = supplierById(existing.supplierId)?.area || existing.supplierArea;
-      existing.supplierArea = area;
-      existing.warehouse = warehouseForArea(area);
-    }
+    existing.supplierArea = supplierById(existing.supplierId)?.area || existing.supplierArea;
+    applyDefaultDest(existing);
   }
   // 楽楽販売から消えた発注（削除）は、まだ入荷していなければ取消扱い
   for (const rec of Object.values(inv().inbound)) {
@@ -5155,6 +5225,7 @@ function inboundState(rec: InboundRec): { code: string; label: string; tracking:
   const tracking = rec.trackingNos.map((n) => invTrack(n.replace(/\D/g, '')) || { trackingNo: n, status: 'unknown', statusText: '確認待ち' });
   if (rec.cancelled) return { code: 'cancelled', label: '発注取消', tracking };
   if (rec.excluded) return { code: 'excluded', label: '対象外', tracking };
+  if (rec.direct) return rec.vendorShippedAt ? { code: 'direct_done', label: 'クリニックへ直送済み', tracking } : { code: 'direct', label: 'クリニックへ直送・発送待ち', tracking };
   if (rec.received) return { code: rec.shortage ? 'shortage' : 'received', label: rec.shortage ? '入荷済み（不足あり）' : '入荷済み', tracking };
   if (rec.method === 'kick') return { code: 'kick', label: 'キック（追跡なし）・受取待ち', tracking };
   if (rec.method === 'handcarry') return { code: 'handcarry', label: '直接持込・受取待ち', tracking };
@@ -5227,6 +5298,15 @@ function inboundView(rec: InboundRec, forWarehouse = false) {
     vendorMemo: rec.vendorMemo || '',
     vendorQtyAllowed: !!rec.vendorQtyAllowed,
     vendorQtyChanges: rec.vendorQtyChanges || [],
+    supplierId: rec.supplierId,
+    whSource: rec.whSource || (rec.warehouseEdited ? 'manual' : 'area'),
+    direct: !!rec.direct,
+    sheetSentAt: rec.sheetSentAt || null,
+    sheetMethod: rec.sheetMethod || '',
+    sheetNo: rec.sheetNo || '',
+    rakurakuSupplierId: rec.rakurakuSupplierId || rec.supplierId,
+    supplierSync: rec.supplierSync || null,
+    history: forWarehouse ? [] : rec.history || [],
     updatedAt: rec.updatedAt,
   };
 }
@@ -5281,8 +5361,45 @@ app.post('/api/inventory/inbound/:poId', async (req, res) => {
   if (!rec) return res.status(404).json({ error: '入荷予定が見つかりません' });
   const b = req.body || {};
   if (isWarehouseId(b.warehouse) && !rec.received) {
+    if (rec.warehouse !== b.warehouse || rec.direct) addHistory(rec, 'staff', `行き先を${WAREHOUSES[b.warehouse as WarehouseId]}にしました`);
     rec.warehouse = b.warehouse;
+    rec.direct = false;
     rec.warehouseEdited = true;
+    rec.whSource = 'manual';
+  }
+  // 行き先：クリニックへ直送／未定（仕入先マスタの既定に戻す）
+  if (b.dest === 'direct' && !rec.received) {
+    if (!rec.direct) addHistory(rec, 'staff', '行き先をクリニックへ直送にしました');
+    rec.direct = true;
+    rec.whSource = 'manual';
+  } else if (b.dest === 'default' && !rec.received) {
+    rec.warehouseEdited = false;
+    rec.whSource = undefined;
+    applyDefaultDest(rec);
+    addHistory(rec, 'staff', '行き先を仕入先マスタの既定に戻しました');
+  }
+  // 仕入先を変える（楽楽販売の発注管理にも書く。書けなくてもこのシステムでは変える）
+  if (typeof b.supplierId === 'string' && b.supplierId && b.supplierId !== rec.supplierId && !rec.received) {
+    const sup = supplierById(b.supplierId);
+    if (!sup) return res.status(400).json({ error: '仕入先が見つかりません（楽楽販売の仕入先マスタにあるものを選んでください）' });
+    const from = rec.supplierName;
+    rec.supplierId = b.supplierId;
+    rec.supplierName = sup.supplierName;
+    rec.supplierArea = sup.area || '';
+    delete rec.sheetSentAt;
+    delete rec.sheetMethod;
+    delete rec.sheetNo;
+    applyDefaultDest(rec);
+    const sync = await writePoSupplierToRakuraku(rec.poId, b.supplierId);
+    rec.supplierSync = { at: new Date().toISOString(), ok: sync.ok, message: sync.message, from, to: b.supplierId };
+    addHistory(rec, 'staff', `仕入先を変更：${from} → ${sup.supplierName}（楽楽販売：${sync.ok ? '反映済み' : sync.message}）`);
+  }
+  // 発注書を送った・送っていないに戻す
+  if (b.sheetSent === false) {
+    delete rec.sheetSentAt;
+    delete rec.sheetMethod;
+    delete rec.sheetNo;
+    addHistory(rec, 'staff', '「発注書を送った」を取り消しました');
   }
   if (['', 'tracking', 'kick', 'handcarry'].includes(b.method)) rec.method = b.method;
   // 社内で「仕入先が発送した」を代わりに付ける・外す
@@ -5313,12 +5430,16 @@ app.post('/api/inventory/inbound/:poId', async (req, res) => {
       const cur = rec.lines.find((x) => x.key === String(l.key));
       const q = Number(l.qty);
       if (cur && Number.isFinite(q) && q >= 0) {
+        if (Math.round(q) !== cur.qty) addHistory(rec, 'staff', `数量を調整：${cur.productName} ${cur.qty} → ${Math.round(q)}（楽楽の発注数 ${cur.poQty}）`);
         cur.qty = Math.round(q);
         cur.qtyEdited = cur.qty !== cur.poQty;
       }
     }
   }
-  if (typeof b.excluded === 'boolean') rec.excluded = b.excluded;
+  if (typeof b.excluded === 'boolean') {
+    if (b.excluded !== !!rec.excluded) addHistory(rec, 'staff', b.excluded ? '対象外にしました' : '入荷予定に戻しました');
+    rec.excluded = b.excluded;
+  }
   if (typeof b.memo === 'string') rec.memo = b.memo.slice(0, 500);
   rec.updatedAt = new Date().toISOString();
   await saveInventory();
@@ -5808,9 +5929,23 @@ registerStockSource(japanSheet);
 
 app.post('/api/inventory/settings', async (req, res) => {
   await loadInventory();
-  const d = ymdSlash(String(req.body?.startDate || ''));
-  if (!d) return res.status(400).json({ error: '日付を入れてください' });
-  inv().settings.startDate = d;
+  const b = req.body || {};
+  if (b.startDate !== undefined) {
+    const d = ymdSlash(String(b.startDate || ''));
+    if (!d) return res.status(400).json({ error: '日付を入れてください' });
+    inv().settings.startDate = d;
+  }
+  if (b.shipTo && typeof b.shipTo === 'object') {
+    const cur = (inv().settings.shipTo ||= {});
+    for (const w of ['domestic', 'korea', 'singapore'] as WarehouseId[]) {
+      const v = b.shipTo[w];
+      if (v && typeof v === 'object') cur[w] = { name: String(v.name || '').slice(0, 120), address: String(v.address || '').slice(0, 400), attn: String(v.attn || '').slice(0, 80), phone: String(v.phone || '').slice(0, 40) };
+    }
+  }
+  if (b.sheetFrom && typeof b.sheetFrom === 'object') {
+    inv().settings.sheetFrom = { company: String(b.sheetFrom.company || '').slice(0, 120), address: String(b.sheetFrom.address || '').slice(0, 400), contact: String(b.sheetFrom.contact || '').slice(0, 200) };
+  }
+  if (typeof b.rkPoSupplierItemId === 'string') inv().settings.rkPoSupplierItemId = b.rkPoSupplierItemId.replace(/\D/g, '').slice(0, 12);
   await saveInventory();
   res.json({ settings: inv().settings });
 });
@@ -5896,6 +6031,7 @@ function receiveInbound(rec: InboundRec, lines: any, memo: any, by: StockMove['b
   rec.received = true;
   rec.shortage = shortage;
   rec.receivedAt = new Date().toISOString();
+  addHistory(rec, by === 'warehouse' ? 'warehouse' : 'staff', `${WAREHOUSES[rec.warehouse]}で入荷を確定し在庫に反映：${rec.lines.map((l) => `${l.productName} ${l.receivedQty}${(l.receivedQty || 0) < l.qty ? `（不足 ${l.qty - (l.receivedQty || 0)}）` : ''}`).join('、')}`);
   rec.receivedMemo = String(memo || '').slice(0, 500);
   rec.updatedAt = rec.receivedAt;
   return null;
@@ -7903,6 +8039,10 @@ if (process.env.NODE_ENV !== 'production') {
     await mergePurchaseOrdersIntoInbound(transformCsvToPurchaseOrders(String(req.body?.csv || '')));
     res.json({ ok: true, count: Object.keys(inv().inbound).length });
   });
+  app.post('/api/inventory/dev-seed-suppliers', (req, res) => {
+    serverRakurakuStore.suppliers = Array.isArray(req.body?.suppliers) ? req.body.suppliers : [];
+    res.json({ ok: true });
+  });
   app.post('/api/inventory/dev-seed-orders', async (req, res) => {
     serverRakurakuStore.orders = finalizeDeliveryData(Array.isArray(req.body?.orders) ? req.body.orders : []);
     await loadInventory();
@@ -7910,6 +8050,128 @@ if (process.env.NODE_ENV !== 'production') {
     res.json({ ok: true });
   });
 }
+
+// --- 仕入先マスタ・発注書・仕入先の変更（楽楽販売への反映）
+/** 楽楽販売の発注管理の仕入先IDを書き換える（レコード更新API）。項目IDが未設定なら書かずに理由を返す */
+async function writePoSupplierToRakuraku(poId: string, supplierId: string): Promise<{ ok: boolean; message: string }> {
+  if (isDemo()) return { ok: true, message: 'サンプルのため楽楽販売には書いていません' };
+  const itemId = inv().settings.rkPoSupplierItemId;
+  if (!itemId) return { ok: false, message: '楽楽販売への反映は未設定（仕入先マスタの画面で「仕入先ID」の項目IDを入れると反映します）' };
+  try {
+    await callRakurakuRecord(RK_UPDATE_PATH, { dbSchemaId: '101249', keyId: poId, values: { [itemId]: supplierId } });
+    return { ok: true, message: '楽楽販売に反映しました' };
+  } catch (e: any) {
+    console.warn('[PO supplier] rakuraku write failed:', e?.message || e);
+    return { ok: false, message: `楽楽販売に反映できませんでした：${String(e?.message || e).slice(0, 200)}` };
+  }
+}
+
+// 社内：仕入先マスタ（楽楽販売の仕入先＋このシステムの項目）
+app.get('/api/inventory/vendor-master', async (_req, res) => {
+  await loadInventory();
+  const rk = ((serverRakurakuStore.suppliers || []) as any[]).filter((s) => s.supplierId && !STOCK_SUPPLIER_IDS.has(s.supplierId));
+  const ids = new Set<string>(rk.map((s) => s.supplierId));
+  Object.values(inv().inbound).forEach((r) => r.supplierId && ids.add(r.supplierId));
+  const counts = new Map<string, { open: number; needSheet: number; shipped: number; received: number }>();
+  for (const r of Object.values(inv().inbound)) {
+    if (!r.supplierId || r.excluded || r.cancelled) continue;
+    const c = counts.get(r.supplierId) || { open: 0, needSheet: 0, shipped: 0, received: 0 };
+    if (r.received) c.received++;
+    else {
+      c.open++;
+      if (r.vendorShippedAt) c.shipped++;
+      else if (!r.sheetSentAt) c.needSheet++;
+    }
+    counts.set(r.supplierId, c);
+  }
+  const vendors = Array.from(ids)
+    .filter((id) => !STOCK_SUPPLIER_IDS.has(id))
+    .map((id) => {
+      const s = supplierById(id);
+      const any = Object.values(inv().inbound).find((r) => r.supplierId === id);
+      const a = (inv().vendorAccess || {})[id];
+      return {
+        supplierId: id,
+        supplierName: s?.supplierName || any?.supplierName || id,
+        area: s?.area || any?.supplierArea || '',
+        email: s?.email || '',
+        phone: s?.phone || '',
+        master: vendorMasterOf(id),
+        counts: counts.get(id) || { open: 0, needSheet: 0, shipped: 0, received: 0 },
+        portal: { slug: a?.slug || null, disabled: !!a?.disabled, lastLoginAt: a?.lastLoginAt || null },
+      };
+    })
+    .sort((a, b) => b.counts.open - a.counts.open || a.supplierName.localeCompare(b.supplierName));
+  res.json({ vendors, settings: { shipTo: inv().settings.shipTo || {}, sheetFrom: inv().settings.sheetFrom || null, rkPoSupplierItemId: inv().settings.rkPoSupplierItemId || '' } });
+});
+app.post('/api/inventory/vendor-master/:supplierId', async (req, res) => {
+  await loadInventory();
+  const id = req.params.supplierId;
+  const b = req.body || {};
+  const cur = vendorMasterOf(id) || { defaultDest: '', contactMethod: '', contactName: '', contactId: '', language: 'en', leadDays: null, note: '', updatedAt: '' };
+  const next: VendorMaster = {
+    defaultDest: b.defaultDest === '' || isDest(b.defaultDest) ? b.defaultDest : cur.defaultDest,
+    contactMethod: ['', 'LINE', 'WhatsApp', 'Email', 'その他'].includes(b.contactMethod) ? b.contactMethod : cur.contactMethod,
+    contactName: typeof b.contactName === 'string' ? b.contactName.slice(0, 80) : cur.contactName,
+    contactId: typeof b.contactId === 'string' ? b.contactId.slice(0, 120) : cur.contactId,
+    language: ['en', 'ko', 'ja'].includes(b.language) ? b.language : cur.language,
+    leadDays: b.leadDays === '' || b.leadDays === null ? null : Number.isFinite(Number(b.leadDays)) && b.leadDays !== undefined ? Math.max(0, Math.round(Number(b.leadDays))) : cur.leadDays,
+    note: typeof b.note === 'string' ? b.note.slice(0, 500) : cur.note,
+    updatedAt: new Date().toISOString(),
+  };
+  (inv().vendorMaster ||= {})[id] = next;
+  // 既定の行き先を変えたら、まだ社内で選んでいない未入荷の発注にも当てる
+  let applied = 0;
+  if (next.defaultDest !== cur.defaultDest) {
+    for (const r of Object.values(inv().inbound)) {
+      if (r.supplierId !== id || r.received || r.cancelled || r.excluded || r.whSource === 'manual' || r.warehouseEdited) continue;
+      applyDefaultDest(r);
+      applied++;
+    }
+  }
+  await saveInventory();
+  res.json({ master: next, applied });
+});
+
+// 発注書：選んだ発注（同じ仕入先）の内容を返す。送ったら sent で記録する
+app.post('/api/inventory/po-sheet', async (req, res) => {
+  await loadInventory();
+  const ids: string[] = Array.isArray(req.body?.poIds) ? req.body.poIds.map(String) : [];
+  const recs = ids.map((id) => inv().inbound[id]).filter(Boolean) as InboundRec[];
+  if (recs.length === 0) return res.status(400).json({ error: '発注を選んでください' });
+  if (new Set(recs.map((r) => r.supplierId)).size > 1) return res.status(400).json({ error: '発注書は仕入先ごとに作ります。同じ仕入先の発注だけを選んでください' });
+  const sup = supplierById(recs[0].supplierId);
+  const m = vendorMasterOf(recs[0].supplierId);
+  const shipTo = inv().settings.shipTo || {};
+  const dest = (r: InboundRec) =>
+    r.direct
+      ? { kind: 'direct', label: 'Direct to clinic', name: r.clinicName, address: '', attn: '', phone: '' }
+      : { kind: r.whSource === 'area' ? 'tbd' : 'warehouse', label: { domestic: 'Japan warehouse', korea: 'Korea warehouse', singapore: 'Singapore warehouse' }[r.warehouse], ...(shipTo[r.warehouse] || { name: '', address: '', attn: '', phone: '' }) };
+  res.json({
+    vendor: { supplierId: recs[0].supplierId, name: sup?.supplierName || recs[0].supplierName, email: sup?.email || '', phone: sup?.phone || '', master: m },
+    from: inv().settings.sheetFrom || null,
+    pos: recs.map((r) => ({ poId: r.poId, poDate: r.poDate, orderId: r.orderId, dest: dest(r), lines: r.lines.map((l) => ({ key: l.key, productName: l.productName, poQty: l.poQty, qty: l.qty })), sheetSentAt: r.sheetSentAt || null })),
+  });
+});
+app.post('/api/inventory/po-sheet/sent', async (req, res) => {
+  await loadInventory();
+  const ids: string[] = Array.isArray(req.body?.poIds) ? req.body.poIds.map(String) : [];
+  const method = String(req.body?.method || '').slice(0, 30);
+  const recs = ids.map((id) => inv().inbound[id]).filter(Boolean) as InboundRec[];
+  if (recs.length === 0) return res.status(400).json({ error: '発注を選んでください' });
+  inv().sheetSeq = (inv().sheetSeq || 0) + 1;
+  const sheetNo = `PS-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${String(inv().sheetSeq).padStart(4, '0')}`;
+  const at = new Date().toISOString();
+  for (const r of recs) {
+    r.sheetSentAt = at;
+    r.sheetMethod = method;
+    r.sheetNo = sheetNo;
+    r.updatedAt = at;
+    addHistory(r, 'staff', `発注書 ${sheetNo} を仕入先に送りました${method ? `（${method}）` : ''}`);
+  }
+  await saveInventory();
+  res.json({ sheetNo, at });
+});
 
 // --- 仕入先の画面（/vendor/:slug）
 // 楽楽販売の発注管理で「発注済み」になった発注を、その仕入先だけに見せる。仕入先は発送したら「発送済み」を押す（追跡番号は任意）。
@@ -7932,8 +8194,11 @@ function vendorPoView(rec: InboundRec) {
   return {
     poId: rec.poId,
     poDate: rec.poDate,
-    shipTo: WAREHOUSES[rec.warehouse],
-    shipToEn: ({ domestic: 'Japan warehouse', korea: 'Korea warehouse', singapore: 'Singapore warehouse' } as Record<WarehouseId, string>)[rec.warehouse],
+    shipTo: rec.direct ? 'クリニックへ直送' : rec.whSource === 'area' ? `${WAREHOUSES[rec.warehouse]}（未確定）` : WAREHOUSES[rec.warehouse],
+    shipToEn: rec.direct
+      ? 'Direct to clinic (we will send the address)'
+      : `${({ domestic: 'Japan warehouse', korea: 'Korea warehouse', singapore: 'Singapore warehouse' } as Record<WarehouseId, string>)[rec.warehouse]}${rec.whSource === 'area' ? ' – to be confirmed' : ''}`,
+    shipToAddress: rec.direct ? '' : [inv().settings.shipTo?.[rec.warehouse]?.name, inv().settings.shipTo?.[rec.warehouse]?.address, inv().settings.shipTo?.[rec.warehouse]?.phone].filter(Boolean).join(' / '),
     lines: rec.lines.map((l) => ({ key: l.key, productName: l.productName, qty: l.qty, poQty: l.poQty })),
     qtyEditable: !!rec.vendorQtyAllowed && !rec.vendorShippedAt && !rec.received,
     qtyChanges: (rec.vendorQtyChanges || []).map((c) => ({ productName: c.productName, from: c.from, to: c.to })),
@@ -8073,6 +8338,7 @@ app.post('/api/vendor/po/:poId/ship', async (req, res) => {
   rec.vendorShippedAt = new Date().toISOString();
   rec.vendorShippedBy = 'vendor';
   rec.updatedAt = rec.vendorShippedAt;
+  addHistory(rec, 'vendor', `仕入先が発送済みにしました${list.length ? `（追跡 ${list.join(', ')}）` : ''}${changes.length ? `・数量変更 ${changes.map((c) => `${c.line.productName}→${c.to}`).join('、')}` : ''}`);
   await saveInventory();
   res.json({ po: vendorPoView(rec) });
 });
@@ -8137,7 +8403,7 @@ app.get('/api/warehouse/data', async (req, res) => {
   await loadProductFlags().catch(() => {});
   if (!w) return res.status(401).json({ error: 'login_required' });
   const inbound = Object.values(inv().inbound)
-    .filter((r) => r.warehouse === w && !r.excluded && !r.cancelled)
+    .filter((r) => r.warehouse === w && !r.excluded && !r.cancelled && !r.direct)
     .sort((a, b) => (b.poDate || '').localeCompare(a.poDate || '') || b.poId.localeCompare(a.poId))
     .map((r) => inboundView(r, true));
   res.json({

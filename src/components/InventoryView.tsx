@@ -11,14 +11,16 @@ import { TONE, Tone } from './flow/tone';
 import { PUBLIC_ORIGIN } from '../utils/publicUrl';
 import { askConfirm } from './flow/Confirm';
 import { ErrorNote } from './flow/Messages';
+import { PurchaseFlowView } from './purchase/PurchaseFlowView';
+import { VendorMasterPanel } from './purchase/VendorMasterPanel';
 
 // 入荷・在庫（国内倉庫・韓国倉庫・シンガポール倉庫）。楽楽販売の発注（発注済み）から入荷予定を作り、
 // 入荷先倉庫・配送方法・追跡番号・数量をここで入れる。倉庫の担当者が実数を入れて承認すると在庫に加わる（国内倉庫は社内で承認）。
 // 未発注の明細は在庫から引き当て、倉庫への出荷指示を出す。
 
-type WarehouseId = 'domestic' | 'korea' | 'singapore';
-const WH_NAME: Record<WarehouseId, string> = { domestic: '国内倉庫', korea: '韓国倉庫', singapore: 'シンガポール倉庫' };
-const WH_IDS: WarehouseId[] = ['domestic', 'korea', 'singapore'];
+export type WarehouseId = 'domestic' | 'korea' | 'singapore';
+export const WH_NAME: Record<WarehouseId, string> = { domestic: '国内倉庫', korea: '韓国倉庫', singapore: 'シンガポール倉庫' };
+export const WH_IDS: WarehouseId[] = ['domestic', 'korea', 'singapore'];
 const METHOD_LABEL: Record<string, string> = { '': '未設定', tracking: '宅配便・国際便（追跡あり）', kick: 'キック（追跡なし）', handcarry: '直接持込' };
 
 interface InboundLine {
@@ -34,7 +36,7 @@ interface InboundLine {
   inspect?: 'ok' | 'ng' | null;
   inspectNote?: string;
 }
-interface Inbound {
+export interface Inbound {
   poId: string;
   poDate: string;
   supplierName: string;
@@ -62,6 +64,15 @@ interface Inbound {
   vendorMemo?: string;
   vendorQtyAllowed?: boolean;
   vendorQtyChanges?: { key: string; productName: string; from: number; to: number; at: string }[];
+  supplierId?: string;
+  whSource?: 'master' | 'manual' | 'area';
+  direct?: boolean;
+  sheetSentAt?: string | null;
+  sheetMethod?: string;
+  sheetNo?: string;
+  rakurakuSupplierId?: string;
+  supplierSync?: { at: string; ok: boolean; message: string; from: string; to: string } | null;
+  history?: { at: string; by: string; text: string }[];
   updatedAt?: string;
 }
 interface StockRow {
@@ -145,7 +156,7 @@ interface InventoryData {
 }
 
 const MOVE_LABEL: Record<string, string> = { inbound: '入荷', outbound: '出庫', adjust: '在庫修正', import: '取り込み', unreceive: '承認取消' };
-const fmt = (iso: string | null) => (iso ? new Date(iso).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—');
+export const fmt = (iso: string | null) => (iso ? new Date(iso).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—');
 // 入荷の状態の色（全画面共通の色のルール）。国内倉庫の到着・キック・持込は社内で承認するので「あなたの作業待ち」
 const STATE_TONE: Record<string, 'urgent' | 'action' | 'waiting' | 'done' | 'na'> = {
   no_tracking: 'action',
@@ -177,14 +188,14 @@ const inboundNext = (r: { state: string; warehouse: string; received: boolean })
             ? '届いた数が足りません。仕入先に確認してください'
             : '';
 
-async function api(path: string, init?: RequestInit) {
+export async function api(path: string, init?: RequestInit) {
   const r = await fetch(path, { ...init, headers: { 'Content-Type': 'application/json', ...demoHeaders(), ...(init?.headers || {}) } });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(j?.error || `エラー（${r.status}）`);
   return j;
 }
 
-function InboundCard({ rec, onSaved }: { rec: Inbound; onSaved: () => void }) {
+export function InboundCard({ rec, onSaved, embedded }: { rec: Inbound; onSaved: () => void; embedded?: boolean }) {
   const [tracking, setTracking] = useState(rec.trackingNos.join('、'));
   const [qty, setQty] = useState<Record<string, string>>(Object.fromEntries(rec.lines.map((l) => [l.key, String(l.qty)])));
   const [busy, setBusy] = useState(false);
@@ -236,10 +247,10 @@ function InboundCard({ rec, onSaved }: { rec: Inbound; onSaved: () => void }) {
               仕入先が数量を修正：{rec.vendorQtyChanges!.map((c) => `${c.productName} ${c.from}→${c.to}`).join('、')}
             </div>
           )}
-          {inboundNext(rec) && <div className={`mt-1 inline-block rounded px-2 py-0.5 text-[11px] font-bold ${TONE[stateTone(rec) === 'action' ? 'action' : stateTone(rec) === 'urgent' ? 'urgent' : 'waiting']}`}>{inboundNext(rec)}</div>}
+          {!embedded && inboundNext(rec) && <div className={`mt-1 inline-block rounded px-2 py-0.5 text-[11px] font-bold ${TONE[stateTone(rec) === 'action' ? 'action' : stateTone(rec) === 'urgent' ? 'urgent' : 'waiting']}`}>{inboundNext(rec)}</div>}
         </div>
         <div className="flex flex-wrap items-center gap-2 text-xs">
-          <label className="flex items-center gap-1">
+          <label className={`flex items-center gap-1 ${embedded ? 'hidden' : ''}`}>
             <span className="text-slate-500">入荷先</span>
             <select disabled={locked || busy} value={rec.warehouse} onChange={(e) => save({ warehouse: e.target.value })} className="rounded-md border border-slate-300 px-2 py-1 font-semibold">
               {WH_IDS.map((w) => (
@@ -1106,7 +1117,7 @@ interface VendorRow {
   lastLoginAt: string | null;
 }
 /** 仕入先の画面：仕入先ごとにURLとパスワードを発行する。仕入先は自分あての発注を見て「発送済み」を押す */
-function VendorAccessPanel() {
+export function VendorAccessPanel() {
   const [rows, setRows] = useState<VendorRow[] | null>(null);
   const [issued, setIssued] = useState<{ name: string; slug: string; password: string } | null>(null);
   const [changing, setChanging] = useState<string | null>(null);
@@ -2063,7 +2074,7 @@ export function ShippingInstructionsPage({ onNavigate }: { onNavigate?: (tab: st
 export function InventoryView({ orders, onNavigate }: { orders: Order[]; onNavigate?: (tab: string) => void }) {
   const [data, setData] = useState<InventoryData | null>(null);
   const [error, setError] = useState('');
-  const [tab, setTab] = useState<'inbound' | 'stock' | 'moves' | 'access' | 'vendors'>('stock');
+  const [tab, setTab] = useState<'inbound' | 'stock' | 'moves' | 'access' | 'vendors'>('inbound');
   const [wh, setWh] = useState<'all' | WarehouseId>('all');
   const [stateFilter, setStateFilter] = useState<'open' | 'waiting' | 'received' | 'shortage' | 'closed' | 'all'>('open');
   const [q, setQ] = useState('');
@@ -2214,10 +2225,10 @@ export function InventoryView({ orders, onNavigate }: { orders: Order[]; onNavig
       <div className="flex flex-wrap gap-1.5">
         {(
           [
+            ['inbound', '発注・入荷の流れ', Truck],
             ['stock', '在庫', PackageCheck],
-            ['inbound', '入荷予定', Truck],
             ['moves', '入出庫の履歴', History],
-            ['vendors', '仕入先の画面', Truck],
+            ['vendors', '仕入先マスタ', ClipboardList],
             ['access', '倉庫の担当者画面', KeyRound],
           ] as const
         ).map(([id, label, Icon]) => (
@@ -2233,33 +2244,7 @@ export function InventoryView({ orders, onNavigate }: { orders: Order[]; onNavig
       </div>
 
       {tab === 'inbound' && (
-        <div className="space-y-3">
-          <div className="flex flex-wrap items-center gap-2 text-xs">
-            <select value={stateFilter} onChange={(e) => setStateFilter(e.target.value as any)} className="rounded-md border border-slate-300 px-2 py-1 font-semibold">
-              <option value="open">未入荷（すべて）</option>
-              <option value="waiting">倉庫の承認待ち</option>
-              <option value="received">入荷済み</option>
-              <option value="shortage">不足あり</option>
-              <option value="closed">対象外・発注取消</option>
-              <option value="all">すべて</option>
-            </select>
-            <div className="relative">
-              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2 top-2" />
-              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="発注ID・仕入先・商品・追跡番号" className="rounded-md border border-slate-300 pl-7 pr-2 py-1 w-64" />
-            </div>
-            <span className="text-slate-500">{inbound.length}件</span>
-          </div>
-          <div className="grid grid-cols-1 2xl:grid-cols-2 gap-3 items-start">
-          {inbound.length === 0 && (
-            <div className="2xl:col-span-2 rounded-xl border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-500">
-              該当する入荷予定はありません。{data.inbound.length === 0 && '「楽楽から発注を取り込む」を押すか、次の全件同期（2時間ごと）をお待ちください。'}
-            </div>
-          )}
-          {inbound.map((r) => (
-            <InboundCard key={`${r.poId}-${r.updatedAt ?? ''}-${r.trackingNos.join()}-${r.lines.map((l) => l.qty).join()}`} rec={r} onSaved={load} />
-          ))}
-          </div>
-        </div>
+        <PurchaseFlowView inbound={wh === 'all' ? data.inbound : data.inbound.filter((r) => r.direct || r.warehouse === wh)} onReload={load} poSyncedAt={data.poSyncedAt} />
       )}
 
       {tab === 'stock' && (
@@ -2357,7 +2342,7 @@ export function InventoryView({ orders, onNavigate }: { orders: Order[]; onNavig
       )}
 
       {tab === 'access' && <WarehouseAccessPanel data={data} onSaved={load} />}
-      {tab === 'vendors' && <VendorAccessPanel />}
+      {tab === 'vendors' && <VendorMasterPanel />}
       <div className="text-[11px] text-slate-400 flex items-center gap-1">
         <CheckCircle2 className="w-3 h-3" />
         入荷予定の追跡番号は、出荷の追跡と同じく配送会社のデータで自動確認します（到着すると「倉庫に到着・承認待ち」）。
