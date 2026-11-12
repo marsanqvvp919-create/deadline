@@ -30,6 +30,7 @@ import { UnshippedClinicsView } from './components/UnshippedClinicsView';
 import { ProductMasterView } from './components/ProductMasterView';
 import { ClinicMasterView } from './components/ClinicMasterView';
 import { InventoryView, ShippingInstructionsPage } from './components/InventoryView';
+import { VendorMasterPanel } from './components/purchase/VendorMasterPanel';
 import { UnorderedView } from './components/UnorderedView';
 import { UndoToastHost } from './components/flow/UndoToast';
 import { ConfirmHost } from './components/flow/Confirm';
@@ -105,7 +106,7 @@ const APP_TAGLINE = '受注から到着まで ― 楽楽販売 連携';
 const KNOWN_TABS: ViewTab[] = [
   'leak_check', 'dashboard', 'morning_meeting', 'alerts', 'procurement', 'unshipped_clinics', 'partial_shipment', 'overdue',
   'customs_management', 'cool_missing', 'kanto_customs_ng', 'unmatched_sheets', 'inventory_management', 'shipping_calc', 'shipping_instructions', 'invoices',
-  'sheet_import', 'arrival_tracking', 'products', 'clinics', 'carrier_settings', 'bulk_deliveries', 'portal_admin', 'product_quantity',
+  'sheet_import', 'arrival_tracking', 'products', 'clinics', 'vendor_master', 'carrier_settings', 'bulk_deliveries', 'portal_admin', 'product_quantity',
   'sales_dashboard', 'sales_rep_sales', 'sales_clinic_master', 'reorder_prediction', 'rep_ranking',
 ];
 
@@ -736,6 +737,7 @@ export default function App() {
     sheet_import: '出荷シートの内容を楽楽販売に取り込みます',
     products: '商品ごとの仕入先・原価・クール便の要否を確認・設定します',
     clinics: 'クリニックの情報と、送り先（英語名・住所・電話）を確認・修正します',
+    vendor_master: '仕入先ごとの既定の行き先（韓国・シンガポール・直送）と連絡先、発注書・仕入先の画面の設定をします',
     portal_admin: 'お客様が見る管理画面のURLとパスワードを発行・管理します',
     product_quantity: '製剤ごとに、未発注・未発送の数と、これまでに売れた数を確認します',
     sales_dashboard: '全社の月別売上（入金済・請求・受注ベース）と、当月の目標の達成状況を見ます',
@@ -875,6 +877,13 @@ export default function App() {
       group: 'admin',
       label: 'クリニックマスタ',
       icon: Building2,
+      badge: null,
+    },
+    {
+      id: 'vendor_master',
+      group: 'admin',
+      label: '仕入先マスタ',
+      icon: Truck,
       badge: null,
     },
     {
@@ -1238,6 +1247,8 @@ export default function App() {
               onSelectOrder={handleOpenDetail}
             />
           )}
+
+          {activeTab === 'vendor_master' && <VendorMasterPanel />}
 
           {activeTab === 'clinics' && (
             <ClinicMasterView

@@ -160,6 +160,7 @@ export interface DeliveryData {
 }
 
 export type ViewTab =
+  | 'vendor_master'
   | 'leak_check'
   | 'dashboard'
   | 'delivery_dashboard'

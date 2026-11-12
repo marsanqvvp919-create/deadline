@@ -12,7 +12,6 @@ import { PUBLIC_ORIGIN } from '../utils/publicUrl';
 import { askConfirm } from './flow/Confirm';
 import { ErrorNote } from './flow/Messages';
 import { PurchaseFlowView } from './purchase/PurchaseFlowView';
-import { VendorMasterPanel } from './purchase/VendorMasterPanel';
 
 // 入荷・在庫（国内倉庫・韓国倉庫・シンガポール倉庫）。楽楽販売の発注（発注済み）から入荷予定を作り、
 // 入荷先倉庫・配送方法・追跡番号・数量をここで入れる。倉庫の担当者が実数を入れて承認すると在庫に加わる（国内倉庫は社内で承認）。
@@ -2228,7 +2227,6 @@ export function InventoryView({ orders, onNavigate }: { orders: Order[]; onNavig
             ['inbound', '発注・入荷の流れ', Truck],
             ['stock', '在庫', PackageCheck],
             ['moves', '入出庫の履歴', History],
-            ['vendors', '仕入先マスタ', ClipboardList],
             ['access', '倉庫の担当者画面', KeyRound],
           ] as const
         ).map(([id, label, Icon]) => (
@@ -2342,7 +2340,6 @@ export function InventoryView({ orders, onNavigate }: { orders: Order[]; onNavig
       )}
 
       {tab === 'access' && <WarehouseAccessPanel data={data} onSaved={load} />}
-      {tab === 'vendors' && <VendorMasterPanel />}
       <div className="text-[11px] text-slate-400 flex items-center gap-1">
         <CheckCircle2 className="w-3 h-3" />
         入荷予定の追跡番号は、出荷の追跡と同じく配送会社のデータで自動確認します（到着すると「倉庫に到着・承認待ち」）。
