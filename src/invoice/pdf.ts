@@ -557,6 +557,32 @@ function drawShippingInfo(doc: jsPDF, shipment: Shipment, settings: SystemSettin
 /**
  * Creates a beautiful Commercial Invoice PDF
  */
+// 明細が多いときは、A4（高さ297mm）の下端まで使わず、下に余白を残して次のページへ送る
+const PAGE_BOTTOM = 297 - 20;
+
+/** 改ページして、続きのページの上に書類名とインボイス番号を出す。続きを書き始める位置を返す */
+function addContinuationPage(doc: jsPDF, title: string, shipment: Shipment): number {
+  doc.addPage();
+  setupFont(doc, 'bold');
+  doc.setFontSize(9);
+  doc.setTextColor(71, 85, 105); // Slate-600
+  doc.text(`${title}  ${safeText(shipment.invoiceNo || '')}  (continued)`, 15, 18);
+  return 24;
+}
+
+/** 2ページ以上のときだけ、各ページの右下にページ番号を入れる */
+function drawPageNumbers(doc: jsPDF) {
+  const pageCount = doc.getNumberOfPages();
+  if (pageCount < 2) return;
+  for (let i = 1; i <= pageCount; i++) {
+    doc.setPage(i);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7.5);
+    doc.setTextColor(148, 163, 184); // Slate-400
+    doc.text(`Page ${i} / ${pageCount}`, 195, 297 - 10, { align: 'right' });
+  }
+}
+
 export function generateInvoicePDF(shipment: Shipment, settings: SystemSettings): jsPDF {
   const doc = new jsPDF({
     orientation: 'portrait',
@@ -564,25 +590,29 @@ export function generateInvoicePDF(shipment: Shipment, settings: SystemSettings)
     format: 'a4'
   });
 
+  const TITLE = 'INVOICE';
   let currentY = 15;
-  currentY = drawHeader(doc, 'INVOICE', shipment, currentY, settings);
+  currentY = drawHeader(doc, TITLE, shipment, currentY, settings);
   currentY = drawParties(doc, shipment, currentY);
   currentY = drawShippingInfo(doc, shipment, settings, currentY);
 
-  // Detail table header
-  doc.setFillColor(15, 23, 42); // Slate-900 (High contrast)
-  doc.rect(15, currentY, 180, 8, 'F');
+  // Detail table header（改ページしたときも同じ見出しを出す）
+  const drawTableHeader = () => {
+    doc.setFillColor(15, 23, 42); // Slate-900 (High contrast)
+    doc.rect(15, currentY, 180, 8, 'F');
 
-  setupFont(doc, 'bold');
-  doc.setFontSize(8);
-  doc.setTextColor(255, 255, 255);
-  doc.text('SKU', 18, currentY + 5.2);
-  doc.text('Description of Goods', 46, currentY + 5.2);
-  doc.text('Qty', 145, currentY + 5.2, { align: 'right' });
-  doc.text('Unit Price', 168, currentY + 5.2, { align: 'right' });
-  doc.text('Amount', 192, currentY + 5.2, { align: 'right' });
+    setupFont(doc, 'bold');
+    doc.setFontSize(8);
+    doc.setTextColor(255, 255, 255);
+    doc.text('SKU', 18, currentY + 5.2);
+    doc.text('Description of Goods', 46, currentY + 5.2);
+    doc.text('Qty', 145, currentY + 5.2, { align: 'right' });
+    doc.text('Unit Price', 168, currentY + 5.2, { align: 'right' });
+    doc.text('Amount', 192, currentY + 5.2, { align: 'right' });
 
-  currentY += 8;
+    currentY += 8;
+  };
+  drawTableHeader();
 
   // Detail table rows
   setupFont(doc, 'normal');
@@ -599,6 +629,13 @@ export function generateInvoicePDF(shipment: Shipment, settings: SystemSettings)
   };
 
   shipment.items.forEach((item, index) => {
+    if (currentY + 10 > PAGE_BOTTOM) {
+      doc.setDrawColor(226, 232, 240); // Slate-200
+      doc.line(15, currentY, 195, currentY);
+      currentY = addContinuationPage(doc, TITLE, shipment);
+      drawTableHeader();
+    }
+
     // Zebra background
     if (index % 2 === 1) {
       doc.setFillColor(248, 250, 252); // Slate-50
@@ -658,6 +695,7 @@ export function generateInvoicePDF(shipment: Shipment, settings: SystemSettings)
   rowCount++; // for grand total
 
   const boxCardHeight = rowCount * 5 + 4;
+  if (currentY - 2 + boxCardHeight > PAGE_BOTTOM) currentY = addContinuationPage(doc, TITLE, shipment) + 2;
   
   // Draw beautiful summary card background matching the UI Live Preview
   doc.setFillColor(250, 251, 252); // Softest gray
@@ -712,22 +750,25 @@ export function generateInvoicePDF(shipment: Shipment, settings: SystemSettings)
   doc.setFontSize(8);
   setupFont(doc, 'normal');
 
-  // Declaration text
-  const declTitleY = Math.max(currentY, 212);
+  // Declaration text（入りきらなければ次のページへ）
+  const declText = settings.declaration || "We hereby certify that the information contained in this invoice is true and correct and that the contents of this shipment are as stated above.";
+  const declLines = doc.splitTextToSize(declText, 180);
+  // 1ページで収まるときは下のほうに置く。続きのページでは合計のすぐ下に置く
+  let declTitleY = doc.getNumberOfPages() === 1 ? Math.max(currentY, 212) : currentY;
+  if (declTitleY + 4 + declLines.length * 3.5 > PAGE_BOTTOM) declTitleY = addContinuationPage(doc, TITLE, shipment);
   setupFont(doc, 'bold');
   doc.setTextColor(30, 41, 59); // Slate-800
   doc.text('Declaration:', 15, declTitleY);
   
   setupFont(doc, 'normal');
   doc.setTextColor(71, 85, 105); // Slate-600
-  const declText = settings.declaration || "We hereby certify that the information contained in this invoice is true and correct and that the contents of this shipment are as stated above.";
-  const declLines = doc.splitTextToSize(declText, 180);
   let declY = declTitleY + 4;
   declLines.forEach((line: string) => {
     doc.text(line, 15, declY);
     declY += 3.5;
   });
 
+  drawPageNumbers(doc);
   return doc;
 }
 
@@ -741,26 +782,30 @@ export function generatePackingListPDF(shipment: Shipment, settings: SystemSetti
     format: 'a4'
   });
 
+  const TITLE = 'PACKING LIST';
   let currentY = 15;
-  currentY = drawHeader(doc, 'PACKING LIST', shipment, currentY, settings);
+  currentY = drawHeader(doc, TITLE, shipment, currentY, settings);
   currentY = drawParties(doc, shipment, currentY);
   currentY = drawShippingInfo(doc, shipment, settings, currentY);
 
-  // Detail table header (Slate-800 for Packing List visual differentiation)
-  doc.setFillColor(30, 41, 59); // Slate-800
-  doc.rect(15, currentY, 180, 8, 'F');
+  // Detail table header (Slate-800 for Packing List visual differentiation)（改ページしたときも同じ見出しを出す）
+  const drawTableHeader = () => {
+    doc.setFillColor(30, 41, 59); // Slate-800
+    doc.rect(15, currentY, 180, 8, 'F');
 
-  setupFont(doc, 'bold');
-  doc.setFontSize(8);
-  doc.setTextColor(255, 255, 255);
-  doc.text('SKU', 18, currentY + 5.2);
-  doc.text('Description of Goods', 46, currentY + 5.2);
-  doc.text('Qty', 115, currentY + 5.2, { align: 'right' });
-  doc.text('No. of Boxes', 140, currentY + 5.2, { align: 'right' });
-  doc.text('Net Weight', 166, currentY + 5.2, { align: 'right' });
-  doc.text('Gross Weight', 192, currentY + 5.2, { align: 'right' });
+    setupFont(doc, 'bold');
+    doc.setFontSize(8);
+    doc.setTextColor(255, 255, 255);
+    doc.text('SKU', 18, currentY + 5.2);
+    doc.text('Description of Goods', 46, currentY + 5.2);
+    doc.text('Qty', 115, currentY + 5.2, { align: 'right' });
+    doc.text('No. of Boxes', 140, currentY + 5.2, { align: 'right' });
+    doc.text('Net Weight', 166, currentY + 5.2, { align: 'right' });
+    doc.text('Gross Weight', 192, currentY + 5.2, { align: 'right' });
 
-  currentY += 8;
+    currentY += 8;
+  };
+  drawTableHeader();
 
   // Detail table rows
   setupFont(doc, 'normal');
@@ -772,6 +817,13 @@ export function generatePackingListPDF(shipment: Shipment, settings: SystemSetti
   let totalGrossWeight = 0;
 
   shipment.items.forEach((item, index) => {
+    if (currentY + 10 > PAGE_BOTTOM) {
+      doc.setDrawColor(226, 232, 240); // Slate-200
+      doc.line(15, currentY, 195, currentY);
+      currentY = addContinuationPage(doc, TITLE, shipment);
+      drawTableHeader();
+    }
+
     // Zebra background
     if (index % 2 === 1) {
       doc.setFillColor(248, 250, 252); // Slate-50
@@ -834,6 +886,7 @@ export function generatePackingListPDF(shipment: Shipment, settings: SystemSetti
   const cardStartX = 114;
   
   const boxHeight = 4 * 5 + 4; // 4 rows: qty, boxes, net weight, gross weight
+  if (currentY - 2 + boxHeight > PAGE_BOTTOM) currentY = addContinuationPage(doc, TITLE, shipment) + 2;
   
   // Draw card background matching the UI Live Preview
   doc.setFillColor(250, 251, 252); // Softest gray
@@ -878,6 +931,7 @@ export function generatePackingListPDF(shipment: Shipment, settings: SystemSetti
 
   printSummaryRow('TOTAL GROSS WEIGHT:', `${totalGrossWeight.toFixed(3)} kg`, true, true);
 
+  drawPageNumbers(doc);
   return doc;
 }
 
